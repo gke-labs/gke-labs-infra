@@ -1,4 +1,4 @@
-module gke-labs-infra
+module github.com/gke-labs/gke-labs-infra
 
 go 1.25.1
 
