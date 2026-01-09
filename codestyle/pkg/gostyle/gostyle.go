@@ -108,7 +108,7 @@ func Run(ctx context.Context, repoRoot string, files []string) error {
 		cmd.Stderr = os.Stderr
 
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("gofmt failed on chunk %d-%d: %w", i, end, err)
+			return fmt.Errorf("gofmt failed: %w", err)
 		}
 	}
 
