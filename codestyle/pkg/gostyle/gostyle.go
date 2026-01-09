@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/walker"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/yaml"
 )
@@ -85,20 +86,9 @@ func runGofmt(ctx context.Context, repoRoot string, files []string) error {
 			}
 		}
 	} else {
-		// Walk and find .go files
-		err := filepath.Walk(repoRoot, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-			if info.IsDir() {
-				if info.Name() == "vendor" || info.Name() == ".git" {
-					return filepath.SkipDir
-				}
-			}
-			if !info.IsDir() && strings.HasSuffix(path, ".go") {
-				filesToFormat = append(filesToFormat, path)
-			}
-			return nil
+		var err error
+		filesToFormat, err = walker.Walk(repoRoot, []string{"vendor", ".git"}, func(path string, info os.FileInfo) bool {
+			return strings.HasSuffix(path, ".go")
 		})
 		if err != nil {
 			return fmt.Errorf("error walking for go files: %w", err)
@@ -136,23 +126,16 @@ func runGoVet(ctx context.Context, repoRoot string) error {
 	log := klog.FromContext(ctx)
 	log.Info("Running go vet")
 
-	var goModDirs []string
-	err := filepath.Walk(repoRoot, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			if info.Name() == "vendor" || info.Name() == ".git" {
-				return filepath.SkipDir
-			}
-		}
-		if !info.IsDir() && info.Name() == "go.mod" {
-			goModDirs = append(goModDirs, filepath.Dir(path))
-		}
-		return nil
+	goModFiles, err := walker.Walk(repoRoot, []string{"vendor", ".git"}, func(path string, info os.FileInfo) bool {
+		return info.Name() == "go.mod"
 	})
 	if err != nil {
 		return fmt.Errorf("error walking for go.mod files: %w", err)
+	}
+
+	var goModDirs []string
+	for _, f := range goModFiles {
+		goModDirs = append(goModDirs, filepath.Dir(f))
 	}
 
 	for _, dir := range goModDirs {
