@@ -21,8 +21,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"gke-labs-infra/codestyle/pkg/fileheaders"
-	"gke-labs-infra/codestyle/pkg/gostyle"
+	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/fileheaders"
+	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/gostyle"
 
 	"k8s.io/klog/v2"
 )
@@ -30,7 +30,7 @@ import (
 func main() {
 	klog.InitFlags(nil)
 	flag.Parse()
-	
+
 	ctx := context.Background()
 
 	files := flag.Args()
@@ -46,11 +46,11 @@ func run(ctx context.Context, files []string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	if err := fileheaders.Run(ctx, repoRoot, files); err != nil {
 		return fmt.Errorf("fileheaders failed: %w", err)
 	}
-	
+
 	if err := gostyle.Run(ctx, repoRoot, files); err != nil {
 		return fmt.Errorf("gostyle failed: %w", err)
 	}
