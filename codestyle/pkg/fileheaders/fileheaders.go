@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package fileheaders
 
 import (
 	"bytes"
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -60,34 +59,13 @@ func (p *processor) shouldIgnoreFile(path string) bool {
 	return false
 }
 
-func main() {
-	ctx := context.Background()
-
-	if err := Run(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-}
-
-func Run(ctx context.Context) error {
+func Run(ctx context.Context, repoRoot string, files []string) error {
 	var errs []error
 
 	var opt FileHeadersOptions
-
-	flag.Parse()
+	opt.InitDefaults()
 
 	log := klog.FromContext(ctx)
-
-	files := flag.Args()
-
-	repoRoot, err := findRepoRoot()
-	if err != nil {
-		return err
-	}
-
-	if err := os.Chdir(repoRoot); err != nil {
-		return fmt.Errorf("error changing to repo root %s: %w", repoRoot, err)
-	}
 
 	configFile := filepath.Join(repoRoot, ".codestyle/file-headers.yaml")
 	config, err := loadConfig(configFile)
@@ -103,12 +81,22 @@ func Run(ctx context.Context) error {
 	}
 
 	if len(files) == 0 {
-		if err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+		if err := filepath.Walk(repoRoot, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
 			if !info.IsDir() {
-				files = append(files, path)
+				// Make path relative to repoRoot for consistency if needed,
+				// or just use absolute paths.
+				// The original code used filepath.Walk(".") after Chdir(repoRoot).
+				// Here we are walking repoRoot.
+				// To match original behavior of checking ignore patterns (which look like relative paths),
+				// we might want to make it relative.
+				relPath, err := filepath.Rel(repoRoot, path)
+				if err != nil {
+					return err
+				}
+				files = append(files, relPath)
 			}
 			return nil
 		}); err != nil {
@@ -116,8 +104,35 @@ func Run(ctx context.Context) error {
 		}
 	}
 
+	// Ensure we are in repoRoot so relative paths work, or use absolute paths.
+	// The original code did os.Chdir(repoRoot).
+	// Let's do that for safety if the caller hasn't.
+	// But changing global CWD in a library function is bad.
+	// Instead, let's construct absolute paths or assume CWD is repoRoot?
+	// The issue says "codestyle command... looks for .codestyle/...".. 
+	// Let's assume the caller sets the CWD or we handle paths correctly.
+	// For now, let's use the full path for reading/writing, but use relative path for ignore checks?
+
 	for _, file := range files {
-		if err := processor.processFile(ctx, file); err != nil {
+		// existing logic expects file to be relative or at least checkable against ignore patterns.
+		// If `files` came from Walk above, they are relative.
+		// If `files` passed in, they might be whatever user typed.
+		// Let's normalize to relative to repoRoot for checking ignore, and absolute for IO.
+
+		absPath := file
+		if !filepath.IsAbs(file) {
+			absPath = filepath.Join(repoRoot, file)
+		}
+
+		relPath, err := filepath.Rel(repoRoot, absPath)
+		if err != nil {
+			// If we can't make it relative to repo root, maybe it's outside?
+			// Just skip or log?
+			log.Info("Skipping file outside repo root", "file", file)
+			continue
+		}
+
+		if err := processor.processFile(ctx, absPath, relPath); err != nil {
 			log.Error(err, "Error processing file", "file", file)
 			errs = append(errs, fmt.Errorf("error processing %s: %w", file, err))
 		}
@@ -142,20 +157,20 @@ type processor struct {
 	config  *Config
 }
 
-func (p *processor) processFile(ctx context.Context, path string) error {
+func (p *processor) processFile(ctx context.Context, absPath, relPath string) error {
 	log := klog.FromContext(ctx)
 
-	if p.shouldIgnoreFile(path) {
+	if p.shouldIgnoreFile(relPath) {
 		return nil
 	}
 
-	ext := filepath.Ext(path)
-	commentStyle := getCommentStyle(filepath.Base(path), ext)
+	ext := filepath.Ext(absPath)
+	commentStyle := getCommentStyle(filepath.Base(absPath), ext)
 	if commentStyle == "" {
 		return nil
 	}
 
-	content, err := os.ReadFile(path)
+	content, err := os.ReadFile(absPath)
 	if err != nil {
 		return err
 	}
@@ -172,7 +187,7 @@ func (p *processor) processFile(ctx context.Context, path string) error {
 		return nil
 	}
 
-	log.Info("Adding file header", "file", path)
+	log.Info("Adding file header", "file", relPath)
 
 	header, err := p.generateHeader(commentStyle)
 	if err != nil {
@@ -199,7 +214,7 @@ func (p *processor) processFile(ctx context.Context, path string) error {
 	// Join usually handles separators.
 
 	output := strings.Join(newLines, "\n")
-	return os.WriteFile(path, []byte(output), 0644)
+	return os.WriteFile(absPath, []byte(output), 0644)
 }
 
 func getCommentStyle(name, ext string) string {
@@ -239,26 +254,4 @@ func (p *processor) generateHeader(style string) (string, error) {
 	lines = append(lines, "")
 
 	return strings.Join(lines, "\n"), nil
-}
-
-// findRepoRoot attempts to find the root of the git repository
-func findRepoRoot() (string, error) {
-	startDir, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-
-	dir := startDir
-	for {
-		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-			return dir, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-
-	return "", fmt.Errorf("could not find git repository root (starting at %s)", startDir)
 }
