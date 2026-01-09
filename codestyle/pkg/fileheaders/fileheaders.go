@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/walker"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/yaml"
 )
@@ -81,27 +82,16 @@ func Run(ctx context.Context, repoRoot string, files []string) error {
 	}
 
 	if len(files) == 0 {
-		if err := filepath.Walk(repoRoot, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-			if !info.IsDir() {
-				// Make path relative to repoRoot for consistency if needed,
-				// or just use absolute paths.
-				// The original code used filepath.Walk(".") after Chdir(repoRoot).
-				// Here we are walking repoRoot.
-				// To match original behavior of checking ignore patterns (which look like relative paths),
-				// we might want to make it relative.
-				relPath, err := filepath.Rel(repoRoot, path)
-				if err != nil {
-					return err
-				}
-				files = append(files, relPath)
-			}
-			return nil
-		}); err != nil {
+		var skipDirs []string
+		for _, ignore := range opt.IgnoreFiles {
+			skipDirs = append(skipDirs, strings.TrimSuffix(ignore, "/"))
+		}
+
+		absFiles, err := walker.Walk(repoRoot, skipDirs, nil)
+		if err != nil {
 			return fmt.Errorf("error walking directory: %w", err)
 		}
+		files = absFiles
 	}
 
 	// Ensure we use absolute paths for IO, but relative paths for ignore checks.
