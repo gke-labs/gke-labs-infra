@@ -1,3 +1,5 @@
+#!/bin/bash
+
 # Copyright 2026 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,25 +14,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-name: Verify Codestyle
+set -o errexit
+set -o nounset
+set -o pipefail
 
-on:
-  push:
-    branches:
-      - main
-  pull_request:
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "${REPO_ROOT}"
 
-jobs:
-  verify-codestyle:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+echo "Running generate..."
+./dev/tasks/generate
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: 'go.mod'
+echo "Checking for git changes..."
+if [[ -n $(git status --porcelain) ]]; then
+  echo "Error: Uncommitted changes found after running generate:"
+  git status --porcelain
+  git diff
+  exit 1
+fi
 
-      - name: Run verify-codestyle
-        run: ./dev/ci/presubmits/verify-codestyle
+echo "generate verification passed!"
