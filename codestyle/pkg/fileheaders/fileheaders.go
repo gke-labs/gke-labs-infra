@@ -104,15 +104,7 @@ func Run(ctx context.Context, repoRoot string, files []string) error {
 		}
 	}
 
-	// Ensure we are in repoRoot so relative paths work, or use absolute paths.
-	// The original code did os.Chdir(repoRoot).
-	// Let's do that for safety if the caller hasn't.
-	// But changing global CWD in a library function is bad.
-	// Instead, let's construct absolute paths or assume CWD is repoRoot?
-	// The issue says "codestyle command... looks for .codestyle/...".. 
-	// Let's assume the caller sets the CWD or we handle paths correctly.
-	// For now, let's use the full path for reading/writing, but use relative path for ignore checks?
-
+	// Ensure we use absolute paths for IO, but relative paths for ignore checks.
 	for _, file := range files {
 		// existing logic expects file to be relative or at least checkable against ignore patterns.
 		// If `files` came from Walk above, they are relative.
@@ -126,9 +118,8 @@ func Run(ctx context.Context, repoRoot string, files []string) error {
 
 		relPath, err := filepath.Rel(repoRoot, absPath)
 		if err != nil {
-			// If we can't make it relative to repo root, maybe it's outside?
-			// Just skip or log?
-			log.Info("Skipping file outside repo root", "file", file)
+			log.Error(err, "Skipping file outside repo root", "file", file)
+			errs = append(errs, fmt.Errorf("skipping file outside repo root %s: %w", file, err))
 			continue
 		}
 
