@@ -21,15 +21,12 @@ set -o pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}"
 
-echo "Running generate..."
-./dev/tasks/generate
+# Run generation
+go run ./ap/main.go generate
 
-echo "Checking for git changes..."
+# Check for changes
 if [[ -n $(git status --porcelain) ]]; then
-  echo "Error: Uncommitted changes found after running generate:"
-  git status --porcelain
-  git diff
+  echo "Changes detected after running 'ap generate'. Please commit these changes."
+  git status
   exit 1
 fi
-
-echo "generate verification passed!"
