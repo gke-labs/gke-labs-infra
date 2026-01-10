@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/generate"
 	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
@@ -35,6 +36,7 @@ func main() {
 		fmt.Fprintf(flag.CommandLine.Output(), "  test    Run tests\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  build   Build artifacts\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  deploy  Deploy artifacts\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "  generate Run generation tasks\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "\nFlags:\n")
 		flag.PrintDefaults()
 	}
@@ -62,6 +64,8 @@ func main() {
 		cmdErr = runBuild(ctx, root)
 	case "deploy":
 		cmdErr = runDeploy(ctx, root)
+	case "generate":
+		cmdErr = runGenerate(ctx, root)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", command)
 		flag.Usage()
@@ -87,6 +91,10 @@ func runDeploy(ctx context.Context, root string) error {
 		return fmt.Errorf("build failed during deploy: %w", err)
 	}
 	return k8s.Deploy(ctx, root)
+}
+
+func runGenerate(ctx context.Context, root string) error {
+	return generate.Run(ctx, root)
 }
 
 // findRepoRoot attempts to find the root of the git repository
