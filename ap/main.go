@@ -21,9 +21,9 @@ import (
 	"os"
 	"path/filepath"
 
+	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
-	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
 	"k8s.io/klog/v2"
 )
 

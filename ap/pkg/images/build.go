@@ -49,7 +49,7 @@ func Build(ctx context.Context, root string) error {
 
 		parts := strings.Split(relPath, string(os.PathSeparator))
 		name := ""
-		
+
 		// Look for images/<name>/Dockerfile structure
 		for i, part := range parts {
 			if part == "images" && i+2 < len(parts) && parts[len(parts)-1] == "Dockerfile" {

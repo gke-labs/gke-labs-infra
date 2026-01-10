@@ -44,7 +44,7 @@ func Deploy(ctx context.Context, root string) error {
 
 	for _, manifest := range manifests {
 		relPath, _ := filepath.Rel(root, manifest)
-		
+
 		// Simple check if it is under a k8s directory
 		if !strings.Contains(relPath, "k8s") {
 			klog.V(2).Infof("Skipping manifest not in k8s directory: %s", relPath)
