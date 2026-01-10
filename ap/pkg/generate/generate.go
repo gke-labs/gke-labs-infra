@@ -127,7 +127,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}"
 
 # Run generation
-go run ./ap/main.go generate
+go run github.com/gke-labs/gke-labs-infra/ap@latest generate
 
 # Check for changes
 if [[ -n $(git status --porcelain) ]]; then
