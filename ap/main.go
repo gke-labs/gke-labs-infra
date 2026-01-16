@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/format"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/generate"
 	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
@@ -37,6 +38,7 @@ func main() {
 		fmt.Fprintf(flag.CommandLine.Output(), "  build   Build artifacts\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  deploy  Deploy artifacts\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  generate Run generation tasks\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "  format  Run formatting tasks (alias: fmt)\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "\nFlags:\n")
 		flag.PrintDefaults()
 	}
@@ -66,6 +68,8 @@ func main() {
 		cmdErr = runDeploy(ctx, root)
 	case "generate":
 		cmdErr = runGenerate(ctx, root)
+	case "format", "fmt":
+		cmdErr = runFormat(ctx, root)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", command)
 		flag.Usage()
@@ -95,6 +99,10 @@ func runDeploy(ctx context.Context, root string) error {
 
 func runGenerate(ctx context.Context, root string) error {
 	return generate.Run(ctx, root)
+}
+
+func runFormat(ctx context.Context, root string) error {
+	return format.Run(ctx, root)
 }
 
 // findRepoRoot attempts to find the root of the git repository
