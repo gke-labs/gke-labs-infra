@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/cache"
 	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/walker"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/yaml"
@@ -34,6 +35,18 @@ type Config struct {
 
 func Run(ctx context.Context, repoRoot string, files []string) error {
 	log := klog.FromContext(ctx)
+
+	// Initialize cache
+	cm, err := cache.NewManager()
+	if err != nil {
+		log.V(2).Info("Failed to initialize cache", "error", err)
+	} else {
+		defer func() {
+			if err := cm.Save(); err != nil {
+				log.Error(err, "Failed to save cache")
+			}
+		}()
+	}
 
 	configFile := filepath.Join(repoRoot, ".codestyle/go.yaml")
 
@@ -54,7 +67,7 @@ func Run(ctx context.Context, repoRoot string, files []string) error {
 	}
 
 	if config.Gofmt {
-		if err := runGofmt(ctx, repoRoot, files, config.Skip); err != nil {
+		if err := runGofmt(ctx, repoRoot, files, config.Skip, cm); err != nil {
 			return err
 		}
 	}
@@ -62,7 +75,7 @@ func Run(ctx context.Context, repoRoot string, files []string) error {
 	return nil
 }
 
-func runGofmt(ctx context.Context, repoRoot string, files []string, skip []string) error {
+func runGofmt(ctx context.Context, repoRoot string, files []string, skip []string, cm *cache.Manager) error {
 	log := klog.FromContext(ctx)
 	var filesToFormat []string
 	if len(files) > 0 {
@@ -88,20 +101,37 @@ func runGofmt(ctx context.Context, repoRoot string, files []string, skip []strin
 		}
 	}
 
-	if len(filesToFormat) == 0 {
+	// Filter files using cache
+	var dirtyFiles []string
+	if cm != nil {
+		for _, f := range filesToFormat {
+			meta, err := cm.GetOrUpdateMetadata(f)
+			if err != nil {
+				dirtyFiles = append(dirtyFiles, f)
+				continue
+			}
+			if !cm.IsGofmtDone(meta.Hash) {
+				dirtyFiles = append(dirtyFiles, f)
+			}
+		}
+	} else {
+		dirtyFiles = filesToFormat
+	}
+
+	if len(dirtyFiles) == 0 {
 		return nil
 	}
 
-	log.Info("Running gofmt", "files", len(filesToFormat))
+	log.Info("Running gofmt", "files", len(dirtyFiles))
 
 	// Chunk files to avoid argument length limits
 	chunkSize := 100
-	for i := 0; i < len(filesToFormat); i += chunkSize {
+	for i := 0; i < len(dirtyFiles); i += chunkSize {
 		end := i + chunkSize
-		if end > len(filesToFormat) {
-			end = len(filesToFormat)
+		if end > len(dirtyFiles) {
+			end = len(dirtyFiles)
 		}
-		chunk := filesToFormat[i:end]
+		chunk := dirtyFiles[i:end]
 
 		args := append([]string{"-w"}, chunk...)
 		cmd := exec.CommandContext(ctx, "gofmt", args...)
@@ -112,5 +142,18 @@ func runGofmt(ctx context.Context, repoRoot string, files []string, skip []strin
 			return fmt.Errorf("gofmt failed: %w", err)
 		}
 	}
+
+	// Update cache for processed files
+	if cm != nil {
+		for _, f := range dirtyFiles {
+			// Re-check metadata. gofmt might have changed it.
+			meta, err := cm.GetOrUpdateMetadata(f)
+			if err != nil {
+				continue
+			}
+			cm.MarkGofmtDone(meta.Hash)
+		}
+	}
+
 	return nil
 }
