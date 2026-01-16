@@ -61,6 +61,16 @@ func TestIgnoreList(t *testing.T) {
 			},
 		},
 		{
+			Pattern: "*.yaml",
+			Matches: []string{
+				"file.yaml",
+				"foo/bar/file.yaml",
+			},
+			NonMatches: []string{
+				"file.yml",
+			},
+		},
+		{
 			Pattern: "vendor",
 			Matches: []string{
 				"vendor",
