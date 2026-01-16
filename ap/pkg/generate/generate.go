@@ -114,7 +114,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}"
 
 # Run generation
-go run github.com/gke-labs/gke-labs-infra/ap@latest generate
+go run ./ap generate
 
 # Check for changes
 if [[ -n $(git status --porcelain) ]]; then
@@ -165,7 +165,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}"
 
 # Run tests
-go run github.com/gke-labs/gke-labs-infra/ap@latest test
+go run ./ap test
 `
 	if err := os.WriteFile(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
