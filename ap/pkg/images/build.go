@@ -34,7 +34,8 @@ func Build(ctx context.Context, root string) error {
 		imagePrefix = "local"
 	}
 
-	dockerfiles, err := walker.Walk(root, []string{".git", "vendor", "node_modules"}, func(path string, info os.FileInfo) bool {
+	ignoreList := walker.NewIgnoreList([]string{".git", "vendor", "node_modules"})
+	dockerfiles, err := walker.Walk(root, ignoreList, func(path string, info os.FileInfo) bool {
 		return info.Name() == "Dockerfile"
 	})
 	if err != nil {

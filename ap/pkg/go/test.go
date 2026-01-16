@@ -28,7 +28,8 @@ import (
 // Test runs go tests in discovered modules.
 func Test(ctx context.Context, root string) error {
 	// Find all go.mod files
-	goMods, err := walker.Walk(root, []string{".git", "vendor", "node_modules"}, func(path string, info os.FileInfo) bool {
+	ignoreList := walker.NewIgnoreList([]string{".git", "vendor", "node_modules"})
+	goMods, err := walker.Walk(root, ignoreList, func(path string, info os.FileInfo) bool {
 		return info.Name() == "go.mod"
 	})
 	if err != nil {
