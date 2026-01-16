@@ -30,10 +30,13 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+var generatedCodeRegexp = regexp.MustCompile(`Code generated .* DO NOT EDIT`)
+
 type Config struct {
 	License         string   `json:"license"`
 	CopyrightHolder string   `json:"copyrightHolder"`
 	Skip            []string `json:"skip"`
+	SkipGenerated   *bool    `json:"skipGenerated"`
 }
 
 type FileHeadersOptions struct {
@@ -132,6 +135,10 @@ func loadConfig(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, err
 	}
+	if config.SkipGenerated == nil {
+		t := true
+		config.SkipGenerated = &t
+	}
 	return &config, nil
 }
 
@@ -153,11 +160,17 @@ func (p *processor) processFile(ctx context.Context, absPath, relPath string) er
 		return err
 	}
 
-	// Robust check: look for the copyright string with the comment prefix
-	// We check the first 2000 bytes to be efficient and avoid false positives (like finding the string in the code itself)
+	// Check for generated file
+	// We check the first 2000 bytes to be efficient
 	checkBuf := content
 	if len(checkBuf) > 2000 {
 		checkBuf = checkBuf[:2000]
+	}
+
+	if p.config.SkipGenerated != nil && *p.config.SkipGenerated {
+		if generatedCodeRegexp.Match(checkBuf) {
+			return nil
+		}
 	}
 
 	expectedCopyright := commentStyle + " Copyright"
