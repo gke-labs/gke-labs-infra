@@ -14,3 +14,5 @@
 
 license: apache-2.0
 copyrightHolder: Google LLC
+skip:
+  - "**/*.yaml"
