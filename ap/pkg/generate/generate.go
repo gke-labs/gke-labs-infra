@@ -213,6 +213,7 @@ on:
     branches:
       - main
   pull_request:
+  merge_group:
 
 jobs:
 `)
