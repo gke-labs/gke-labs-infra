@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/yaml"
 )
 
 func Run(ctx context.Context, root string) error {
@@ -90,7 +91,12 @@ func runGenerateVerifierGenerator(ctx context.Context, root string) error {
 	targetFile := filepath.Join(presubmitsDir, "ap-verify-generate")
 	klog.Infof("Generating %s", targetFile)
 
-	content := `#!/bin/bash
+	apCmd, err := getApCommand(root)
+	if err != nil {
+		return err
+	}
+
+	content := fmt.Sprintf(`#!/bin/bash
 
 # Copyright 2026 Google LLC
 #
@@ -114,7 +120,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}"
 
 # Run generation
-go run github.com/gke-labs/gke-labs-infra/ap@latest generate
+%s generate
 
 # Check for changes
 if [[ -n $(git status --porcelain) ]]; then
@@ -122,7 +128,7 @@ if [[ -n $(git status --porcelain) ]]; then
   git status
   exit 1
 fi
-`
+`, apCmd)
 	if err := os.WriteFile(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
@@ -141,7 +147,12 @@ func runApTestGenerator(ctx context.Context, root string) error {
 	targetFile := filepath.Join(presubmitsDir, "ap-test")
 	klog.Infof("Generating %s", targetFile)
 
-	content := `#!/bin/bash
+	apCmd, err := getApCommand(root)
+	if err != nil {
+		return err
+	}
+
+	content := fmt.Sprintf(`#!/bin/bash
 
 # Copyright 2026 Google LLC
 #
@@ -165,8 +176,8 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}"
 
 # Run tests
-go run github.com/gke-labs/gke-labs-infra/ap@latest test
-`
+%s test
+`, apCmd)
 	if err := os.WriteFile(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
@@ -213,6 +224,7 @@ on:
     branches:
       - main
   pull_request:
+  merge_group:
 
 jobs:
 `)
@@ -250,4 +262,31 @@ jobs:
 	}
 
 	return nil
+}
+
+func getApCommand(root string) (string, error) {
+	configPath := filepath.Join(root, ".ap", "ap.yaml")
+	defaultCmd := "go run github.com/gke-labs/gke-labs-infra/ap@latest"
+
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		return defaultCmd, nil
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read %s: %w", configPath, err)
+	}
+
+	var config struct {
+		Version string `json:"version"`
+	}
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return "", fmt.Errorf("failed to parse %s: %w", configPath, err)
+	}
+
+	if config.Version == "!self" {
+		return "go run ./ap", nil
+	}
+
+	return defaultCmd, nil
 }
