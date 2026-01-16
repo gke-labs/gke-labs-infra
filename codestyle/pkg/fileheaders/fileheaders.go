@@ -30,8 +30,9 @@ import (
 )
 
 type Config struct {
-	License         string `json:"license"`
-	CopyrightHolder string `json:"copyrightHolder"`
+	License         string   `json:"license"`
+	CopyrightHolder string   `json:"copyrightHolder"`
+	Skip            []string `json:"skip"`
 }
 
 type FileHeadersOptions struct {
@@ -49,15 +50,14 @@ func (o *FileHeadersOptions) InitDefaults() {
 	}
 }
 
-func (p *processor) shouldIgnoreFile(path string) bool {
-	for _, pattern := range p.options.IgnoreFiles {
-		// Check if matches pattern, for now we just check for prefix
-		if strings.HasPrefix(path, pattern) {
-			return true
-		}
-	}
+// processor handles file processing
+type processor struct {
+	config     *Config
+	ignoreList *walker.IgnoreList
+}
 
-	return false
+func (p *processor) shouldIgnoreFile(relPath string, isDir bool) bool {
+	return p.ignoreList.ShouldIgnore(relPath, isDir)
 }
 
 func Run(ctx context.Context, repoRoot string, files []string) error {
@@ -74,45 +74,49 @@ func Run(ctx context.Context, repoRoot string, files []string) error {
 		return err
 	}
 
-	// TODO: Should we merge config into options?
+	// Combine default ignores with config skips
+	allIgnores := append(opt.IgnoreFiles, config.Skip...)
+	ignoreList := walker.NewIgnoreList(allIgnores)
 
 	processor := &processor{
-		config:  config,
-		options: opt,
+		config:     config,
+		ignoreList: ignoreList,
 	}
 
 	if len(files) == 0 {
-		ignoreList := walker.NewIgnoreList(opt.IgnoreFiles)
-
-		absFiles, err := walker.Walk(repoRoot, ignoreList, nil)
+		fv := walker.NewFileView(repoRoot, allIgnores)
+		err := fv.Walk(func(f walker.File) error {
+			// f.RelPath is already relative to repoRoot
+			if err := processor.processFile(ctx, f.Path, f.RelPath); err != nil {
+				log.Error(err, "Error processing file", "file", f.RelPath)
+				// We don't abort walk on individual file error usually, but Walk signature expects error.
+				// We should collect errors.
+				errs = append(errs, fmt.Errorf("error processing %s: %w", f.RelPath, err))
+			}
+			return nil
+		})
 		if err != nil {
 			return fmt.Errorf("error walking directory: %w", err)
 		}
-		files = absFiles
-	}
+	} else {
+		// Ensure we use absolute paths for IO, but relative paths for ignore checks.
+		for _, file := range files {
+			absPath := file
+			if !filepath.IsAbs(file) {
+				absPath = filepath.Join(repoRoot, file)
+			}
 
-	// Ensure we use absolute paths for IO, but relative paths for ignore checks.
-	for _, file := range files {
-		// existing logic expects file to be relative or at least checkable against ignore patterns.
-		// If `files` came from Walk above, they are relative.
-		// If `files` passed in, they might be whatever user typed.
-		// Let's normalize to relative to repoRoot for checking ignore, and absolute for IO.
+			relPath, err := filepath.Rel(repoRoot, absPath)
+			if err != nil {
+				log.Error(err, "Skipping file outside repo root", "file", file)
+				errs = append(errs, fmt.Errorf("skipping file outside repo root %s: %w", file, err))
+				continue
+			}
 
-		absPath := file
-		if !filepath.IsAbs(file) {
-			absPath = filepath.Join(repoRoot, file)
-		}
-
-		relPath, err := filepath.Rel(repoRoot, absPath)
-		if err != nil {
-			log.Error(err, "Skipping file outside repo root", "file", file)
-			errs = append(errs, fmt.Errorf("skipping file outside repo root %s: %w", file, err))
-			continue
-		}
-
-		if err := processor.processFile(ctx, absPath, relPath); err != nil {
-			log.Error(err, "Error processing file", "file", file)
-			errs = append(errs, fmt.Errorf("error processing %s: %w", file, err))
+			if err := processor.processFile(ctx, absPath, relPath); err != nil {
+				log.Error(err, "Error processing file", "file", file)
+				errs = append(errs, fmt.Errorf("error processing %s: %w", file, err))
+			}
 		}
 	}
 	return errors.Join(errs...)
@@ -130,15 +134,10 @@ func loadConfig(path string) (*Config, error) {
 	return &config, nil
 }
 
-type processor struct {
-	options FileHeadersOptions
-	config  *Config
-}
-
 func (p *processor) processFile(ctx context.Context, absPath, relPath string) error {
 	log := klog.FromContext(ctx)
 
-	if p.shouldIgnoreFile(relPath) {
+	if p.shouldIgnoreFile(relPath, false) {
 		return nil
 	}
 
@@ -187,9 +186,6 @@ func (p *processor) processFile(ctx context.Context, absPath, relPath string) er
 		newLines = append(newLines, header)
 		newLines = append(newLines, lines...)
 	}
-
-	// Ensure we don't end up with double newlines at EOF if original had one?
-	// Join usually handles separators.
 
 	output := strings.Join(newLines, "\n")
 	return os.WriteFile(absPath, []byte(output), 0644)
