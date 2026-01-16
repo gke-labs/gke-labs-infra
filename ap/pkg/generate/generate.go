@@ -22,8 +22,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/fileheaders"
-	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/gostyle"
 	"k8s.io/klog/v2"
 )
 
@@ -34,7 +32,7 @@ func Run(ctx context.Context, root string) error {
 	}
 
 	// 2. Run built-in generators
-	if err := runCodestyleGenerator(ctx, root); err != nil {
+	if err := runGenerateVerifierGenerator(ctx, root); err != nil {
 		return err
 	}
 
@@ -81,23 +79,8 @@ func runLegacyScripts(ctx context.Context, root string) error {
 	return nil
 }
 
-func runCodestyleGenerator(ctx context.Context, root string) error {
-	codestyleDir := filepath.Join(root, ".codestyle")
+func runGenerateVerifierGenerator(ctx context.Context, root string) error {
 	presubmitsDir := filepath.Join(root, "dev", "ci", "presubmits")
-
-	// Check if .codestyle exists
-	if _, err := os.Stat(codestyleDir); os.IsNotExist(err) {
-		return nil
-	}
-
-	// Run codestyle logic
-	klog.Info("Running codestyle...")
-	if err := fileheaders.Run(ctx, root, nil); err != nil {
-		return fmt.Errorf("fileheaders failed: %w", err)
-	}
-	if err := gostyle.Run(ctx, root, nil); err != nil {
-		return fmt.Errorf("gostyle failed: %w", err)
-	}
 
 	// Check if dev/ci/presubmits exists
 	if _, err := os.Stat(presubmitsDir); os.IsNotExist(err) {
