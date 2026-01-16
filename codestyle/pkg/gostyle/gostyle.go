@@ -87,10 +87,12 @@ func runGofmt(ctx context.Context, repoRoot string, files []string, skip []strin
 			}
 		}
 	} else {
-		var err error
-		ignoreList := walker.NewIgnoreList(append([]string{"vendor", ".git"}, skip...))
-		filesToFormat, err = walker.Walk(repoRoot, ignoreList, func(path string, info os.FileInfo) bool {
-			return strings.HasSuffix(path, ".go")
+		fv := walker.NewFileView(repoRoot, append([]string{"vendor", ".git"}, skip...))
+		err := fv.Walk(func(f walker.File) error {
+			if strings.HasSuffix(f.Path, ".go") {
+				filesToFormat = append(filesToFormat, f.Path)
+			}
+			return nil
 		})
 		if err != nil {
 			return fmt.Errorf("error walking for go files: %w", err)
@@ -128,9 +130,13 @@ func runGoVet(ctx context.Context, repoRoot string, skip []string) error {
 	log := klog.FromContext(ctx)
 	log.Info("Running go vet")
 
-	ignoreList := walker.NewIgnoreList(append([]string{"vendor", ".git"}, skip...))
-	goModFiles, err := walker.Walk(repoRoot, ignoreList, func(path string, info os.FileInfo) bool {
-		return info.Name() == "go.mod"
+	fv := walker.NewFileView(repoRoot, append([]string{"vendor", ".git"}, skip...))
+	var goModFiles []string
+	err := fv.Walk(func(f walker.File) error {
+		if f.Info.Name() == "go.mod" {
+			goModFiles = append(goModFiles, f.Path)
+		}
+		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("error walking for go.mod files: %w", err)
