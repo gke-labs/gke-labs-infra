@@ -26,6 +26,7 @@ import (
 	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/version"
 	"k8s.io/klog/v2"
 )
 
@@ -39,6 +40,7 @@ func main() {
 		fmt.Fprintf(flag.CommandLine.Output(), "  deploy  Deploy artifacts\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  generate Run generation tasks\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  format  Run formatting tasks (alias: fmt)\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "  version Print version information\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "\nFlags:\n")
 		flag.PrintDefaults()
 	}
@@ -70,6 +72,8 @@ func main() {
 		cmdErr = runGenerate(ctx, root)
 	case "format", "fmt":
 		cmdErr = runFormat(ctx, root)
+	case "version":
+		cmdErr = runVersion(ctx, root)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", command)
 		flag.Usage()
@@ -103,6 +107,10 @@ func runGenerate(ctx context.Context, root string) error {
 
 func runFormat(ctx context.Context, root string) error {
 	return format.Run(ctx, root)
+}
+
+func runVersion(ctx context.Context, root string) error {
+	return version.Run(ctx, root)
 }
 
 // findRepoRoot attempts to find the root of the git repository
