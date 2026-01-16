@@ -38,6 +38,16 @@ func Test(ctx context.Context, root string) error {
 
 	for _, goMod := range goMods {
 		dir := filepath.Dir(goMod)
+
+		klog.Infof("Running go vet in %s", dir)
+		vetCmd := exec.CommandContext(ctx, "go", "vet", "./...")
+		vetCmd.Dir = dir
+		vetCmd.Stdout = os.Stdout
+		vetCmd.Stderr = os.Stderr
+		if err := vetCmd.Run(); err != nil {
+			return fmt.Errorf("go vet failed in %s: %w", dir, err)
+		}
+
 		klog.Infof("Running go test in %s", dir)
 		cmd := exec.CommandContext(ctx, "go", "test", "./...")
 		cmd.Dir = dir
