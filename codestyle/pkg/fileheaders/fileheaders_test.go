@@ -137,3 +137,60 @@ metadata:
 		t.Errorf("YAML file was modified but should have been skipped. Content:\n%s", string(content))
 	}
 }
+
+func TestRun_KubernetesStyle(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create config
+	configDir := filepath.Join(tmpDir, ".codestyle")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configFile := filepath.Join(configDir, "file-headers.yaml")
+	configContent := `
+license: apache-2.0
+copyrightHolder: Google LLC
+`
+	if err := os.WriteFile(configFile, []byte(configContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a go file with K8s style header
+	targetFile := filepath.Join(tmpDir, "k8s.go")
+	fileContent := `/*
+Copyright 2018 The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package main
+`
+	if err := os.WriteFile(targetFile, []byte(fileContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run fileheaders
+	ctx := context.Background()
+	if err := Run(ctx, tmpDir, []string{targetFile}); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	// Verify file was NOT modified
+	content, err := os.ReadFile(targetFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != fileContent {
+		t.Errorf("File was modified but should have been skipped. Content:\n%s", string(content))
+	}
+}

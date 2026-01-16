@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -162,6 +163,15 @@ func (p *processor) processFile(ctx context.Context, absPath, relPath string) er
 	expectedCopyright := commentStyle + " Copyright"
 	if bytes.Contains(checkBuf, []byte(expectedCopyright)) {
 		return nil
+	}
+
+	// Check for K8s style block headers in Go files
+	if ext == ".go" {
+		// Look for /* ... Copyright ... */ pattern
+		// We use a simplified regex that looks for /* followed by Copyright within the buffer
+		if regexp.MustCompile(`(?s)/\*.*?Copyright`).Match(checkBuf) {
+			return nil
+		}
 	}
 
 	log.Info("Adding file header", "file", relPath)
