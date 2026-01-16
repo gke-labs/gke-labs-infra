@@ -23,23 +23,32 @@ import (
 type Filter func(path string, info os.FileInfo) bool
 
 // Walk walks the directory tree rooted at root and returns a list of files.
-// It skips directories listed in skipDirs.
+// It skips paths matched by the ignore list.
 // If filter is provided, it only returns files for which filter returns true.
-func Walk(root string, skipDirs []string, filter Filter) ([]string, error) {
+func Walk(root string, ignore *IgnoreList, filter Filter) ([]string, error) {
 	var files []string
-	skipMap := make(map[string]bool)
-	for _, d := range skipDirs {
-		skipMap[d] = true
-	}
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() {
-			if skipMap[info.Name()] {
+
+		relPath, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if relPath == "." {
+			return nil
+		}
+
+		if ignore != nil && ignore.ShouldIgnore(relPath, info.IsDir()) {
+			if info.IsDir() {
 				return filepath.SkipDir
 			}
+			return nil
+		}
+
+		if info.IsDir() {
 			return nil
 		}
 

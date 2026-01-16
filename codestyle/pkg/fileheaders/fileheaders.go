@@ -82,12 +82,9 @@ func Run(ctx context.Context, repoRoot string, files []string) error {
 	}
 
 	if len(files) == 0 {
-		var skipDirs []string
-		for _, ignore := range opt.IgnoreFiles {
-			skipDirs = append(skipDirs, strings.TrimSuffix(ignore, "/"))
-		}
+		ignoreList := walker.NewIgnoreList(opt.IgnoreFiles)
 
-		absFiles, err := walker.Walk(repoRoot, skipDirs, nil)
+		absFiles, err := walker.Walk(repoRoot, ignoreList, nil)
 		if err != nil {
 			return fmt.Errorf("error walking directory: %w", err)
 		}

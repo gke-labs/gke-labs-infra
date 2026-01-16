@@ -34,6 +34,7 @@ type GovetConfig struct {
 type Config struct {
 	Gofmt bool         `json:"gofmt"`
 	Govet *GovetConfig `json:"govet"`
+	Skip  []string     `json:"skip"`
 }
 
 func Run(ctx context.Context, repoRoot string, files []string) error {
@@ -58,13 +59,13 @@ func Run(ctx context.Context, repoRoot string, files []string) error {
 	}
 
 	if config.Gofmt {
-		if err := runGofmt(ctx, repoRoot, files); err != nil {
+		if err := runGofmt(ctx, repoRoot, files, config.Skip); err != nil {
 			return err
 		}
 	}
 
 	if config.Govet != nil && config.Govet.Enabled {
-		if err := runGoVet(ctx, repoRoot); err != nil {
+		if err := runGoVet(ctx, repoRoot, config.Skip); err != nil {
 			return err
 		}
 	}
@@ -72,7 +73,7 @@ func Run(ctx context.Context, repoRoot string, files []string) error {
 	return nil
 }
 
-func runGofmt(ctx context.Context, repoRoot string, files []string) error {
+func runGofmt(ctx context.Context, repoRoot string, files []string, skip []string) error {
 	log := klog.FromContext(ctx)
 	var filesToFormat []string
 	if len(files) > 0 {
@@ -87,7 +88,8 @@ func runGofmt(ctx context.Context, repoRoot string, files []string) error {
 		}
 	} else {
 		var err error
-		filesToFormat, err = walker.Walk(repoRoot, []string{"vendor", ".git"}, func(path string, info os.FileInfo) bool {
+		ignoreList := walker.NewIgnoreList(append([]string{"vendor", ".git"}, skip...))
+		filesToFormat, err = walker.Walk(repoRoot, ignoreList, func(path string, info os.FileInfo) bool {
 			return strings.HasSuffix(path, ".go")
 		})
 		if err != nil {
@@ -122,11 +124,12 @@ func runGofmt(ctx context.Context, repoRoot string, files []string) error {
 	return nil
 }
 
-func runGoVet(ctx context.Context, repoRoot string) error {
+func runGoVet(ctx context.Context, repoRoot string, skip []string) error {
 	log := klog.FromContext(ctx)
 	log.Info("Running go vet")
 
-	goModFiles, err := walker.Walk(repoRoot, []string{"vendor", ".git"}, func(path string, info os.FileInfo) bool {
+	ignoreList := walker.NewIgnoreList(append([]string{"vendor", ".git"}, skip...))
+	goModFiles, err := walker.Walk(repoRoot, ignoreList, func(path string, info os.FileInfo) bool {
 		return info.Name() == "go.mod"
 	})
 	if err != nil {
