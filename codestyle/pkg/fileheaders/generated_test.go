@@ -26,7 +26,7 @@ func TestRun_SkipGenerated(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create config
-	configDir := filepath.Join(tmpDir, ".codestyle")
+	configDir := filepath.Join(tmpDir, ".ap")
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestRun_SkipGenerated_Default(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create config WITHOUT skipGenerated
-	configDir := filepath.Join(tmpDir, ".codestyle")
+	configDir := filepath.Join(tmpDir, ".ap")
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestRun_SkipGenerated_False(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create config with skipGenerated: false
-	configDir := filepath.Join(tmpDir, ".codestyle")
+	configDir := filepath.Join(tmpDir, ".ap")
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		t.Fatal(err)
 	}
