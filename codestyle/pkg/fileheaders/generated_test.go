@@ -30,7 +30,7 @@ func TestRun_SkipGenerated(t *testing.T) {
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	configFile := filepath.Join(configDir, "file-headers.yaml")
+	configFile := filepath.Join(configDir, "headers.yaml")
 	// We explicitly set skipGenerated to true, although we plan to make it default.
 	configContent := `
 license: apache-2.0
@@ -95,7 +95,7 @@ func TestRun_SkipGenerated_Default(t *testing.T) {
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	configFile := filepath.Join(configDir, "file-headers.yaml")
+	configFile := filepath.Join(configDir, "headers.yaml")
 	configContent := `
 license: apache-2.0
 copyrightHolder: Google LLC
@@ -139,7 +139,7 @@ func TestRun_SkipGenerated_False(t *testing.T) {
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	configFile := filepath.Join(configDir, "file-headers.yaml")
+	configFile := filepath.Join(configDir, "headers.yaml")
 	configContent := `
 license: apache-2.0
 copyrightHolder: Google LLC
