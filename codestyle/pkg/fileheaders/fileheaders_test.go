@@ -30,7 +30,7 @@ func TestRun_Skip(t *testing.T) {
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	configFile := filepath.Join(configDir, "file-headers.yaml")
+	configFile := filepath.Join(configDir, "headers.yaml")
 	configContent := `
 license: apache-2.0
 copyrightHolder: Google LLC
@@ -96,7 +96,7 @@ func TestRun_Skip_ExplicitFile(t *testing.T) {
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	configFile := filepath.Join(configDir, "file-headers.yaml")
+	configFile := filepath.Join(configDir, "headers.yaml")
 	configContent := `
 license: apache-2.0
 copyrightHolder: Google LLC
@@ -146,7 +146,7 @@ func TestRun_KubernetesStyle(t *testing.T) {
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	configFile := filepath.Join(configDir, "file-headers.yaml")
+	configFile := filepath.Join(configDir, "headers.yaml")
 	configContent := `
 license: apache-2.0
 copyrightHolder: Google LLC
