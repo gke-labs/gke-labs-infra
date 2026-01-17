@@ -29,8 +29,17 @@ import (
 )
 
 type Config struct {
-	Gofmt bool     `json:"gofmt"`
-	Skip  []string `json:"skip"`
+	Gofmt *GofmtConfig `json:"gofmt"`
+	Govet *GovetConfig `json:"govet"`
+	Skip  []string     `json:"skip"`
+}
+
+type GofmtConfig struct {
+	Enabled *bool `json:"enabled"`
+}
+
+type GovetConfig struct {
+	Enabled *bool `json:"enabled"`
 }
 
 func Run(ctx context.Context, repoRoot string, files []string) error {
@@ -50,23 +59,26 @@ func Run(ctx context.Context, repoRoot string, files []string) error {
 
 	configFile := filepath.Join(repoRoot, ".ap/go.yaml")
 
-	// Check if config exists
-	if _, err := os.Stat(configFile); os.IsNotExist(err) {
-		log.V(2).Info("No .ap/go.yaml found, skipping go formatting")
-		return nil
-	}
-
-	data, err := os.ReadFile(configFile)
-	if err != nil {
-		return fmt.Errorf("error reading %s: %w", configFile, err)
-	}
-
 	var config Config
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return fmt.Errorf("error parsing %s: %w", configFile, err)
+	if _, err := os.Stat(configFile); err == nil {
+		data, err := os.ReadFile(configFile)
+		if err != nil {
+			return fmt.Errorf("error reading %s: %w", configFile, err)
+		}
+
+		if err := yaml.Unmarshal(data, &config); err != nil {
+			return fmt.Errorf("error parsing %s: %w", configFile, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("error checking %s: %w", configFile, err)
 	}
 
-	if config.Gofmt {
+	gofmtEnabled := true
+	if config.Gofmt != nil && config.Gofmt.Enabled != nil {
+		gofmtEnabled = *config.Gofmt.Enabled
+	}
+
+	if gofmtEnabled {
 		if err := runGofmt(ctx, repoRoot, files, config.Skip, cm); err != nil {
 			return err
 		}
