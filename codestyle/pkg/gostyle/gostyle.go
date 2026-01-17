@@ -48,11 +48,11 @@ func Run(ctx context.Context, repoRoot string, files []string) error {
 		}()
 	}
 
-	configFile := filepath.Join(repoRoot, ".codestyle/go.yaml")
+	configFile := filepath.Join(repoRoot, ".ap/go.yaml")
 
 	// Check if config exists
 	if _, err := os.Stat(configFile); os.IsNotExist(err) {
-		log.V(2).Info("No .codestyle/go.yaml found, skipping go formatting")
+		log.V(2).Info("No .ap/go.yaml found, skipping go formatting")
 		return nil
 	}
 

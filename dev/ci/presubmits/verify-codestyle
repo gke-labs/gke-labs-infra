@@ -22,7 +22,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}"
 
 echo "Running codestyle..."
-go run ./codestyle/cmd/codestyle/main.go
+go run ./ap/main.go fmt
 
 echo "Checking for git changes..."
 if [[ -n $(git status --porcelain) ]]; then
