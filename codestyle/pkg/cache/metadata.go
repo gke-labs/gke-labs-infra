@@ -36,13 +36,13 @@ func GetMetadata(path string) (*FileMetadata, error) {
 		return nil, err
 	}
 
-	// Access underlying syscall data for Inode and Nano-precision Mtime
+	// Access underlying syscall data for Inode
 	stat := fi.Sys().(*syscall.Stat_t)
 
 	return &FileMetadata{
 		Path:  path,
 		Size:  fi.Size(),
-		Mtime: stat.Mtim.Nano(), // Linux/Unix specific
+		Mtime: fi.ModTime().UnixNano(),
 		Inode: stat.Ino,
 	}, nil
 }
