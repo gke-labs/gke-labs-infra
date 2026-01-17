@@ -42,13 +42,6 @@ func Run(ctx context.Context, root string) error {
 }
 
 func runCodestyle(ctx context.Context, root string) error {
-	codestyleDir := filepath.Join(root, ".codestyle")
-
-	// Check if .codestyle exists
-	if _, err := os.Stat(codestyleDir); os.IsNotExist(err) {
-		return nil
-	}
-
 	klog.Info("Running codestyle...")
 	if err := fileheaders.Run(ctx, root, nil); err != nil {
 		return fmt.Errorf("fileheaders failed: %w", err)

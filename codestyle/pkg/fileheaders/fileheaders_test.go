@@ -26,7 +26,7 @@ func TestRun_Skip(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create config
-	configDir := filepath.Join(tmpDir, ".codestyle")
+	configDir := filepath.Join(tmpDir, ".ap")
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestRun_Skip_ExplicitFile(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create config
-	configDir := filepath.Join(tmpDir, ".codestyle")
+	configDir := filepath.Join(tmpDir, ".ap")
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestRun_KubernetesStyle(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create config
-	configDir := filepath.Join(tmpDir, ".codestyle")
+	configDir := filepath.Join(tmpDir, ".ap")
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		t.Fatal(err)
 	}

@@ -72,7 +72,12 @@ func Run(ctx context.Context, repoRoot string, files []string) error {
 
 	log := klog.FromContext(ctx)
 
-	configFile := filepath.Join(repoRoot, ".codestyle/file-headers.yaml")
+	configFile := filepath.Join(repoRoot, ".ap/file-headers.yaml")
+	if _, err := os.Stat(configFile); os.IsNotExist(err) {
+		klog.V(2).Info("No .ap/file-headers.yaml found, skipping file headers")
+		return nil
+	}
+
 	config, err := loadConfig(configFile)
 	if err != nil {
 		return err
