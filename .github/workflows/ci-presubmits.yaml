@@ -50,17 +50,3 @@ jobs:
       - name: Run ap-verify-generate
         run: ./dev/ci/presubmits/ap-verify-generate
 
-  verify-codestyle:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: 'go.mod'
-
-      - name: Run verify-codestyle
-        run: ./dev/ci/presubmits/verify-codestyle
-

@@ -70,6 +70,9 @@ func main() {
 		cmdErr = runDeploy(ctx, root)
 	case "generate":
 		cmdErr = runGenerate(ctx, root)
+		if cmdErr == nil {
+			cmdErr = runFormat(ctx, root)
+		}
 	case "format", "fmt":
 		cmdErr = runFormat(ctx, root)
 	case "version":
