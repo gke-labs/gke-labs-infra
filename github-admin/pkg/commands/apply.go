@@ -69,14 +69,9 @@ func RunApply(ctx context.Context, opt ApplyOptions) error {
 		return fmt.Errorf("--token or GITHUB_TOKEN env var is required")
 	}
 
-	data, err := os.ReadFile(opt.ConfigPath)
+	configs, err := LoadConfigs(opt.ConfigPath)
 	if err != nil {
-		return fmt.Errorf("failed to read config file: %w", err)
-	}
-
-	var configs []config.RepositoryConfig
-	if err := yaml.Unmarshal(data, &configs); err != nil {
-		return fmt.Errorf("failed to unmarshal config: %w", err)
+		return err
 	}
 
 	ts := oauth2.StaticTokenSource(
@@ -93,6 +88,34 @@ func RunApply(ctx context.Context, opt ApplyOptions) error {
 	}
 
 	return errors.Join(errs...)
+}
+
+func LoadConfigs(path string) ([]config.RepositoryConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	var configs []config.RepositoryConfig
+	docs := SplitYAML(data)
+	for _, doc := range docs {
+		// Try unmarshal as list (backward compatibility)
+		var listConfigs []config.RepositoryConfig
+		if err := yaml.Unmarshal(doc, &listConfigs); err == nil {
+			configs = append(configs, listConfigs...)
+			continue
+		}
+
+		// Try unmarshal as single object
+		var singleConfig config.RepositoryConfig
+		if err := yaml.Unmarshal(doc, &singleConfig); err == nil {
+			configs = append(configs, singleConfig)
+			continue
+		}
+
+		return nil, fmt.Errorf("failed to unmarshal config: invalid format")
+	}
+	return configs, nil
 }
 
 func applyRepo(ctx context.Context, client *github.Client, cfg config.RepositoryConfig, dryRun bool) error {
