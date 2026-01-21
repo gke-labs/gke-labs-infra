@@ -38,6 +38,8 @@ func Run(ctx context.Context) error {
 	}
 
 	rootCmd.AddCommand(commands.BuildUpdateRepoCommand())
+	rootCmd.AddCommand(commands.BuildExportCommand())
+	rootCmd.AddCommand(commands.BuildApplyCommand())
 
 	return rootCmd.ExecuteContext(ctx)
 }
