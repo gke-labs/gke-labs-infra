@@ -32,6 +32,7 @@ import (
 
 type ExportOptions struct {
 	Owner       string
+	Repo        string
 	GitHubToken string
 	Output      string
 }
@@ -55,6 +56,7 @@ func BuildExportCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&opt.Owner, "owner", opt.Owner, "The github owner (org or user)")
+	cmd.Flags().StringVar(&opt.Repo, "repo", opt.Repo, "The specific repo to export")
 	cmd.Flags().StringVar(&opt.GitHubToken, "token", opt.GitHubToken, "The github token (default from GITHUB_TOKEN env var)")
 	cmd.Flags().StringVar(&opt.Output, "output", opt.Output, "Output file path (default is stdout)")
 
@@ -78,10 +80,21 @@ func RunExport(ctx context.Context, opt ExportOptions) error {
 	tc := oauth2.NewClient(ctx, ts)
 	client := github.NewClient(tc)
 
-	// List all repositories
-	repos, err := listRepositories(ctx, client, opt.Owner)
-	if err != nil {
-		return err
+	var repos []*github.Repository
+
+	if opt.Repo != "" {
+		repo, _, err := client.Repositories.Get(ctx, opt.Owner, opt.Repo)
+		if err != nil {
+			return fmt.Errorf("failed to get repo %s/%s: %w", opt.Owner, opt.Repo, err)
+		}
+		repos = []*github.Repository{repo}
+	} else {
+		// List all repositories
+		var err error
+		repos, err = listRepositories(ctx, client, opt.Owner)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Check if we are in multi-file mode
