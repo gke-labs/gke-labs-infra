@@ -1,3 +1,17 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package commands
 
 import (
@@ -17,7 +31,6 @@ type UpdateRepoOptions struct {
 }
 
 func (o *UpdateRepoOptions) InitDefaults() {
-	o.GitHubToken = os.Getenv("GITHUB_TOKEN")
 }
 
 func BuildUpdateRepoCommand() *cobra.Command {
@@ -49,6 +62,9 @@ func RunUpdateRepo(ctx context.Context, opt UpdateRepoOptions) error {
 		return fmt.Errorf("--repo is required")
 	}
 	if opt.GitHubToken == "" {
+		opt.GitHubToken = os.Getenv("GITHUB_TOKEN")
+	}
+	if opt.GitHubToken == "" {
 		return fmt.Errorf("--token or GITHUB_TOKEN env var is required")
 	}
 
@@ -66,7 +82,7 @@ func RunUpdateRepo(ctx context.Context, opt UpdateRepoOptions) error {
 		AllowSquashMerge:    github.Bool(true),
 		AllowMergeCommit:    github.Bool(false),
 		AllowRebaseMerge:    github.Bool(false),
-		DeleteBranchOnMerge: github.Bool(true),
+		DeleteBranchOnMerge: github.Bool(false),
 	}
 
 	_, _, err := client.Repositories.Edit(ctx, opt.Owner, opt.Repo, repoReq)
@@ -79,11 +95,14 @@ func RunUpdateRepo(ctx context.Context, opt UpdateRepoOptions) error {
 	// We configure branch protection for 'main'
 	protectionRequest := &github.ProtectionRequest{
 		RequiredStatusChecks: &github.RequiredStatusChecks{
-			Strict:   true,        // Require branches to be up to date before merging
-			Contexts: &[]string{}, // TODO: Populate with specific checks if known, or let user configure
+			Strict: false, // Require branches to be up to date before merging
+			Contexts: &[]string{
+				"ap-verify-generate",
+				"ap-test",
+			}, // TODO: Populate with specific checks if known, or let user configure
 		},
 		RequiredPullRequestReviews: &github.PullRequestReviewsEnforcementRequest{
-			DismissStaleReviews:          true,
+			DismissStaleReviews:          false,
 			RequireCodeOwnerReviews:      true,
 			RequiredApprovingReviewCount: 1,
 		},
