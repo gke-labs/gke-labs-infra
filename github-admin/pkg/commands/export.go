@@ -20,7 +20,7 @@ import (
 	"os"
 
 	"github.com/gke-labs/gke-labs-infra/github-admin/pkg/config"
-	"github.com/google/go-github/v60/github"
+	"github.com/google/go-github/v81/github"
 	"github.com/spf13/cobra"
 	"golang.org/x/oauth2"
 	"sigs.k8s.io/yaml"
