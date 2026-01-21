@@ -209,6 +209,8 @@ func exportRepo(ctx context.Context, client *github.Client, repo *github.Reposit
 			AllowMergeCommit:    repo.AllowMergeCommit,
 			AllowRebaseMerge:    repo.AllowRebaseMerge,
 			DeleteBranchOnMerge: repo.DeleteBranchOnMerge,
+			MergeCommitTitle:    repo.MergeCommitTitle,
+			MergeCommitMessage:  repo.MergeCommitMessage,
 			HasIssues:           repo.HasIssues,
 			HasProjects:         repo.HasProjects,
 			HasWiki:             repo.HasWiki,

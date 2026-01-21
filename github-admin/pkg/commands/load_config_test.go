@@ -63,6 +63,25 @@ name: repo2
 			content: `invalid: [`,
 			wantErr: true,
 		},
+		{
+			name: "With Merge Settings",
+			content: `owner: org1
+name: repo1
+settings:
+  mergeCommitTitle: PR_TITLE
+  mergeCommitMessage: PR_BODY
+`,
+			want: []config.RepositoryConfig{
+				{
+					Owner: "org1",
+					Name:  "repo1",
+					Settings: &config.RepositorySettings{
+						MergeCommitTitle:   stringPtr("PR_TITLE"),
+						MergeCommitMessage: stringPtr("PR_BODY"),
+					},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -82,4 +101,8 @@ name: repo2
 			}
 		})
 	}
+}
+
+func stringPtr(s string) *string {
+	return &s
 }

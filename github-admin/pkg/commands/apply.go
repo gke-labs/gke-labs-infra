@@ -126,6 +126,8 @@ func applyRepo(ctx context.Context, client *github.Client, cfg config.Repository
 		repoReq.AllowMergeCommit = cfg.Settings.AllowMergeCommit
 		repoReq.AllowRebaseMerge = cfg.Settings.AllowRebaseMerge
 		repoReq.DeleteBranchOnMerge = cfg.Settings.DeleteBranchOnMerge
+		repoReq.MergeCommitTitle = cfg.Settings.MergeCommitTitle
+		repoReq.MergeCommitMessage = cfg.Settings.MergeCommitMessage
 		repoReq.HasIssues = cfg.Settings.HasIssues
 		repoReq.HasProjects = cfg.Settings.HasProjects
 		repoReq.HasWiki = cfg.Settings.HasWiki
