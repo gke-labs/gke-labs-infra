@@ -15,6 +15,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -108,17 +109,23 @@ func RunExport(ctx context.Context, opt ExportOptions) error {
 	}
 
 	if !multiFile {
-		// Marshal to YAML
-		data, err := yaml.Marshal(configs)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("failed to marshal config: %w", err))
-			return errors.Join(errs...)
+		var buf bytes.Buffer
+		for i, cfg := range configs {
+			if i > 0 {
+				buf.WriteString("---\n")
+			}
+			data, err := yaml.Marshal(cfg)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("failed to marshal config: %w", err))
+				return errors.Join(errs...)
+			}
+			buf.Write(data)
 		}
 
 		if opt.Output == "-" {
-			fmt.Print(string(data))
+			fmt.Print(buf.String())
 		} else {
-			if err := os.WriteFile(opt.Output, data, 0644); err != nil {
+			if err := os.WriteFile(opt.Output, buf.Bytes(), 0644); err != nil {
 				errs = append(errs, fmt.Errorf("failed to write output file: %w", err))
 			}
 		}
