@@ -47,6 +47,10 @@ type RepositoryConfig struct {
 	// The key is the branch pattern (e.g., "main").
 	// +optional
 	BranchProtection map[string]*BranchProtection `json:"branchProtection,omitempty"`
+
+	// Rulesets defines the repository rulesets.
+	// +optional
+	Rulesets []*RepositoryRuleset `json:"rulesets,omitempty"`
 }
 
 type RepositorySettings struct {
@@ -69,6 +73,37 @@ type BranchProtection struct {
 	RequireLinearHistory       bool                        `json:"requireLinearHistory,omitempty"`
 	AllowForcePushes           bool                        `json:"allowForcePushes,omitempty"`
 	AllowDeletions             bool                        `json:"allowDeletions,omitempty"`
+}
+
+type RepositoryRuleset struct {
+	Name        string             `json:"name,omitempty"`
+	Target      string             `json:"target,omitempty"`
+	Enforcement string             `json:"enforcement,omitempty"`
+	Conditions  *RulesetConditions `json:"conditions,omitempty"`
+	Rules       *RulesetRules      `json:"rules,omitempty"`
+}
+
+type RulesetConditions struct {
+	RefName *RefNameCondition `json:"refName,omitempty"`
+}
+
+type RefNameCondition struct {
+	Include []string `json:"include,omitempty"`
+	Exclude []string `json:"exclude,omitempty"`
+}
+
+type RulesetRules struct {
+	MergeQueue *MergeQueueRule `json:"mergeQueue,omitempty"`
+}
+
+type MergeQueueRule struct {
+	CheckResponseTimeoutMinutes  int    `json:"checkResponseTimeoutMinutes,omitempty"`
+	GroupingStrategy             string `json:"groupingStrategy,omitempty"`
+	MaxEntriesToBuild            int    `json:"maxEntriesToBuild,omitempty"`
+	MaxEntriesToMerge            int    `json:"maxEntriesToMerge,omitempty"`
+	MergeMethod                  string `json:"mergeMethod,omitempty"`
+	MinEntriesToMerge            int    `json:"minEntriesToMerge,omitempty"`
+	MinEntriesToMergeWaitMinutes int    `json:"minEntriesToMergeWaitMinutes,omitempty"`
 }
 
 type RequiredStatusChecks struct {
