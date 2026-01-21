@@ -16,6 +16,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -81,13 +82,13 @@ func RunExport(ctx context.Context, opt ExportOptions) error {
 	}
 
 	var configs []config.RepositoryConfig
+	var errs []error
 
 	for _, repo := range repos {
 		fmt.Fprintf(os.Stderr, "Processing repo %s...\n", repo.GetName())
 		cfg, err := exportRepo(ctx, client, repo)
 		if err != nil {
-			// Log error but maybe continue?
-			fmt.Fprintf(os.Stderr, "Error exporting repo %s: %v\n", repo.GetName(), err)
+			errs = append(errs, fmt.Errorf("error exporting repo %s: %w", repo.GetName(), err))
 			continue
 		}
 		configs = append(configs, *cfg)
@@ -96,18 +97,19 @@ func RunExport(ctx context.Context, opt ExportOptions) error {
 	// Marshal to YAML
 	data, err := yaml.Marshal(configs)
 	if err != nil {
-		return fmt.Errorf("failed to marshal config: %w", err)
+		errs = append(errs, fmt.Errorf("failed to marshal config: %w", err))
+		return errors.Join(errs...)
 	}
 
 	if opt.Output == "-" {
 		fmt.Print(string(data))
 	} else {
 		if err := os.WriteFile(opt.Output, data, 0644); err != nil {
-			return fmt.Errorf("failed to write output file: %w", err)
+			errs = append(errs, fmt.Errorf("failed to write output file: %w", err))
 		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 func listRepositories(ctx context.Context, client *github.Client, owner string) ([]*github.Repository, error) {

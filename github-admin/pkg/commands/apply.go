@@ -16,6 +16,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -33,6 +34,7 @@ type ApplyOptions struct {
 }
 
 func (o *ApplyOptions) InitDefaults() {
+	o.DryRun = true
 }
 
 func BuildApplyCommand() *cobra.Command {
@@ -83,14 +85,14 @@ func RunApply(ctx context.Context, opt ApplyOptions) error {
 	tc := oauth2.NewClient(ctx, ts)
 	client := github.NewClient(tc)
 
+	var errs []error
 	for _, cfg := range configs {
 		if err := applyRepo(ctx, client, cfg, opt.DryRun); err != nil {
-			fmt.Fprintf(os.Stderr, "Error applying config to %s/%s: %v\n", cfg.Owner, cfg.Name, err)
-			// Continue or fail? Let's continue.
+			errs = append(errs, fmt.Errorf("error applying config to %s/%s: %w", cfg.Owner, cfg.Name, err))
 		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 func applyRepo(ctx context.Context, client *github.Client, cfg config.RepositoryConfig, dryRun bool) error {
