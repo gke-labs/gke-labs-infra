@@ -1,3 +1,17 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package commands
 
 import (
@@ -19,34 +33,22 @@ func TestLoadConfigs(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "List format",
+			name: "List format (Not supported anymore as per PR feedback)",
 			content: `- owner: org1
   name: repo1
 - owner: org2
   name: repo2
 `,
-			want: []config.RepositoryConfig{
-				{Owner: "org1", Name: "repo1"},
-				{Owner: "org2", Name: "repo2"},
-			},
+			// It will try to parse list as single object -> fail?
+			// Actually, mapstructure/yaml might partial match or fail.
+			// Since we removed list support, this test case expectation should change or be removed.
+			// If we parse a list as a struct, it usually errors because [] != struct.
+			wantErr: true,
 		},
 		{
 			name: "Multi-doc format",
 			content: `owner: org1
 name: repo1
----
-owner: org2
-name: repo2
-`,
-			want: []config.RepositoryConfig{
-				{Owner: "org1", Name: "repo1"},
-				{Owner: "org2", Name: "repo2"},
-			},
-		},
-		{
-			name: "Multi-doc with list (mixed - unlikely but possible)",
-			content: `- owner: org1
-  name: repo1
 ---
 owner: org2
 name: repo2

@@ -99,13 +99,6 @@ func LoadConfigs(path string) ([]config.RepositoryConfig, error) {
 	var configs []config.RepositoryConfig
 	docs := SplitYAML(data)
 	for _, doc := range docs {
-		// Try unmarshal as list (backward compatibility)
-		var listConfigs []config.RepositoryConfig
-		if err := yaml.Unmarshal(doc, &listConfigs); err == nil {
-			configs = append(configs, listConfigs...)
-			continue
-		}
-
 		// Try unmarshal as single object
 		var singleConfig config.RepositoryConfig
 		if err := yaml.Unmarshal(doc, &singleConfig); err == nil {
