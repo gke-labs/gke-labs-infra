@@ -97,13 +97,13 @@ type RulesetRules struct {
 }
 
 type MergeQueueRule struct {
-	CheckResponseTimeoutMinutes int    `json:"checkResponseTimeoutMinutes,omitempty"`
-	GroupingStrategy            string `json:"groupingStrategy,omitempty"`
-	MaxEntriesToBuild           int    `json:"maxEntriesToBuild,omitempty"`
-	MaxEntriesToMerge           int    `json:"maxEntriesToMerge,omitempty"`
-	MergeMethod                 string `json:"mergeMethod,omitempty"`
-	MinEntriesToMerge           int    `json:"minEntriesToMerge,omitempty"`
-	MinEntriesToMergeWaitMinutes int   `json:"minEntriesToMergeWaitMinutes,omitempty"`
+	CheckResponseTimeoutMinutes  int    `json:"checkResponseTimeoutMinutes,omitempty"`
+	GroupingStrategy             string `json:"groupingStrategy,omitempty"`
+	MaxEntriesToBuild            int    `json:"maxEntriesToBuild,omitempty"`
+	MaxEntriesToMerge            int    `json:"maxEntriesToMerge,omitempty"`
+	MergeMethod                  string `json:"mergeMethod,omitempty"`
+	MinEntriesToMerge            int    `json:"minEntriesToMerge,omitempty"`
+	MinEntriesToMergeWaitMinutes int    `json:"minEntriesToMergeWaitMinutes,omitempty"`
 }
 
 type RequiredStatusChecks struct {

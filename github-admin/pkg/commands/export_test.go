@@ -90,7 +90,7 @@ func TestMapBranchProtection(t *testing.T) {
 
 func TestMapRuleset(t *testing.T) {
 	targetBranch := github.RulesetTarget("branch")
-	
+
 	tests := []struct {
 		name string
 		rs   *github.RepositoryRuleset
@@ -135,7 +135,7 @@ func TestMapRuleset(t *testing.T) {
 		{
 			name: "Ruleset with Conditions",
 			rs: &github.RepositoryRuleset{
-				Name: "main-protection",
+				Name:        "main-protection",
 				Enforcement: "active",
 				Conditions: &github.RepositoryRulesetConditions{
 					RefName: &github.RepositoryRulesetRefConditionParameters{
@@ -145,7 +145,7 @@ func TestMapRuleset(t *testing.T) {
 				},
 			},
 			want: &config.RepositoryRuleset{
-				Name: "main-protection",
+				Name:        "main-protection",
 				Enforcement: "active",
 				Conditions: &config.RulesetConditions{
 					RefName: &config.RefNameCondition{
