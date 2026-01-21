@@ -60,6 +60,9 @@ type RepositorySettings struct {
 	AllowRebaseMerge    *bool `json:"allowRebaseMerge,omitempty"`
 	DeleteBranchOnMerge *bool `json:"deleteBranchOnMerge,omitempty"`
 
+	MergeCommitTitle   *string `json:"mergeCommitTitle,omitempty"`
+	MergeCommitMessage *string `json:"mergeCommitMessage,omitempty"`
+
 	HasIssues    *bool `json:"hasIssues,omitempty"`
 	HasProjects  *bool `json:"hasProjects,omitempty"`
 	HasWiki      *bool `json:"hasWiki,omitempty"`
