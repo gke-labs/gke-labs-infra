@@ -19,6 +19,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/github-admin/pkg/config"
 	"github.com/google/go-github/v81/github"
@@ -81,6 +83,9 @@ func RunExport(ctx context.Context, opt ExportOptions) error {
 		return err
 	}
 
+	// Check if we are in multi-file mode
+	multiFile := strings.Contains(opt.Output, "{org}") || strings.Contains(opt.Output, "{repo}")
+
 	var configs []config.RepositoryConfig
 	var errs []error
 
@@ -91,25 +96,60 @@ func RunExport(ctx context.Context, opt ExportOptions) error {
 			errs = append(errs, fmt.Errorf("error exporting repo %s: %w", repo.GetName(), err))
 			continue
 		}
-		configs = append(configs, *cfg)
+
+		if multiFile {
+			path := resolveOutputPath(opt.Output, cfg)
+			if err := writeRepoConfig(path, cfg); err != nil {
+				errs = append(errs, err)
+			}
+		} else {
+			configs = append(configs, *cfg)
+		}
 	}
 
-	// Marshal to YAML
-	data, err := yaml.Marshal(configs)
-	if err != nil {
-		errs = append(errs, fmt.Errorf("failed to marshal config: %w", err))
-		return errors.Join(errs...)
-	}
+	if !multiFile {
+		// Marshal to YAML
+		data, err := yaml.Marshal(configs)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("failed to marshal config: %w", err))
+			return errors.Join(errs...)
+		}
 
-	if opt.Output == "-" {
-		fmt.Print(string(data))
-	} else {
-		if err := os.WriteFile(opt.Output, data, 0644); err != nil {
-			errs = append(errs, fmt.Errorf("failed to write output file: %w", err))
+		if opt.Output == "-" {
+			fmt.Print(string(data))
+		} else {
+			if err := os.WriteFile(opt.Output, data, 0644); err != nil {
+				errs = append(errs, fmt.Errorf("failed to write output file: %w", err))
+			}
 		}
 	}
 
 	return errors.Join(errs...)
+}
+
+func resolveOutputPath(template string, cfg *config.RepositoryConfig) string {
+	path := template
+	path = strings.ReplaceAll(path, "{org}", cfg.Owner)
+	path = strings.ReplaceAll(path, "{repo}", cfg.Name)
+	return path
+}
+
+func writeRepoConfig(path string, cfg *config.RepositoryConfig) error {
+	// Create directory if needed
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory %s: %w", dir, err)
+	}
+
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config for %s: %w", cfg.Name, err)
+	}
+
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("failed to write output file %s: %w", path, err)
+	}
+	return nil
 }
 
 func listRepositories(ctx context.Context, client *github.Client, owner string) ([]*github.Repository, error) {
