@@ -183,9 +183,12 @@ func applyRulesets(ctx context.Context, client *github.Client, cfg config.Reposi
 	// List existing rulesets to find IDs
 	existingRulesets, _, err := client.Repositories.GetAllRulesets(ctx, cfg.Owner, cfg.Name, nil)
 	if err != nil {
-		// If 404, it might mean the repo doesn't exist or feature not available.
-		// For now, assume error is real.
-		return fmt.Errorf("failed to list existing rulesets: %w", err)
+		if resp, ok := err.(*github.ErrorResponse); ok && resp.Response.StatusCode == 404 {
+			// Rulesets might not be supported or available, treat as empty
+			existingRulesets = []*github.RepositoryRuleset{}
+		} else {
+			return fmt.Errorf("failed to list existing rulesets: %w", err)
+		}
 	}
 
 	existingMap := make(map[string]*github.RepositoryRuleset)
