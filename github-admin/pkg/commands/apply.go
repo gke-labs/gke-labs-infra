@@ -171,5 +171,95 @@ func applyRepo(ctx context.Context, client *github.Client, cfg config.Repository
 		}
 	}
 
+	// Apply Rulesets
+	if err := applyRulesets(ctx, client, cfg, dryRun); err != nil {
+		return fmt.Errorf("failed to apply rulesets: %w", err)
+	}
+
 	return nil
+}
+
+func applyRulesets(ctx context.Context, client *github.Client, cfg config.RepositoryConfig, dryRun bool) error {
+	// List existing rulesets to find IDs
+	existingRulesets, _, err := client.Repositories.GetAllRulesets(ctx, cfg.Owner, cfg.Name, nil)
+	if err != nil {
+		// If 404, it might mean the repo doesn't exist or feature not available.
+		// For now, assume error is real.
+		return fmt.Errorf("failed to list existing rulesets: %w", err)
+	}
+
+	existingMap := make(map[string]*github.RepositoryRuleset)
+	for _, rs := range existingRulesets {
+		existingMap[rs.Name] = rs
+	}
+
+	for _, rsConfig := range cfg.Rulesets {
+		rsReq := rulesetFromConfig(rsConfig)
+
+		if existing, ok := existingMap[rsConfig.Name]; ok {
+			// Update
+			if dryRun {
+				fmt.Printf("[DryRun] Would update ruleset %s for %s\n", rsConfig.Name, cfg.Name)
+			} else {
+				if existing.ID == nil {
+					return fmt.Errorf("existing ruleset %s has no ID", rsConfig.Name)
+				}
+				_, _, err := client.Repositories.UpdateRuleset(ctx, cfg.Owner, cfg.Name, *existing.ID, *rsReq)
+				if err != nil {
+					return fmt.Errorf("failed to update ruleset %s: %w", rsConfig.Name, err)
+				}
+			}
+		} else {
+			// Create
+			if dryRun {
+				fmt.Printf("[DryRun] Would create ruleset %s for %s\n", rsConfig.Name, cfg.Name)
+			} else {
+				_, _, err := client.Repositories.CreateRuleset(ctx, cfg.Owner, cfg.Name, *rsReq)
+				if err != nil {
+					return fmt.Errorf("failed to create ruleset %s: %w", rsConfig.Name, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func rulesetFromConfig(rs *config.RepositoryRuleset) *github.RepositoryRuleset {
+	enforcement := github.RulesetEnforcement(rs.Enforcement)
+
+	res := &github.RepositoryRuleset{
+		Name:        rs.Name,
+		Enforcement: enforcement,
+	}
+
+	if rs.Target != "" {
+		target := github.RulesetTarget(rs.Target)
+		res.Target = &target
+	}
+
+	if rs.Conditions != nil && rs.Conditions.RefName != nil {
+		res.Conditions = &github.RepositoryRulesetConditions{
+			RefName: &github.RepositoryRulesetRefConditionParameters{
+				Include: rs.Conditions.RefName.Include,
+				Exclude: rs.Conditions.RefName.Exclude,
+			},
+		}
+	}
+
+	if rs.Rules != nil {
+		res.Rules = &github.RepositoryRulesetRules{}
+		if rs.Rules.MergeQueue != nil {
+			mq := rs.Rules.MergeQueue
+			res.Rules.MergeQueue = &github.MergeQueueRuleParameters{
+				CheckResponseTimeoutMinutes:  mq.CheckResponseTimeoutMinutes,
+				GroupingStrategy:             github.MergeGroupingStrategy(mq.GroupingStrategy),
+				MaxEntriesToBuild:            mq.MaxEntriesToBuild,
+				MaxEntriesToMerge:            mq.MaxEntriesToMerge,
+				MergeMethod:                  github.MergeQueueMergeMethod(mq.MergeMethod),
+				MinEntriesToMerge:            mq.MinEntriesToMerge,
+				MinEntriesToMergeWaitMinutes: mq.MinEntriesToMergeWaitMinutes,
+			}
+		}
+	}
+	return res
 }
