@@ -166,3 +166,58 @@ func TestMapRuleset(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveOutputPath(t *testing.T) {
+	tests := []struct {
+		name     string
+		template string
+		cfg      *config.RepositoryConfig
+		want     string
+	}{
+		{
+			name:     "no placeholders",
+			template: "foo/bar.yaml",
+			cfg: &config.RepositoryConfig{
+				Owner: "myorg",
+				Name:  "myrepo",
+			},
+			want: "foo/bar.yaml",
+		},
+		{
+			name:     "org placeholder",
+			template: "foo/{org}/bar.yaml",
+			cfg: &config.RepositoryConfig{
+				Owner: "myorg",
+				Name:  "myrepo",
+			},
+			want: "foo/myorg/bar.yaml",
+		},
+		{
+			name:     "repo placeholder",
+			template: "foo/{repo}.yaml",
+			cfg: &config.RepositoryConfig{
+				Owner: "myorg",
+				Name:  "myrepo",
+			},
+			want: "foo/myrepo.yaml",
+		},
+		{
+			name:     "both placeholders",
+			template: "out/{org}/{repo}/config.yaml",
+			cfg: &config.RepositoryConfig{
+				Owner: "myorg",
+				Name:  "myrepo",
+			},
+			want: "out/myorg/myrepo/config.yaml",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveOutputPath(tt.template, tt.cfg)
+			if got != tt.want {
+				t.Errorf("resolveOutputPath() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
