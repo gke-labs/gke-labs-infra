@@ -101,12 +101,10 @@ func LoadConfigs(path string) ([]config.RepositoryConfig, error) {
 	for _, doc := range docs {
 		// Try unmarshal as single object
 		var singleConfig config.RepositoryConfig
-		if err := yaml.Unmarshal(doc, &singleConfig); err == nil {
-			configs = append(configs, singleConfig)
-			continue
+		if err := yaml.Unmarshal(doc, &singleConfig); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 		}
-
-		return nil, fmt.Errorf("failed to unmarshal config: invalid format")
+		configs = append(configs, singleConfig)
 	}
 	return configs, nil
 }
