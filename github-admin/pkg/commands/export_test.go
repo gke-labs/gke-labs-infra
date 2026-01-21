@@ -87,3 +87,82 @@ func TestMapBranchProtection(t *testing.T) {
 		})
 	}
 }
+
+func TestMapRuleset(t *testing.T) {
+	targetBranch := github.RulesetTarget("branch")
+	
+	tests := []struct {
+		name string
+		rs   *github.RepositoryRuleset
+		want *config.RepositoryRuleset
+	}{
+		{
+			name: "Basic Ruleset",
+			rs: &github.RepositoryRuleset{
+				Name:        "default",
+				Target:      &targetBranch,
+				Enforcement: github.RulesetEnforcement("active"),
+			},
+			want: &config.RepositoryRuleset{
+				Name:        "default",
+				Target:      "branch",
+				Enforcement: "active",
+			},
+		},
+		{
+			name: "Ruleset with Merge Queue",
+			rs: &github.RepositoryRuleset{
+				Name:        "merge-queue",
+				Enforcement: "active",
+				Rules: &github.RepositoryRulesetRules{
+					MergeQueue: &github.MergeQueueRuleParameters{
+						MergeMethod:       "SQUASH",
+						MinEntriesToMerge: 1,
+					},
+				},
+			},
+			want: &config.RepositoryRuleset{
+				Name:        "merge-queue",
+				Enforcement: "active",
+				Rules: &config.RulesetRules{
+					MergeQueue: &config.MergeQueueRule{
+						MergeMethod:       "SQUASH",
+						MinEntriesToMerge: 1,
+					},
+				},
+			},
+		},
+		{
+			name: "Ruleset with Conditions",
+			rs: &github.RepositoryRuleset{
+				Name: "main-protection",
+				Enforcement: "active",
+				Conditions: &github.RepositoryRulesetConditions{
+					RefName: &github.RepositoryRulesetRefConditionParameters{
+						Include: []string{"refs/heads/main"},
+						Exclude: []string{"refs/heads/dev"},
+					},
+				},
+			},
+			want: &config.RepositoryRuleset{
+				Name: "main-protection",
+				Enforcement: "active",
+				Conditions: &config.RulesetConditions{
+					RefName: &config.RefNameCondition{
+						Include: []string{"refs/heads/main"},
+						Exclude: []string{"refs/heads/dev"},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mapRuleset(tt.rs)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("mapRuleset() = \n%v\n, want \n%v", got, tt.want)
+			}
+		})
+	}
+}

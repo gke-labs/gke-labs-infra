@@ -184,7 +184,57 @@ func exportRepo(ctx context.Context, client *github.Client, repo *github.Reposit
 		cfg.BranchProtection[branch.GetName()] = mapBranchProtection(bp)
 	}
 
+	// Export Rulesets
+	rulesets, _, err := client.Repositories.GetAllRulesets(ctx, repo.GetOwner().GetLogin(), repo.GetName(), nil)
+	if err != nil {
+		if resp, ok := err.(*github.ErrorResponse); ok && resp.Response.StatusCode == 404 {
+			// Rulesets might not be supported or available
+		} else {
+			return nil, fmt.Errorf("failed to get rulesets: %w", err)
+		}
+	} else {
+		for _, rs := range rulesets {
+			cfg.Rulesets = append(cfg.Rulesets, mapRuleset(rs))
+		}
+	}
+
 	return cfg, nil
+}
+
+func mapRuleset(rs *github.RepositoryRuleset) *config.RepositoryRuleset {
+	res := &config.RepositoryRuleset{
+		Name:        rs.Name,
+		Enforcement: string(rs.Enforcement),
+	}
+	if rs.Target != nil {
+		res.Target = string(*rs.Target)
+	}
+
+	if rs.Conditions != nil && rs.Conditions.RefName != nil {
+		res.Conditions = &config.RulesetConditions{
+			RefName: &config.RefNameCondition{
+				Include: rs.Conditions.RefName.Include,
+				Exclude: rs.Conditions.RefName.Exclude,
+			},
+		}
+	}
+
+	if rs.Rules != nil {
+		res.Rules = &config.RulesetRules{}
+		if rs.Rules.MergeQueue != nil {
+			mq := rs.Rules.MergeQueue
+			res.Rules.MergeQueue = &config.MergeQueueRule{
+				CheckResponseTimeoutMinutes:  mq.CheckResponseTimeoutMinutes,
+				GroupingStrategy:             string(mq.GroupingStrategy),
+				MaxEntriesToBuild:            mq.MaxEntriesToBuild,
+				MaxEntriesToMerge:            mq.MaxEntriesToMerge,
+				MergeMethod:                  string(mq.MergeMethod),
+				MinEntriesToMerge:            mq.MinEntriesToMerge,
+				MinEntriesToMergeWaitMinutes: mq.MinEntriesToMergeWaitMinutes,
+			}
+		}
+	}
+	return res
 }
 
 func mapBranchProtection(bp *github.Protection) *config.BranchProtection {
