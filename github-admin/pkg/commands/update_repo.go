@@ -79,8 +79,8 @@ func RunUpdateRepo(ctx context.Context, opt UpdateRepoOptions) error {
 	// 1. Enable Auto-Merge (prerequisite for Merge Queue)
 	repoReq := &github.Repository{
 		AllowAutoMerge:      github.Bool(true),
-		AllowSquashMerge:    github.Bool(true),
-		AllowMergeCommit:    github.Bool(false),
+		AllowSquashMerge:    github.Bool(false),
+		AllowMergeCommit:    github.Bool(true),
 		AllowRebaseMerge:    github.Bool(false),
 		DeleteBranchOnMerge: github.Bool(false),
 	}
