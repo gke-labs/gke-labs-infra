@@ -301,6 +301,11 @@ on:
 jobs:
 `)
 
+	goModExists := false
+	if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
+		goModExists = true
+	}
+
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -313,16 +318,22 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+`, scriptName))
 
+		if goModExists {
+			sb.WriteString(`
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
+`)
+		}
 
+		sb.WriteString(fmt.Sprintf(`
       - name: Run %s
         run: ./dev/ci/presubmits/%s
 
-`, scriptName, scriptName, scriptName))
+`, scriptName, scriptName))
 	}
 
 	if err := os.MkdirAll(workflowsDir, 0755); err != nil {
