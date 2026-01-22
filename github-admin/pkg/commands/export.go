@@ -81,6 +81,7 @@ func RunExport(ctx context.Context, opt ExportOptions) error {
 	client := github.NewClient(tc)
 
 	var repos []*github.Repository
+	var hasFullDetails bool
 
 	if opt.Repo != "" {
 		repo, _, err := client.Repositories.Get(ctx, opt.Owner, opt.Repo)
@@ -88,6 +89,7 @@ func RunExport(ctx context.Context, opt ExportOptions) error {
 			return fmt.Errorf("failed to get repo %s/%s: %w", opt.Owner, opt.Repo, err)
 		}
 		repos = []*github.Repository{repo}
+		hasFullDetails = true
 	} else {
 		// List all repositories
 		var err error
@@ -95,6 +97,7 @@ func RunExport(ctx context.Context, opt ExportOptions) error {
 		if err != nil {
 			return err
 		}
+		hasFullDetails = false
 	}
 
 	// Check if we are in multi-file mode
@@ -105,7 +108,19 @@ func RunExport(ctx context.Context, opt ExportOptions) error {
 
 	for _, repo := range repos {
 		fmt.Fprintf(os.Stderr, "Processing repo %s...\n", repo.GetName())
-		cfg, err := exportRepo(ctx, client, repo)
+
+		repoToExport := repo
+		if !hasFullDetails {
+			var err error
+			// We need to fetch full details because ListByOrg returns partial data
+			repoToExport, _, err = client.Repositories.Get(ctx, opt.Owner, repo.GetName())
+			if err != nil {
+				errs = append(errs, fmt.Errorf("error getting full details for repo %s: %w", repo.GetName(), err))
+				continue
+			}
+		}
+
+		cfg, err := exportRepo(ctx, client, repoToExport)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("error exporting repo %s: %w", repo.GetName(), err))
 			continue
