@@ -15,6 +15,7 @@
 package golang
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -38,6 +39,19 @@ func Test(ctx context.Context, root string) error {
 
 	for _, goMod := range goMods {
 		dir := filepath.Dir(goMod)
+
+		// Check if there are any packages
+		listCmd := exec.CommandContext(ctx, "go", "list", "./...")
+		listCmd.Dir = dir
+		output, err := listCmd.Output()
+		if err != nil {
+			return fmt.Errorf("go list failed in %s: %w", dir, err)
+		}
+
+		if len(bytes.TrimSpace(output)) == 0 {
+			klog.Infof("No packages found in %s, skipping vet and test", dir)
+			continue
+		}
 
 		klog.Infof("Running go vet in %s", dir)
 		vetCmd := exec.CommandContext(ctx, "go", "vet", "./...")
