@@ -26,6 +26,7 @@ import (
 	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/version"
 	"k8s.io/klog/v2"
 )
@@ -36,6 +37,7 @@ func main() {
 		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [flags] <command>\n", os.Args[0])
 		fmt.Fprintf(flag.CommandLine.Output(), "\nCommands:\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  test    Run tests\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "  e2e     Run e2e tests\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  build   Build artifacts\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  deploy  Deploy artifacts\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  generate Run generation tasks\n")
@@ -64,6 +66,8 @@ func main() {
 	switch command {
 	case "test":
 		cmdErr = runTest(ctx, root)
+	case "e2e":
+		cmdErr = runE2e(ctx, root)
 	case "build":
 		cmdErr = runBuild(ctx, root)
 	case "deploy":
@@ -89,7 +93,31 @@ func main() {
 }
 
 func runTest(ctx context.Context, root string) error {
-	return golang.Test(ctx, root)
+	if err := golang.Test(ctx, root); err != nil {
+		return err
+	}
+
+	// Run test-* scripts (excluding test-e2e*)
+	testTasks, err := tasks.FindTaskScripts(root, tasks.WithPrefix("test-"), tasks.WithExcludePrefix("test-e2e"))
+	if err != nil {
+		return fmt.Errorf("failed to discover test tasks: %w", err)
+	}
+	return tasks.Run(ctx, root, testTasks)
+}
+
+func runE2e(ctx context.Context, root string) error {
+	// Run test-e2e* scripts
+	e2eTasks, err := tasks.FindTaskScripts(root, tasks.WithPrefix("test-e2e"))
+	if err != nil {
+		return fmt.Errorf("failed to discover e2e tasks: %w", err)
+	}
+
+	if len(e2eTasks) == 0 {
+		klog.Warning("No e2e tasks found (looking for dev/tasks/test-e2e*)")
+		return nil
+	}
+
+	return tasks.Run(ctx, root, e2eTasks)
 }
 
 func runBuild(ctx context.Context, root string) error {
