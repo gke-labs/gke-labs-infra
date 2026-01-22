@@ -98,7 +98,7 @@ func runTest(ctx context.Context, root string) error {
 	}
 
 	// Run test-* scripts (excluding test-e2e*)
-	testTasks, err := tasks.Find(root, "test-", "test-e2e")
+	testTasks, err := tasks.FindTaskScripts(root, tasks.WithPrefix("test-"), tasks.WithExcludePrefix("test-e2e"))
 	if err != nil {
 		return fmt.Errorf("failed to discover test tasks: %w", err)
 	}
@@ -107,7 +107,7 @@ func runTest(ctx context.Context, root string) error {
 
 func runE2e(ctx context.Context, root string) error {
 	// Run test-e2e* scripts
-	e2eTasks, err := tasks.Find(root, "test-e2e", "")
+	e2eTasks, err := tasks.FindTaskScripts(root, tasks.WithPrefix("test-e2e"))
 	if err != nil {
 		return fmt.Errorf("failed to discover e2e tasks: %w", err)
 	}

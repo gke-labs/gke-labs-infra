@@ -26,15 +26,60 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// Task represents a discoverable task script.
-type Task struct {
+// Task is the interface that all tasks must implement.
+type Task interface {
+	Run(ctx context.Context, root string) error
+	GetName() string
+}
+
+// TaskScript represents a discoverable task script.
+type TaskScript struct {
 	Name string
 	Path string
 }
 
-// Find looks for executable scripts in dev/tasks that match the prefix.
-// It can optionally exclude scripts matching an excludePrefix.
-func Find(root string, prefix string, excludePrefix string) ([]Task, error) {
+func (t *TaskScript) Run(ctx context.Context, root string) error {
+	klog.Infof("Running task: %s", t.Name)
+	cmd := exec.CommandContext(ctx, t.Path)
+	cmd.Dir = root
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("task %s failed: %w", t.Name, err)
+	}
+	return nil
+}
+
+func (t *TaskScript) GetName() string {
+	return t.Name
+}
+
+type FindOptions struct {
+	Prefix        string
+	ExcludePrefix string
+}
+
+type FindOption func(*FindOptions)
+
+func WithPrefix(prefix string) FindOption {
+	return func(o *FindOptions) {
+		o.Prefix = prefix
+	}
+}
+
+func WithExcludePrefix(prefix string) FindOption {
+	return func(o *FindOptions) {
+		o.ExcludePrefix = prefix
+	}
+}
+
+// FindTaskScripts looks for executable scripts in dev/tasks that match the prefix.
+func FindTaskScripts(root string, opts ...FindOption) ([]Task, error) {
+	options := FindOptions{}
+	for _, o := range opts {
+		o(&options)
+	}
+
 	tasksDir := filepath.Join(root, "dev", "tasks")
 	entries, err := os.ReadDir(tasksDir)
 	if os.IsNotExist(err) {
@@ -50,20 +95,21 @@ func Find(root string, prefix string, excludePrefix string) ([]Task, error) {
 			continue
 		}
 		name := entry.Name()
-		if strings.HasPrefix(name, prefix) {
-			if excludePrefix != "" && strings.HasPrefix(name, excludePrefix) {
-				continue
-			}
-			tasks = append(tasks, Task{
-				Name: name,
-				Path: filepath.Join(tasksDir, name),
-			})
+		if options.Prefix != "" && !strings.HasPrefix(name, options.Prefix) {
+			continue
 		}
+		if options.ExcludePrefix != "" && strings.HasPrefix(name, options.ExcludePrefix) {
+			continue
+		}
+		tasks = append(tasks, &TaskScript{
+			Name: name,
+			Path: filepath.Join(tasksDir, name),
+		})
 	}
 
 	// Sort by name for deterministic order
 	sort.Slice(tasks, func(i, j int) bool {
-		return tasks[i].Name < tasks[j].Name
+		return tasks[i].GetName() < tasks[j].GetName()
 	})
 
 	return tasks, nil
@@ -72,13 +118,8 @@ func Find(root string, prefix string, excludePrefix string) ([]Task, error) {
 // Run executes a list of tasks.
 func Run(ctx context.Context, root string, tasks []Task) error {
 	for _, task := range tasks {
-		klog.Infof("Running task: %s", task.Name)
-		cmd := exec.CommandContext(ctx, task.Path)
-		cmd.Dir = root
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("task %s failed: %w", task.Name, err)
+		if err := task.Run(ctx, root); err != nil {
+			return err
 		}
 	}
 	return nil

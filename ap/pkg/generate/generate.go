@@ -193,7 +193,7 @@ cd "${REPO_ROOT}"
 
 func runApE2eGenerator(ctx context.Context, root string) error {
 	// Check if we have any e2e tasks
-	e2eTasks, err := tasks.Find(root, "test-e2e", "")
+	e2eTasks, err := tasks.FindTaskScripts(root, tasks.WithPrefix("test-e2e"))
 	if err != nil {
 		return fmt.Errorf("failed to discover e2e tasks: %w", err)
 	}
