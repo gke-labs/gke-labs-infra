@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/yaml"
 )
@@ -38,6 +39,10 @@ func Run(ctx context.Context, root string) error {
 	}
 
 	if err := runApTestGenerator(ctx, root); err != nil {
+		return err
+	}
+
+	if err := runApE2eGenerator(ctx, root); err != nil {
 		return err
 	}
 
@@ -178,6 +183,72 @@ cd "${REPO_ROOT}"
 
 # Run tests
 %s test
+`, apCmd)
+	if err := os.WriteFile(targetFile, []byte(content), 0755); err != nil {
+		return fmt.Errorf("failed to write %s: %w", targetFile, err)
+	}
+
+	return nil
+}
+
+func runApE2eGenerator(ctx context.Context, root string) error {
+	// Check if we have any e2e tasks
+	e2eTasks, err := tasks.Find(root, "test-e2e", "")
+	if err != nil {
+		return fmt.Errorf("failed to discover e2e tasks: %w", err)
+	}
+
+	presubmitsDir := filepath.Join(root, "dev", "ci", "presubmits")
+	targetFile := filepath.Join(presubmitsDir, "ap-e2e")
+
+	// If no e2e tasks, we should remove the file if it exists
+	if len(e2eTasks) == 0 {
+		if _, err := os.Stat(targetFile); err == nil {
+			klog.Infof("Removing %s as no e2e tasks found", targetFile)
+			if err := os.Remove(targetFile); err != nil {
+				return fmt.Errorf("failed to remove %s: %w", targetFile, err)
+			}
+		}
+		return nil
+	}
+
+	// Check if dev/ci/presubmits exists
+	if _, err := os.Stat(presubmitsDir); os.IsNotExist(err) {
+		return nil
+	}
+
+	klog.Infof("Generating %s", targetFile)
+
+	apCmd, err := getApCommand(root)
+	if err != nil {
+		return err
+	}
+
+	content := fmt.Sprintf(`#!/bin/bash
+
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+set -o errexit
+set -o nounset
+set -o pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "${REPO_ROOT}"
+
+# Run e2e tests
+%s e2e
 `, apCmd)
 	if err := os.WriteFile(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
