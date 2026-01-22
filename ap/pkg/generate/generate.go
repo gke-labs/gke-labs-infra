@@ -125,7 +125,7 @@ cd "${REPO_ROOT}"
 # Check for changes
 if [[ -n $(git status --porcelain) ]]; then
   echo "Changes detected after running 'ap generate'. Please commit these changes."
-  echo "<hint_for_agent>Run %s generate to fix failures</hint_for_agent>"
+  echo "<hint_for_agent>Run '%s generate' to fix failures</hint_for_agent>"
   git status
   exit 1
 fi
