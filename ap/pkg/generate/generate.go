@@ -125,10 +125,11 @@ cd "${REPO_ROOT}"
 # Check for changes
 if [[ -n $(git status --porcelain) ]]; then
   echo "Changes detected after running 'ap generate'. Please commit these changes."
+  echo "<hint_for_agent>Run %s generate to fix failures</hint_for_agent>"
   git status
   exit 1
 fi
-`, apCmd)
+`, apCmd, apCmd)
 	if err := os.WriteFile(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
