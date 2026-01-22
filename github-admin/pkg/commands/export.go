@@ -80,20 +80,22 @@ func RunExport(ctx context.Context, opt ExportOptions) error {
 	tc := oauth2.NewClient(ctx, ts)
 	client := github.NewClient(tc)
 
-	var repos []*github.Repository
+	type RepoRef struct {
+		Owner string
+		Name  string
+	}
+	var repoRefs []RepoRef
 
 	if opt.Repo != "" {
-		repo, _, err := client.Repositories.Get(ctx, opt.Owner, opt.Repo)
-		if err != nil {
-			return fmt.Errorf("failed to get repo %s/%s: %w", opt.Owner, opt.Repo, err)
-		}
-		repos = []*github.Repository{repo}
+		repoRefs = []RepoRef{{Owner: opt.Owner, Name: opt.Repo}}
 	} else {
 		// List all repositories
-		var err error
-		repos, err = listRepositories(ctx, client, opt.Owner)
+		repos, err := listRepositories(ctx, client, opt.Owner)
 		if err != nil {
 			return err
+		}
+		for _, repo := range repos {
+			repoRefs = append(repoRefs, RepoRef{Owner: repo.GetOwner().GetLogin(), Name: repo.GetName()})
 		}
 	}
 
@@ -103,11 +105,18 @@ func RunExport(ctx context.Context, opt ExportOptions) error {
 	var configs []config.RepositoryConfig
 	var errs []error
 
-	for _, repo := range repos {
-		fmt.Fprintf(os.Stderr, "Processing repo %s...\n", repo.GetName())
+	for _, ref := range repoRefs {
+		fmt.Fprintf(os.Stderr, "Processing repo %s...\n", ref.Name)
+
+		repo, _, err := client.Repositories.Get(ctx, ref.Owner, ref.Name)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("error getting repo %s/%s: %w", ref.Owner, ref.Name, err))
+			continue
+		}
+
 		cfg, err := exportRepo(ctx, client, repo)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("error exporting repo %s: %w", repo.GetName(), err))
+			errs = append(errs, fmt.Errorf("error exporting repo %s: %w", ref.Name, err))
 			continue
 		}
 
