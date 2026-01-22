@@ -21,6 +21,9 @@
 
     Ensure `headers.yaml` has the correct license and copyright holder for your project.
 
+    Ensure `.ap/ap.yaml` is configured with `version: latest`.
+    (Note: The source repo uses `version: "!self"` which is for internal development only).
+
 2.  **Prepare CI directories**:
     Create the directory where `ap` will generate CI presubmit scripts. This signals `ap` to manage CI generation.
 
