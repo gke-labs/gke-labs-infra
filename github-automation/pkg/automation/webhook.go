@@ -1,6 +1,7 @@
 package automation
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/bradleyfalzon/ghinstallation/v2"
@@ -29,20 +30,18 @@ func (h *WebhookHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := r.Context()
-
 	switch event := event.(type) {
 	case *github.PullRequestReviewEvent:
-		h.handlePullRequestReview(ctx, event)
+		go h.handlePullRequestReview(context.Background(), event)
 	case *github.CheckRunEvent:
-		h.handleCheckRun(ctx, event)
+		go h.handleCheckRun(context.Background(), event)
 	case *github.CheckSuiteEvent:
-		h.handleCheckSuite(ctx, event)
+		go h.handleCheckSuite(context.Background(), event)
 	case *github.StatusEvent:
-		h.handleStatus(ctx, event)
+		go h.handleStatus(context.Background(), event)
 	case *github.PullRequestEvent:
 		// Also useful to check when PR is opened or synced (new commits)
-		h.handlePullRequest(ctx, event)
+		go h.handlePullRequest(context.Background(), event)
 	default:
 		// Ignore other events
 	}
