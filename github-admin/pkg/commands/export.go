@@ -264,7 +264,14 @@ func exportRepo(ctx context.Context, client *github.Client, repo *github.Reposit
 			return nil, fmt.Errorf("failed to get rulesets: %w", err)
 		}
 	} else {
-		for _, rs := range rulesets {
+		for _, rsSummary := range rulesets {
+			if rsSummary.ID == nil {
+				continue
+			}
+			rs, _, err := client.Repositories.GetRuleset(ctx, repo.GetOwner().GetLogin(), repo.GetName(), *rsSummary.ID, false)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get ruleset %d: %w", *rsSummary.ID, err)
+			}
 			cfg.Rulesets = append(cfg.Rulesets, mapRuleset(rs))
 		}
 	}
