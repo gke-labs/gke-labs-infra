@@ -2,7 +2,6 @@ package automation
 
 import (
 	"context"
-	"strings"
 
 	"github.com/google/go-github/v81/github"
 	"k8s.io/klog/v2"
@@ -115,16 +114,14 @@ func (h *WebhookHandler) processPR(ctx context.Context, repo *github.Repository,
 
 	protection, _, err := client.Repositories.GetBranchProtection(ctx, owner, repoName, baseRef)
 	if err != nil {
-		// If 404, no protection. 
-		if !strings.Contains(err.Error(), "404") {
+		// If 404, no protection.
+		if respErr, ok := err.(*github.ErrorResponse); ok && respErr.Response.StatusCode == 404 {
+			klog.Infof("No branch protection found for %s. Relying on default mergeability.", baseRef)
+			protection = nil
+		} else {
 			klog.Errorf("Failed to get branch protection for %s: %v", baseRef, err)
-			return 
+			return
 		}
-		// If no protection, maybe we assume it's okay? 
-		// Or strictly require at least 1 approval if that's the "policy" this app enforces?
-		// Let's assume if no protection, we trust `pr.Mergeable`.
-		klog.Infof("No branch protection found for %s. Relying on default mergeability.", baseRef)
-		protection = nil
 	}
 
 	// Verify Approvals
