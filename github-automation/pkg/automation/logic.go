@@ -19,9 +19,23 @@ func (h *WebhookHandler) handleCheckRun(ctx context.Context, event *github.Check
 		return
 	}
 	
-	// CheckRun events can be associated with multiple PRs
-	for _, pr := range event.GetCheckRun().PullRequests {
-		// The PR object in CheckRun is minimal, fetch the full PR
+	prs := event.GetCheckRun().PullRequests
+	if len(prs) == 0 {
+		// Fallback: look up PRs by SHA
+		client, err := h.getClient(event.GetInstallation().GetID())
+		if err != nil {
+			klog.Errorf("Failed to create client: %v", err)
+			return
+		}
+		foundPrs, _, err := client.PullRequests.ListPullRequestsWithCommit(ctx, event.GetRepo().GetOwner().GetLogin(), event.GetRepo().GetName(), event.GetCheckRun().GetHeadSHA(), nil)
+		if err != nil {
+			klog.Errorf("Failed to list PRs for commit %s: %v", event.GetCheckRun().GetHeadSHA(), err)
+			return
+		}
+		prs = foundPrs
+	}
+
+	for _, pr := range prs {
 		h.fetchAndProcessPR(ctx, event.GetRepo(), pr.GetNumber(), event.GetInstallation().GetID())
 	}
 }
@@ -31,7 +45,23 @@ func (h *WebhookHandler) handleCheckSuite(ctx context.Context, event *github.Che
 		return
 	}
 	
-	for _, pr := range event.GetCheckSuite().PullRequests {
+	prs := event.GetCheckSuite().PullRequests
+	if len(prs) == 0 {
+		// Fallback: look up PRs by SHA
+		client, err := h.getClient(event.GetInstallation().GetID())
+		if err != nil {
+			klog.Errorf("Failed to create client: %v", err)
+			return
+		}
+		foundPrs, _, err := client.PullRequests.ListPullRequestsWithCommit(ctx, event.GetRepo().GetOwner().GetLogin(), event.GetRepo().GetName(), event.GetCheckSuite().GetHeadSHA(), nil)
+		if err != nil {
+			klog.Errorf("Failed to list PRs for commit %s: %v", event.GetCheckSuite().GetHeadSHA(), err)
+			return
+		}
+		prs = foundPrs
+	}
+	
+	for _, pr := range prs {
 		h.fetchAndProcessPR(ctx, event.GetRepo(), pr.GetNumber(), event.GetInstallation().GetID())
 	}
 }
