@@ -11,6 +11,7 @@ import (
 type WebhookHandler struct {
 	AppsTransport *ghinstallation.AppsTransport
 	WebhookSecret []byte
+	ClientCreator func(installationID int64) (*github.Client, error)
 }
 
 func (h *WebhookHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
@@ -51,6 +52,9 @@ func (h *WebhookHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *WebhookHandler) getClient(installationID int64) (*github.Client, error) {
+	if h.ClientCreator != nil {
+		return h.ClientCreator(installationID)
+	}
 	// We use the AppsTransport to create a new transport for the specific installation
 	// ghinstallation.NewFromAppsTransport handles the token refresh logic
 	itr := ghinstallation.NewFromAppsTransport(h.AppsTransport, installationID)
