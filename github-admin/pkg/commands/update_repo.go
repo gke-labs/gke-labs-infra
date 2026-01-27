@@ -141,11 +141,11 @@ func ensureMergeQueue(ctx context.Context, client *github.Client, owner, repo st
 
 	// Define the merge queue rule
 	params := map[string]interface{}{
-		"merge_method":                                      "MERGE",
-		"max_entries_to_build":                              5,
-		"block_merge_when_pull_request_has_failing_checks":  true,
-		"block_merge_when_pull_request_has_dismissed_reviews": true,
-		"block_merge_when_pull_request_needs_update":        true,
+		"merge_method":         "MERGE",
+		"max_entries_to_build": 5,
+		"block_merge_when_pull_request_has_failing_checks":          true,
+		"block_merge_when_pull_request_has_dismissed_reviews":       true,
+		"block_merge_when_pull_request_needs_update":                true,
 		"block_merge_when_queued_pull_requests_have_failing_checks": true,
 	}
 	paramsBytes, err := json.Marshal(params)
