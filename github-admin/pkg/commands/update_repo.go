@@ -16,6 +16,7 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -115,5 +116,80 @@ func RunUpdateRepo(ctx context.Context, opt UpdateRepoOptions) error {
 	}
 	fmt.Println("Branch protection updated for 'main'.")
 
+	// 3. Merge Queue (via Ruleset)
+	if err := ensureMergeQueue(ctx, client, opt.Owner, opt.Repo); err != nil {
+		return fmt.Errorf("failed to ensure merge queue: %w", err)
+	}
+	fmt.Println("Merge Queue ruleset ensured.")
+
+	return nil
+}
+
+func ensureMergeQueue(ctx context.Context, client *github.Client, owner, repo string) error {
+	rulesets, _, err := client.Repositories.GetAllRulesets(ctx, owner, repo, false)
+	if err != nil {
+		return fmt.Errorf("failed to list rulesets: %w", err)
+	}
+
+	var existing *github.Ruleset
+	for _, rs := range rulesets {
+		if rs.Name == "Merge Queue" {
+			existing = rs
+			break
+		}
+	}
+
+	// Define the merge queue rule
+	params := map[string]interface{}{
+		"merge_method":         "MERGE",
+		"max_entries_to_build": 5,
+		"block_merge_when_pull_request_has_failing_checks":          true,
+		"block_merge_when_pull_request_has_dismissed_reviews":       true,
+		"block_merge_when_pull_request_needs_update":                true,
+		"block_merge_when_queued_pull_requests_have_failing_checks": true,
+	}
+	paramsBytes, err := json.Marshal(params)
+	if err != nil {
+		return err
+	}
+	rawParams := json.RawMessage(paramsBytes)
+
+	target := github.String("branch")
+
+	rules := []*github.RepositoryRule{
+		{
+			Type:       "merge_queue",
+			Parameters: &rawParams,
+		},
+	}
+
+	conditions := &github.RulesetConditions{
+		RefName: &github.RulesetRefConditionParameters{
+			Include: []string{"refs/heads/main"},
+			Exclude: []string{},
+		},
+	}
+
+	rs := &github.Ruleset{
+		Name:        "Merge Queue",
+		Target:      target,
+		Enforcement: "active",
+		Rules:       rules,
+		Conditions:  conditions,
+	}
+
+	if existing != nil {
+		fmt.Printf("Updating existing Merge Queue ruleset (ID: %d)...\n", *existing.ID)
+		_, _, err = client.Repositories.UpdateRuleset(ctx, owner, repo, *existing.ID, rs)
+		if err != nil {
+			return fmt.Errorf("failed to update ruleset: %w", err)
+		}
+	} else {
+		fmt.Printf("Creating new Merge Queue ruleset...\n")
+		_, _, err = client.Repositories.CreateRuleset(ctx, owner, repo, rs)
+		if err != nil {
+			return fmt.Errorf("failed to create ruleset: %w", err)
+		}
+	}
 	return nil
 }
