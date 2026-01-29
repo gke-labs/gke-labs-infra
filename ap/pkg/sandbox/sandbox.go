@@ -21,6 +21,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/generate"
 	"k8s.io/klog/v2"
 )
 
@@ -65,7 +66,7 @@ func Run(ctx context.Context, root string, args []string) error {
 	}
 
 	// Copy code to pod
-	klog.Infof("Copying code to pod...")
+	klog.Infof("Copying code from %s to pod...", root)
 	// Note: we use "." to refer to the current directory which should be the root passed in.
 	// But it's safer to use the 'root' variable.
 	cpCmd := exec.CommandContext(ctx, "kubectl", "cp", root, podName+":/workspace/src")
@@ -78,20 +79,24 @@ func Run(ctx context.Context, root string, args []string) error {
 
 	// Run the command in the pod
 	klog.Infof("Running command in sandbox: ap %s", strings.Join(args, " "))
-	
+
+	apCmd, err := generate.GetApCommand(root)
+	if err != nil {
+		return fmt.Errorf("failed to get ap command: %w", err)
+	}
+
 	// Prepare the command string for bash -c
-	// We want to run: go run ./ap <args>
-	goCmd := "go run ./ap"
+	goCmd := apCmd
 	if len(args) > 0 {
 		goCmd += " " + strings.Join(args, " ")
 	}
-	
-	execCmd := exec.CommandContext(ctx, "kubectl", "exec", podName, "--", "bash", "-c", 
+
+	execCmd := exec.CommandContext(ctx, "kubectl", "exec", podName, "--", "bash", "-c",
 		fmt.Sprintf("cd /workspace/src && %s", goCmd))
-	
+
 	execCmd.Stdout = os.Stdout
 	execCmd.Stderr = os.Stderr
-	
+
 	if err := execCmd.Run(); err != nil {
 		return fmt.Errorf("failed to execute command in sandbox: %w", err)
 	}

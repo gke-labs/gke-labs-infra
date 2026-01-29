@@ -96,7 +96,7 @@ func runGenerateVerifierGenerator(ctx context.Context, root string) error {
 	targetFile := filepath.Join(presubmitsDir, "ap-verify-generate")
 	klog.Infof("Generating %s", targetFile)
 
-	apCmd, err := getApCommand(root)
+	apCmd, err := GetApCommand(root)
 	if err != nil {
 		return err
 	}
@@ -153,7 +153,7 @@ func runApTestGenerator(ctx context.Context, root string) error {
 	targetFile := filepath.Join(presubmitsDir, "ap-test")
 	klog.Infof("Generating %s", targetFile)
 
-	apCmd, err := getApCommand(root)
+	apCmd, err := GetApCommand(root)
 	if err != nil {
 		return err
 	}
@@ -219,7 +219,7 @@ func runApE2eGenerator(ctx context.Context, root string) error {
 
 	klog.Infof("Generating %s", targetFile)
 
-	apCmd, err := getApCommand(root)
+	apCmd, err := GetApCommand(root)
 	if err != nil {
 		return err
 	}
@@ -347,7 +347,7 @@ jobs:
 	return nil
 }
 
-func getApCommand(root string) (string, error) {
+func GetApCommand(root string) (string, error) {
 	configPath := filepath.Join(root, ".ap", "ap.yaml")
 	defaultCmd := "go run github.com/gke-labs/gke-labs-infra/ap@latest"
 
