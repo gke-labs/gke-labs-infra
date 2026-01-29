@@ -26,6 +26,7 @@ import (
 	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sandbox"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/version"
 	"k8s.io/klog/v2"
@@ -42,6 +43,7 @@ func main() {
 		fmt.Fprintf(flag.CommandLine.Output(), "  deploy  Deploy artifacts\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  generate Run generation tasks\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  format  Run formatting tasks (alias: fmt)\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "  alpha   Experimental commands (e.g. sandbox)\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  version Print version information\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "\nFlags:\n")
 		flag.PrintDefaults()
@@ -79,6 +81,8 @@ func main() {
 		}
 	case "format", "fmt":
 		cmdErr = runFormat(ctx, root)
+	case "alpha":
+		cmdErr = runAlpha(ctx, root, args[1:])
 	case "version":
 		cmdErr = runVersion(ctx, root)
 	default:
@@ -89,6 +93,18 @@ func main() {
 
 	if cmdErr != nil {
 		klog.Exitf("Command %s failed: %v", command, cmdErr)
+	}
+}
+
+func runAlpha(ctx context.Context, root string, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("alpha requires a subcommand (sandbox)")
+	}
+	switch args[0] {
+	case "sandbox":
+		return sandbox.Run(ctx, root, args[1:])
+	default:
+		return fmt.Errorf("unknown alpha subcommand: %s", args[0])
 	}
 }
 
