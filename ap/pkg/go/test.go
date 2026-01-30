@@ -31,13 +31,13 @@ import (
 
 // testEvent represents a single event in a go test -json stream.
 type testEvent struct {
-	Time       time.Time
-	Action     string
-	Package    string
-	ImportPath string
-	Test       string
-	Elapsed    float64
-	Output     string
+	Time       time.Time `json:"Time"`
+	Action     string    `json:"Action"`
+	Package    string    `json:"Package"`
+	ImportPath string    `json:"ImportPath"`
+	Test       string    `json:"Test"`
+	Elapsed    float64   `json:"Elapsed"`
+	Output     string    `json:"Output"`
 }
 
 // Test runs go tests in discovered modules.
@@ -51,7 +51,7 @@ func Test(ctx context.Context, root string) error {
 		return err
 	}
 
-	buildDir := filepath.Join(root, ".build", "test-results")
+	buildDir := filepath.Join(root, ".build", "test-results", "go")
 	if err := os.MkdirAll(buildDir, 0755); err != nil {
 		return fmt.Errorf("failed to create build dir: %w", err)
 	}
@@ -119,23 +119,24 @@ func runGoTest(ctx context.Context, dir string, resultFile string) error {
 			if err == io.EOF {
 				break
 			}
-			// If it's not JSON, we can't do much with it for pretty printing,
-			// but it's already being written to the file via TeeReader.
+			klog.Warningf("failed to decode test event: %v", err)
 			break
 		}
+
+		indent := strings.Repeat("    ", strings.Count(event.Test, "/"))
 
 		switch event.Action {
 		case "pass":
 			if event.Test != "" {
-				fmt.Printf("PASS: %s\n", event.Test)
+				fmt.Printf("%s--- PASS: %s (%.2fs)\n", indent, event.Test, event.Elapsed)
 			}
 		case "fail":
 			if event.Test != "" {
-				fmt.Printf("FAIL: %s\n", event.Test)
+				fmt.Printf("%s--- FAIL: %s (%.2fs)\n", indent, event.Test, event.Elapsed)
 			}
 		case "skip":
 			if event.Test != "" {
-				fmt.Printf("SKIP: %s\n", event.Test)
+				fmt.Printf("%s--- SKIP: %s (%.2fs)\n", indent, event.Test, event.Elapsed)
 			}
 		case "output":
 			if event.Test == "" {
@@ -151,6 +152,10 @@ func runGoTest(ctx context.Context, dir string, resultFile string) error {
 			}
 		case "build-output":
 			fmt.Print(event.Output)
+		case "run", "pause", "cont", "bench", "start", "build-fail":
+			// Ignore these for pretty printing
+		default:
+			klog.Warningf("unknown test action: %s", event.Action)
 		}
 	}
 
