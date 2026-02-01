@@ -22,25 +22,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/cache"
 	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/walker"
 	"k8s.io/klog/v2"
-	"sigs.k8s.io/yaml"
 )
-
-type Config struct {
-	Gofmt *GofmtConfig `json:"gofmt"`
-	Govet *GovetConfig `json:"govet"`
-	Skip  []string     `json:"skip"`
-}
-
-type GofmtConfig struct {
-	Enabled *bool `json:"enabled"`
-}
-
-type GovetConfig struct {
-	Enabled *bool `json:"enabled"`
-}
 
 func Run(ctx context.Context, repoRoot string, files []string) error {
 	log := klog.FromContext(ctx)
@@ -57,29 +43,13 @@ func Run(ctx context.Context, repoRoot string, files []string) error {
 		}()
 	}
 
-	configFile := filepath.Join(repoRoot, ".ap/go.yaml")
-
-	var config Config
-	if _, err := os.Stat(configFile); err == nil {
-		data, err := os.ReadFile(configFile)
-		if err != nil {
-			return fmt.Errorf("error reading %s: %w", configFile, err)
-		}
-
-		if err := yaml.Unmarshal(data, &config); err != nil {
-			return fmt.Errorf("error parsing %s: %w", configFile, err)
-		}
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("error checking %s: %w", configFile, err)
+	cfg, err := config.Load(repoRoot)
+	if err != nil {
+		return err
 	}
 
-	gofmtEnabled := true
-	if config.Gofmt != nil && config.Gofmt.Enabled != nil {
-		gofmtEnabled = *config.Gofmt.Enabled
-	}
-
-	if gofmtEnabled {
-		if err := runGofmt(ctx, repoRoot, files, config.Skip, cm); err != nil {
+	if cfg.IsGofmtEnabled() {
+		if err := runGofmt(ctx, repoRoot, files, cfg.Skip, cm); err != nil {
 			return err
 		}
 	}
