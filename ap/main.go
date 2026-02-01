@@ -29,6 +29,7 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sandbox"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/version"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/versionbump"
 	"k8s.io/klog/v2"
 )
 
@@ -44,6 +45,7 @@ func main() {
 		fmt.Fprintf(flag.CommandLine.Output(), "  deploy  Deploy artifacts\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  generate Run generation tasks\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  format  Run formatting tasks (alias: fmt)\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "  versionbump Bump project versions (e.g. Go)\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  alpha   Experimental commands (e.g. sandbox)\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  version Print version information\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "\nFlags:\n")
@@ -84,6 +86,8 @@ func main() {
 		}
 	case "format", "fmt":
 		cmdErr = runFormat(ctx, root)
+	case "versionbump":
+		cmdErr = runVersionbump(ctx, root)
 	case "alpha":
 		cmdErr = runAlpha(ctx, root, args[1:])
 	case "version":
@@ -161,6 +165,10 @@ func runGenerate(ctx context.Context, root string) error {
 
 func runFormat(ctx context.Context, root string) error {
 	return format.Run(ctx, root)
+}
+
+func runVersionbump(ctx context.Context, root string) error {
+	return versionbump.Run(ctx, root)
 }
 
 func runVersion(ctx context.Context, root string) error {
