@@ -50,6 +50,7 @@ ap <command>
 
 Commands:
 - `test`: Run tests
+- `lint`: Run linting tasks (vet, govulncheck)
 - `build`: Build artifacts
 - `deploy`: Deploy artifacts
 - `generate`: Run generation tasks
