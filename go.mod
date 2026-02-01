@@ -1,6 +1,6 @@
 module github.com/gke-labs/gke-labs-infra
 
-go 1.24.0
+go 1.24.12
 
 require (
 	github.com/google/go-github/v81 v81.0.0

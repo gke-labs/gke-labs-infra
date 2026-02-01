@@ -39,6 +39,7 @@ func main() {
 		fmt.Fprintf(flag.CommandLine.Output(), "\nCommands:\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  test    Run tests\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  e2e     Run e2e tests\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "  lint    Run linting tasks (vet, govulncheck)\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  build   Build artifacts\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  deploy  Deploy artifacts\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  generate Run generation tasks\n")
@@ -70,6 +71,8 @@ func main() {
 		cmdErr = runTest(ctx, root)
 	case "e2e":
 		cmdErr = runE2e(ctx, root)
+	case "lint":
+		cmdErr = runLint(ctx, root)
 	case "build":
 		cmdErr = runBuild(ctx, root)
 	case "deploy":
@@ -134,6 +137,10 @@ func runE2e(ctx context.Context, root string) error {
 	}
 
 	return tasks.Run(ctx, root, e2eTasks)
+}
+
+func runLint(ctx context.Context, root string) error {
+	return golang.Lint(ctx, root)
 }
 
 func runBuild(ctx context.Context, root string) error {

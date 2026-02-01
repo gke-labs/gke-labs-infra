@@ -72,15 +72,6 @@ func Test(ctx context.Context, root string) error {
 			return err
 		}
 
-		klog.Infof("Running go vet in %s", dir)
-		vetCmd := exec.CommandContext(ctx, "go", "vet", "./...")
-		vetCmd.Dir = dir
-		vetCmd.Stdout = os.Stdout
-		vetCmd.Stderr = os.Stderr
-		if err := vetCmd.Run(); err != nil {
-			return fmt.Errorf("go vet failed in %s: %w", dir, err)
-		}
-
 		klog.Infof("Running go test in %s", dir)
 		if err := runGoTest(ctx, dir, resultFile); err != nil {
 			return fmt.Errorf("go test failed in %s: %w", dir, err)
