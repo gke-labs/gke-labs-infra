@@ -21,12 +21,18 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/walker"
 	"k8s.io/klog/v2"
 )
 
 // Lint runs go vet and govulncheck in discovered modules.
 func Lint(ctx context.Context, root string) error {
+	cfg, err := config.Load(root)
+	if err != nil {
+		return err
+	}
+
 	// Find all go.mod files
 	ignoreList := walker.NewIgnoreList([]string{".git", "vendor", "node_modules"})
 	goMods, err := walker.Walk(root, ignoreList, func(path string, info os.FileInfo) bool {
@@ -39,22 +45,26 @@ func Lint(ctx context.Context, root string) error {
 	for _, goMod := range goMods {
 		dir := filepath.Dir(goMod)
 
-		klog.Infof("Running go vet in %s", dir)
-		vetCmd := exec.CommandContext(ctx, "go", "vet", "./...")
-		vetCmd.Dir = dir
-		vetCmd.Stdout = os.Stdout
-		vetCmd.Stderr = os.Stderr
-		if err := vetCmd.Run(); err != nil {
-			return fmt.Errorf("go vet failed in %s: %w", dir, err)
+		if cfg.IsGovetEnabled() {
+			klog.Infof("Running go vet in %s", dir)
+			vetCmd := exec.CommandContext(ctx, "go", "vet", "./...")
+			vetCmd.Dir = dir
+			vetCmd.Stdout = os.Stdout
+			vetCmd.Stderr = os.Stderr
+			if err := vetCmd.Run(); err != nil {
+				return fmt.Errorf("go vet failed in %s: %w", dir, err)
+			}
 		}
 
-		klog.Infof("Running govulncheck in %s", dir)
-		vulnCmd := exec.CommandContext(ctx, "go", "run", "golang.org/x/vuln/cmd/govulncheck@latest", "./...")
-		vulnCmd.Dir = dir
-		vulnCmd.Stdout = os.Stdout
-		vulnCmd.Stderr = os.Stderr
-		if err := vulnCmd.Run(); err != nil {
-			return fmt.Errorf("govulncheck failed in %s: %w", dir, err)
+		if cfg.IsGovulncheckEnabled() {
+			klog.Infof("Running govulncheck in %s", dir)
+			vulnCmd := exec.CommandContext(ctx, "go", "run", "golang.org/x/vuln/cmd/govulncheck@latest", "./...")
+			vulnCmd.Dir = dir
+			vulnCmd.Stdout = os.Stdout
+			vulnCmd.Stderr = os.Stderr
+			if err := vulnCmd.Run(); err != nil {
+				return fmt.Errorf("govulncheck failed in %s: %w", dir, err)
+			}
 		}
 	}
 	return nil
