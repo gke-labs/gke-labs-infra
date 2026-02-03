@@ -32,7 +32,7 @@ import (
 // Run runs the ap command in a sandbox pod.
 func Run(ctx context.Context, root string, args []string) error {
 	podName := "ap-sandbox"
-	image := "golang:1.25-trixie"
+	image := "local/ap-golang:latest"
 
 	klog.Infof("Ensuring sandbox pod %s is running...", podName)
 
@@ -44,7 +44,7 @@ func Run(ctx context.Context, root string, args []string) error {
 		runCmd := exec.CommandContext(ctx, "kubectl", "run", podName,
 			"--image="+image,
 			"--restart=Never",
-			"--", "sleep", "infinity")
+			"--", "serve")
 		if err := runCmd.Run(); err != nil {
 			return fmt.Errorf("failed to create sandbox pod: %w", err)
 		}
@@ -55,35 +55,6 @@ func Run(ctx context.Context, root string, args []string) error {
 		if err := waitCmd.Run(); err != nil {
 			return fmt.Errorf("pod did not become ready: %w", err)
 		}
-	}
-
-	// Bootstrap: Build and upload 'ap' binary so we can start the gRPC server.
-	// We use kubectl exec with stdin to avoid 'kubectl cp'.
-	klog.Infof("Bootstrapping ap in pod...")
-	apBinary := filepath.Join(os.TempDir(), "ap-sandbox-bin")
-	buildCmd := exec.CommandContext(ctx, "go", "build", "-o", apBinary, "./ap")
-	buildCmd.Dir = root
-	if err := buildCmd.Run(); err != nil {
-		return fmt.Errorf("failed to build ap for bootstrapping: %w", err)
-	}
-	defer os.Remove(apBinary)
-
-	bootstrapCmd := exec.CommandContext(ctx, "kubectl", "cp", apBinary, podName+":/usr/local/bin/ap")
-	if err := bootstrapCmd.Run(); err != nil {
-		return fmt.Errorf("failed to upload ap binary to pod: %w", err)
-	}
-
-	chmodCmd := exec.CommandContext(ctx, "kubectl", "exec", podName, "--", "chmod", "+x", "/usr/local/bin/ap")
-	if err := chmodCmd.Run(); err != nil {
-		return fmt.Errorf("failed to chmod ap binary in pod: %w", err)
-	}
-
-	// Start the server in the pod
-	klog.Infof("Starting ap serve in pod...")
-	// Run in background using a shell that disowns the process
-	startServerCmd := exec.CommandContext(ctx, "kubectl", "exec", podName, "--", "bash", "-c", "mkdir -p /workspace/src && nohup ap serve --root /workspace/src > /tmp/ap-serve.log 2>&1 &")
-	if err := startServerCmd.Run(); err != nil {
-		return fmt.Errorf("failed to start ap serve in pod: %w", err)
 	}
 
 	// Port forward

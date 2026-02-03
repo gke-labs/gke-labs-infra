@@ -17,6 +17,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sandbox"
 	"github.com/spf13/cobra"
@@ -44,7 +45,11 @@ func BuildServeCommand(rootOpt *RootOptions) *cobra.Command {
 				opt.ServeRoot = opt.RepoRoot
 			}
 			if opt.ServeRoot == "" {
-				return fmt.Errorf("--root is required if not run inside a git repository")
+				cwd, err := os.Getwd()
+				if err != nil {
+					return fmt.Errorf("failed to get current working directory: %w", err)
+				}
+				opt.ServeRoot = cwd
 			}
 			return RunServe(cmd.Context(), opt)
 		},

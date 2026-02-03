@@ -65,11 +65,10 @@ func Build(ctx context.Context, root string) error {
 		}
 
 		tag := fmt.Sprintf("%s/%s:latest", imagePrefix, name)
-		dir := filepath.Dir(dockerfile)
 
-		klog.Infof("Building image %s from %s", tag, dir)
-		cmd := exec.CommandContext(ctx, "docker", "buildx", "build", "-t", tag, ".")
-		cmd.Dir = dir
+		klog.Infof("Building image %s from %s", tag, root)
+		cmd := exec.CommandContext(ctx, "docker", "buildx", "build", "-t", tag, "-f", relPath, ".")
+		cmd.Dir = root
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
