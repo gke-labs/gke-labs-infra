@@ -81,7 +81,7 @@ func Run(ctx context.Context, root string, args []string) error {
 	// Start the server in the pod
 	klog.Infof("Starting ap serve in pod...")
 	// Run in background using a shell that disowns the process
-	startServerCmd := exec.CommandContext(ctx, "kubectl", "exec", podName, "--", "bash", "-c", "mkdir -p /workspace/src && nohup ap serve -root /workspace/src > /tmp/ap-serve.log 2>&1 &")
+	startServerCmd := exec.CommandContext(ctx, "kubectl", "exec", podName, "--", "bash", "-c", "mkdir -p /workspace/src && nohup ap serve --root /workspace/src > /tmp/ap-serve.log 2>&1 &")
 	if err := startServerCmd.Run(); err != nil {
 		return fmt.Errorf("failed to start ap serve in pod: %w", err)
 	}
