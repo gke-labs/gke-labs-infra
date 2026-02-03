@@ -19,9 +19,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"time"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/generate"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sandbox/api"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"k8s.io/klog/v2"
 )
 
@@ -41,64 +45,141 @@ func Run(ctx context.Context, root string, args []string) error {
 			"--image="+image,
 			"--restart=Never",
 			"--", "sleep", "infinity")
-		runCmd.Stdout = os.Stdout
-		runCmd.Stderr = os.Stderr
 		if err := runCmd.Run(); err != nil {
 			return fmt.Errorf("failed to create sandbox pod: %w", err)
 		}
 
-		// Wait for pod to be ready (only if we just created it)
+		// Wait for pod to be ready
 		klog.Infof("Waiting for pod %s to be ready...", podName)
 		waitCmd := exec.CommandContext(ctx, "kubectl", "wait", "--for=condition=Ready", "pod/"+podName, "--timeout=60s")
-		waitCmd.Stdout = os.Stdout
-		waitCmd.Stderr = os.Stderr
 		if err := waitCmd.Run(); err != nil {
 			return fmt.Errorf("pod did not become ready: %w", err)
 		}
 	}
 
-	// Ensure parent directory exists in the pod, but NOT the src directory itself
-	// so that kubectl cp . pod:/workspace/src creates src from .
-	klog.Infof("Preparing directory in pod...")
-	mkdirCmd := exec.CommandContext(ctx, "kubectl", "exec", podName, "--", "mkdir", "-p", "/workspace")
-	if err := mkdirCmd.Run(); err != nil {
-		return fmt.Errorf("failed to create directory in pod: %w", err)
+	// Bootstrap: Build and upload 'ap' binary so we can start the gRPC server.
+	// We use kubectl exec with stdin to avoid 'kubectl cp'.
+	klog.Infof("Bootstrapping ap in pod...")
+	apBinary := filepath.Join(os.TempDir(), "ap-sandbox-bin")
+	buildCmd := exec.CommandContext(ctx, "go", "build", "-o", apBinary, "./ap")
+	buildCmd.Dir = root
+	if err := buildCmd.Run(); err != nil {
+		return fmt.Errorf("failed to build ap for bootstrapping: %w", err)
 	}
+	defer os.Remove(apBinary)
 
-	// Copy code to pod
-	klog.Infof("Copying code from %s to pod...", root)
-	// Note: we use "." to refer to the current directory which should be the root passed in.
-	// But it's safer to use the 'root' variable.
-	cpCmd := exec.CommandContext(ctx, "kubectl", "cp", root, podName+":/workspace/src")
-	cpCmd.Stdout = os.Stdout
-	cpCmd.Stderr = os.Stderr
-	if err := cpCmd.Run(); err != nil {
-		// kubectl cp often returns non-zero even if it mostly worked (e.g. due to special files)
-		klog.Warningf("kubectl cp had some issues, continuing anyway: %v", err)
-	}
-
-	// Run the command in the pod
-	klog.Infof("Running command in sandbox: ap %s", strings.Join(args, " "))
-
-	apCmd, err := generate.GetApCommand(root)
+	f, err := os.Open(apBinary)
 	if err != nil {
-		return fmt.Errorf("failed to get ap command: %w", err)
+		return err
+	}
+	defer f.Close()
+
+	bootstrapCmd := exec.CommandContext(ctx, "kubectl", "exec", "-i", podName, "--", "bash", "-c", "cat > /usr/local/bin/ap && chmod +x /usr/local/bin/ap")
+	bootstrapCmd.Stdin = f
+	if err := bootstrapCmd.Run(); err != nil {
+		return fmt.Errorf("failed to upload ap binary to pod: %w", err)
 	}
 
-	// Prepare the command string for bash -c
-	goCmd := apCmd
-	if len(args) > 0 {
-		goCmd += " " + strings.Join(args, " ")
+	// Start the server in the pod
+	klog.Infof("Starting ap serve in pod...")
+	// Run in background using a shell that disowns the process
+	startServerCmd := exec.CommandContext(ctx, "kubectl", "exec", podName, "--", "bash", "-c", "mkdir -p /workspace/src && nohup ap serve -root /workspace/src > /tmp/ap-serve.log 2>&1 &")
+	if err := startServerCmd.Run(); err != nil {
+		return fmt.Errorf("failed to start ap serve in pod: %w", err)
 	}
 
-	execCmd := exec.CommandContext(ctx, "kubectl", "exec", podName, "--", "bash", "-c",
-		fmt.Sprintf("cd /workspace/src && %s", goCmd))
+	// Port forward
+	klog.Infof("Setting up port-forward...")
+	localPort := 50051
+	pfCmd := exec.CommandContext(ctx, "kubectl", "port-forward", "pod/"+podName, fmt.Sprintf("%d:%d", localPort, localPort))
+	// Redirect pf output to avoid noise
+	pfCmd.Stdout = nil
+	pfCmd.Stderr = nil
+	if err := pfCmd.Start(); err != nil {
+		return fmt.Errorf("failed to start port-forward: %w", err)
+	}
+	defer func() {
+		if pfCmd.Process != nil {
+			pfCmd.Process.Kill()
+		}
+	}()
 
-	execCmd.Stdout = os.Stdout
-	execCmd.Stderr = os.Stderr
+	// Wait for port-forward to be ready by trying to connect
+	var conn *grpc.ClientConn
+	for i := 0; i < 10; i++ {
+		conn, err = grpc.Dial(fmt.Sprintf("localhost:%d", localPort), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock(), grpc.WithTimeout(1*time.Second))
+		if err == nil {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to connect to sandbox gRPC after retries: %w", err)
+	}
+	defer conn.Close()
+	client := api.NewSandboxServiceClient(conn)
 
-	if err := execCmd.Run(); err != nil {
-		return fmt.Errorf("failed to execute command in sandbox: %w", err)
+	// Copy code using gRPC
+	klog.Infof("Copying code to sandbox using gRPC...")
+	err = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if info.Name() == ".git" || info.Name() == ".build" || info.Name() == "node_modules" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		
+		relPath, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		
+		_, err = client.WriteFile(ctx, &api.WriteFileRequest{
+			Path:    relPath,
+			Content: content,
+		})
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("failed to sync code to sandbox: %w", err)
+	}
+
+	// Run the task
+	klog.Infof("Executing task: ap %s", strings.Join(args, " "))
+	resp, err := client.RunTask(ctx, &api.RunTaskRequest{
+		Args: args,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to execute task: %w", err)
+	}
+
+	fmt.Print(resp.Stdout)
+	fmt.Fprint(os.Stderr, resp.Stderr)
+
+	// Copy back changed files/results
+	if len(resp.ChangedFiles) > 0 {
+		klog.Infof("Copying back %d changed files...", len(resp.ChangedFiles))
+		for _, file := range resp.ChangedFiles {
+			fullPath := filepath.Join(root, file.Path)
+			if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+				return fmt.Errorf("failed to create local directory for %s: %w", file.Path, err)
+			}
+			if err := os.WriteFile(fullPath, file.Content, 0644); err != nil {
+				return fmt.Errorf("failed to write local file %s: %w", file.Path, err)
+			}
+		}
+	}
+
+	if resp.ExitCode != 0 {
+		return fmt.Errorf("sandbox command failed with exit code %d", resp.ExitCode)
 	}
 
 	return nil
