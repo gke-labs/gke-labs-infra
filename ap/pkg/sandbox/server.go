@@ -64,7 +64,7 @@ func (s *server) RunTask(ctx context.Context, req *api.RunTaskRequest) (*api.Run
 	cmd := exec.CommandContext(ctx, "ap", req.Args...)
 	cmd.Dir = s.root
 	cmd.Env = append(os.Environ(), "AP_ROOT="+s.root)
-	
+
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -135,16 +135,16 @@ func Serve(ctx context.Context, root string, port int) error {
 	if err != nil {
 		return fmt.Errorf("failed to listen: %w", err)
 	}
-	
+
 	s := grpc.NewServer()
 	api.RegisterSandboxServiceServer(s, &server{root: root})
-	
+
 	klog.Infof("Sandbox server listening on %v", lis.Addr())
-	
+
 	go func() {
 		<-ctx.Done()
 		s.GracefulStop()
 	}()
-	
+
 	return s.Serve(lis)
 }

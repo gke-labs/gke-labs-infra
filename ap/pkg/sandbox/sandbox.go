@@ -68,16 +68,14 @@ func Run(ctx context.Context, root string, args []string) error {
 	}
 	defer os.Remove(apBinary)
 
-	f, err := os.Open(apBinary)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	bootstrapCmd := exec.CommandContext(ctx, "kubectl", "exec", "-i", podName, "--", "bash", "-c", "cat > /usr/local/bin/ap && chmod +x /usr/local/bin/ap")
-	bootstrapCmd.Stdin = f
+	bootstrapCmd := exec.CommandContext(ctx, "kubectl", "cp", apBinary, podName+":/usr/local/bin/ap")
 	if err := bootstrapCmd.Run(); err != nil {
 		return fmt.Errorf("failed to upload ap binary to pod: %w", err)
+	}
+
+	chmodCmd := exec.CommandContext(ctx, "kubectl", "exec", podName, "--", "chmod", "+x", "/usr/local/bin/ap")
+	if err := chmodCmd.Run(); err != nil {
+		return fmt.Errorf("failed to chmod ap binary in pod: %w", err)
 	}
 
 	// Start the server in the pod
@@ -106,6 +104,7 @@ func Run(ctx context.Context, root string, args []string) error {
 
 	// Wait for port-forward to be ready by trying to connect
 	var conn *grpc.ClientConn
+	var err error
 	for i := 0; i < 10; i++ {
 		conn, err = grpc.Dial(fmt.Sprintf("localhost:%d", localPort), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock(), grpc.WithTimeout(1*time.Second))
 		if err == nil {
@@ -131,17 +130,17 @@ func Run(ctx context.Context, root string, args []string) error {
 			}
 			return nil
 		}
-		
+
 		relPath, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
 		}
-		
+
 		content, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
-		
+
 		_, err = client.WriteFile(ctx, &api.WriteFileRequest{
 			Path:    relPath,
 			Content: content,
