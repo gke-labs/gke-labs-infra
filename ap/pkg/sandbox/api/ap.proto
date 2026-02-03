@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package ap.sandbox.v1;
+
+option go_package = "github.com/gke-labs/gke-labs-infra/ap/pkg/sandbox/api";
+
+service SandboxService {
+    // WriteFile writes a file to the sandbox.
+    rpc WriteFile(WriteFileRequest) returns (WriteFileResponse);
+    
+    // ReadFile reads a file from the sandbox.
+    rpc ReadFile(ReadFileRequest) returns (ReadFileResponse);
+    
+    // RunTask runs an ap command in the sandbox.
+    rpc RunTask(RunTaskRequest) returns (RunTaskResponse);
+}
+
+message WriteFileRequest {
+    string path = 1;
+    bytes content = 2;
+}
+
+message WriteFileResponse {}
+
+message ReadFileRequest {
+    string path = 1;
+}
+
+message ReadFileResponse {
+    bytes content = 1;
+}
+
+message RunTaskRequest {
+    repeated string args = 1;
+}
+
+message RunTaskResponse {
+    int32 exit_code = 1;
+    string stdout = 2;
+    string stderr = 3;
+    repeated ChangedFile changed_files = 4;
+}
+
+message ChangedFile {
+    string path = 1;
+    bytes content = 2;
+}

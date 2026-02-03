@@ -90,6 +90,8 @@ func main() {
 		cmdErr = runVersionbump(ctx, root)
 	case "alpha":
 		cmdErr = runAlpha(ctx, root, args[1:])
+	case "serve":
+		cmdErr = runServe(ctx, root)
 	case "version":
 		cmdErr = runVersion(ctx, root)
 	default:
@@ -171,12 +173,23 @@ func runVersionbump(ctx context.Context, root string) error {
 	return versionbump.Run(ctx, root)
 }
 
+func runServe(ctx context.Context, root string) error {
+	serveFlags := flag.NewFlagSet("serve", flag.ExitOnError)
+	serveRoot := serveFlags.String("root", root, "Root directory for the sandbox server")
+	serveFlags.Parse(os.Args[2:])
+	return sandbox.Serve(ctx, *serveRoot, 50051)
+}
+
 func runVersion(ctx context.Context, root string) error {
 	return version.Run(ctx, root)
 }
 
 // findRepoRoot attempts to find the root of the git repository
 func findRepoRoot() (string, error) {
+	if root := os.Getenv("AP_ROOT"); root != "" {
+		return root, nil
+	}
+
 	startDir, err := os.Getwd()
 	if err != nil {
 		return "", err
