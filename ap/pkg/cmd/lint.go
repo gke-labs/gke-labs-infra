@@ -18,6 +18,7 @@ import (
 	"context"
 
 	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/prlinter"
 	"github.com/spf13/cobra"
 )
 
@@ -34,7 +35,7 @@ func BuildLintCommand(rootOpt *RootOptions) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "lint",
-		Short: "Run linting tasks (vet, govulncheck)",
+		Short: "Run linting tasks (vet, govulncheck, prlinter)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return RunLint(cmd.Context(), opt)
@@ -47,6 +48,9 @@ func BuildLintCommand(rootOpt *RootOptions) *cobra.Command {
 // RunLint executes the business logic for the "lint" command.
 func RunLint(ctx context.Context, opt LintOptions) error {
 	if err := requireRepoRoot(opt.RootOptions); err != nil {
+		return err
+	}
+	if err := prlinter.Lint(ctx, opt.RepoRoot); err != nil {
 		return err
 	}
 	return golang.Lint(ctx, opt.RepoRoot)
