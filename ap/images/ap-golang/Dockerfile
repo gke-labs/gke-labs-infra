@@ -12,13 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM golang:1.25.6-trixie AS builder
+FROM golang:1.25.7-trixie AS builder
 
 WORKDIR /workspace
 COPY . .
 RUN go build -o /usr/local/bin/ap ./ap
 
-FROM golang:1.25.6-trixie
+FROM golang:1.25.7-trixie
 COPY --from=builder /usr/local/bin/ap /usr/local/bin/ap
 WORKDIR /workspace
 ENTRYPOINT ["ap"]

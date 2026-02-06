@@ -35,7 +35,7 @@ func Lint(ctx context.Context, root string) error {
 
 	// Find all go.mod files
 	ignoreList := walker.NewIgnoreList([]string{".git", "vendor", "node_modules"})
-	goMods, err := walker.Walk(root, ignoreList, func(path string, info os.FileInfo) bool {
+	goMods, err := walker.Walk(root, ignoreList, func(_ string, info os.FileInfo) bool {
 		return info.Name() == "go.mod"
 	})
 	if err != nil {
@@ -77,8 +77,6 @@ func Lint(ctx context.Context, root string) error {
 			unusedCmd.Stdout = os.Stdout
 			unusedCmd.Stderr = os.Stderr
 			if err := unusedCmd.Run(); err != nil {
-				// We don't return error here because we want to see all lint errors.
-				// Wait, the other checks return error. Let's stay consistent.
 				return fmt.Errorf("unused check failed in %s: %w", dir, err)
 			}
 		}
