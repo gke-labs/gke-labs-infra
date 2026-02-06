@@ -26,6 +26,7 @@ type Config struct {
 	Gofmt       *GofmtConfig       `json:"gofmt"`
 	Govet       *GovetConfig       `json:"govet"`
 	Govulncheck *GovulncheckConfig `json:"govulncheck"`
+	Unused      *UnusedConfig      `json:"unused"`
 	Skip        []string           `json:"skip"`
 }
 
@@ -38,6 +39,10 @@ type GovetConfig struct {
 }
 
 type GovulncheckConfig struct {
+	Enabled *bool `json:"enabled"`
+}
+
+type UnusedConfig struct {
 	Enabled *bool `json:"enabled"`
 }
 
@@ -82,6 +87,14 @@ func (c *Config) IsGovetEnabled() bool {
 func (c *Config) IsGovulncheckEnabled() bool {
 	if c.Govulncheck != nil && c.Govulncheck.Enabled != nil {
 		return *c.Govulncheck.Enabled
+	}
+	return true
+}
+
+// IsUnusedEnabled returns true if unused detection is enabled in the config (defaulting to true).
+func (c *Config) IsUnusedEnabled() bool {
+	if c.Unused != nil && c.Unused.Enabled != nil {
+		return *c.Unused.Enabled
 	}
 	return true
 }

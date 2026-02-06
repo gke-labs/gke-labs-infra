@@ -66,6 +66,22 @@ func Lint(ctx context.Context, root string) error {
 				return fmt.Errorf("govulncheck failed in %s: %w", dir, err)
 			}
 		}
+
+		if cfg.IsUnusedEnabled() {
+			klog.Infof("Running unused check in %s", dir)
+			// Find the path to the ap-unused tool.
+			// Since we're in the same repo, we can find it relative to the root.
+			toolPath := filepath.Join(root, "codestyle/cmd/ap-unused")
+			unusedCmd := exec.CommandContext(ctx, "go", "run", toolPath, "./...")
+			unusedCmd.Dir = dir
+			unusedCmd.Stdout = os.Stdout
+			unusedCmd.Stderr = os.Stderr
+			if err := unusedCmd.Run(); err != nil {
+				// We don't return error here because we want to see all lint errors.
+				// Wait, the other checks return error. Let's stay consistent.
+				return fmt.Errorf("unused check failed in %s: %w", dir, err)
+			}
+		}
 	}
 	return nil
 }
