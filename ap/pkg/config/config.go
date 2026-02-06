@@ -28,6 +28,7 @@ type Config struct {
 	Govulncheck *GovulncheckConfig `json:"govulncheck"`
 	Unused      *UnusedConfig      `json:"unused"`
 	Skip        []string           `json:"skip"`
+	Lint        *LintConfig        `json:"lint"`
 }
 
 type GofmtConfig struct {
@@ -44,6 +45,14 @@ type GovulncheckConfig struct {
 
 type UnusedConfig struct {
 	Enabled *bool `json:"enabled"`
+}
+
+type LintConfig struct {
+	UnusedParameters *UnusedParametersConfig `json:"unusedparameters"`
+}
+
+type UnusedParametersConfig struct {
+	Mode string `json:"mode"`
 }
 
 // Load loads the configuration from .ap/go.yaml in the repository root.
@@ -97,4 +106,13 @@ func (c *Config) IsUnusedEnabled() bool {
 		return *c.Unused.Enabled
 	}
 	return true
+}
+
+// IsUnusedParametersEnabled returns true if unused parameter detection is enabled.
+// Default is false.
+func (c *Config) IsUnusedParametersEnabled() bool {
+	if c.Lint != nil && c.Lint.UnusedParameters != nil {
+		return c.Lint.UnusedParameters.Mode != "skip"
+	}
+	return false
 }

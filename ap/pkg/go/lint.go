@@ -82,7 +82,14 @@ func Lint(ctx context.Context, root string) error {
 			if err != nil {
 				return fmt.Errorf("could not find ap executable: %w", err)
 			}
-			unusedCmd := exec.CommandContext(ctx, apPath, "unused", "./...")
+			args := []string{"unused"}
+			if cfg.IsUnusedParametersEnabled() {
+				args = append(args, "-unused.check-parameters=true")
+			} else {
+				args = append(args, "-unused.check-parameters=false")
+			}
+			args = append(args, "./...")
+			unusedCmd := exec.CommandContext(ctx, apPath, args...)
 			unusedCmd.Dir = dir
 			unusedCmd.Stdout = os.Stdout
 			unusedCmd.Stderr = os.Stderr
