@@ -30,7 +30,7 @@ import (
 // Deploy deploys k8s manifests found in k8s/manifest.yaml.
 func Deploy(ctx context.Context, root string) error {
 	ignoreList := walker.NewIgnoreList([]string{".git", "vendor", "node_modules"})
-	manifests, err := walker.Walk(root, ignoreList, func(path string, info os.FileInfo) bool {
+	manifests, err := walker.Walk(root, ignoreList, func(_ string, info os.FileInfo) bool {
 		return info.Name() == "manifest.yaml"
 	})
 	if err != nil {

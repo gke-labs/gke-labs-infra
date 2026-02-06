@@ -35,7 +35,7 @@ type server struct {
 	root string
 }
 
-func (s *server) WriteFile(ctx context.Context, req *api.WriteFileRequest) (*api.WriteFileResponse, error) {
+func (s *server) WriteFile(_ context.Context, req *api.WriteFileRequest) (*api.WriteFileResponse, error) {
 	fullPath := filepath.Join(s.root, req.Path)
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
 		return nil, fmt.Errorf("failed to create directory: %w", err)
@@ -46,7 +46,7 @@ func (s *server) WriteFile(ctx context.Context, req *api.WriteFileRequest) (*api
 	return &api.WriteFileResponse{}, nil
 }
 
-func (s *server) ReadFile(ctx context.Context, req *api.ReadFileRequest) (*api.ReadFileResponse, error) {
+func (s *server) ReadFile(_ context.Context, req *api.ReadFileRequest) (*api.ReadFileResponse, error) {
 	fullPath := filepath.Join(s.root, req.Path)
 	content, err := os.ReadFile(fullPath)
 	if err != nil {

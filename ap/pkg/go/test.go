@@ -44,7 +44,7 @@ type testEvent struct {
 func Test(ctx context.Context, root string) error {
 	// Find all go.mod files
 	ignoreList := walker.NewIgnoreList([]string{".git", "vendor", "node_modules"})
-	goMods, err := walker.Walk(root, ignoreList, func(path string, info os.FileInfo) bool {
+	goMods, err := walker.Walk(root, ignoreList, func(_ string, info os.FileInfo) bool {
 		return info.Name() == "go.mod"
 	})
 	if err != nil {

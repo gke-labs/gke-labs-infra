@@ -35,7 +35,7 @@ func Lint(ctx context.Context, root string) error {
 
 	// Find all go.mod files
 	ignoreList := walker.NewIgnoreList([]string{".git", "vendor", "node_modules"})
-	goMods, err := walker.Walk(root, ignoreList, func(path string, info os.FileInfo) bool {
+	goMods, err := walker.Walk(root, ignoreList, func(_ string, info os.FileInfo) bool {
 		return info.Name() == "go.mod"
 	})
 	if err != nil {
@@ -64,6 +64,20 @@ func Lint(ctx context.Context, root string) error {
 			vulnCmd.Stderr = os.Stderr
 			if err := vulnCmd.Run(); err != nil {
 				return fmt.Errorf("govulncheck failed in %s: %w", dir, err)
+			}
+		}
+
+		if cfg.IsUnusedEnabled() {
+			klog.Infof("Running unused check in %s", dir)
+			// Find the path to the ap-unused tool.
+			// Since we're in the same repo, we can find it relative to the root.
+			toolPath := filepath.Join(root, "codestyle/cmd/ap-unused")
+			unusedCmd := exec.CommandContext(ctx, "go", "run", toolPath, "./...")
+			unusedCmd.Dir = dir
+			unusedCmd.Stdout = os.Stdout
+			unusedCmd.Stderr = os.Stderr
+			if err := unusedCmd.Run(); err != nil {
+				return fmt.Errorf("unused check failed in %s: %w", dir, err)
 			}
 		}
 	}

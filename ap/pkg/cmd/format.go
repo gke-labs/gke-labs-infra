@@ -37,7 +37,7 @@ func BuildFormatCommand(rootOpt *RootOptions) *cobra.Command {
 		Aliases: []string{"fmt"},
 		Short:   "Run formatting tasks",
 		Args:    cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			return RunFormat(cmd.Context(), opt)
 		},
 	}

@@ -40,7 +40,7 @@ func BuildServeCommand(rootOpt *RootOptions) *cobra.Command {
 		Use:   "serve",
 		Short: "Start the sandbox server",
 		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			if opt.ServeRoot == "" {
 				opt.ServeRoot = opt.RepoRoot
 			}
@@ -52,8 +52,7 @@ func BuildServeCommand(rootOpt *RootOptions) *cobra.Command {
 				opt.ServeRoot = cwd
 			}
 			return RunServe(cmd.Context(), opt)
-		},
-	}
+		}}
 
 	cmd.Flags().StringVar(&opt.ServeRoot, "root", "", "Root directory for the sandbox server (defaults to repo root)")
 	cmd.Flags().IntVar(&opt.Port, "port", 50051, "Port to listen on")

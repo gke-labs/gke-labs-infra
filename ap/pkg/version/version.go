@@ -21,7 +21,7 @@ import (
 )
 
 // Run prints version information
-func Run(ctx context.Context, root string) error {
+func Run(_ context.Context, _ string) error {
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
 		return fmt.Errorf("failed to read build info")

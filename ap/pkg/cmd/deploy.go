@@ -38,7 +38,7 @@ func BuildDeployCommand(rootOpt *RootOptions) *cobra.Command {
 		Use:   "deploy",
 		Short: "Deploy artifacts",
 		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			return RunDeploy(cmd.Context(), opt)
 		},
 	}

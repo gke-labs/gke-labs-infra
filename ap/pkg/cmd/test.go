@@ -38,7 +38,7 @@ func BuildTestCommand(rootOpt *RootOptions) *cobra.Command {
 		Use:   "test",
 		Short: "Run tests",
 		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			return RunTest(cmd.Context(), opt)
 		},
 	}

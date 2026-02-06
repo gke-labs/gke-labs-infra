@@ -37,7 +37,7 @@ func BuildLintCommand(rootOpt *RootOptions) *cobra.Command {
 		Use:   "lint",
 		Short: "Run linting tasks (vet, govulncheck, prlinter)",
 		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			return RunLint(cmd.Context(), opt)
 		},
 	}
