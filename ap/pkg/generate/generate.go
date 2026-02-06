@@ -89,7 +89,7 @@ func runLegacyScripts(ctx context.Context, root string) error {
 	return nil
 }
 
-func runGenerateVerifierGenerator(ctx context.Context, root string) error {
+func runGenerateVerifierGenerator(_ context.Context, root string) error {
 	presubmitsDir := filepath.Join(root, "dev", "ci", "presubmits")
 
 	// Check if dev/ci/presubmits exists
@@ -146,7 +146,7 @@ fi
 	return nil
 }
 
-func runApTestGenerator(ctx context.Context, root string) error {
+func runApTestGenerator(_ context.Context, root string) error {
 	presubmitsDir := filepath.Join(root, "dev", "ci", "presubmits")
 
 	// Check if dev/ci/presubmits exists
@@ -195,7 +195,7 @@ cd "${REPO_ROOT}"
 	return nil
 }
 
-func runApLintGenerator(ctx context.Context, root string) error {
+func runApLintGenerator(_ context.Context, root string) error {
 	presubmitsDir := filepath.Join(root, "dev", "ci", "presubmits")
 
 	// Check if dev/ci/presubmits exists
@@ -244,7 +244,7 @@ cd "${REPO_ROOT}"
 	return nil
 }
 
-func runApE2eGenerator(ctx context.Context, root string) error {
+func runApE2eGenerator(_ context.Context, root string) error {
 	// Check if we have any e2e tasks
 	e2eTasks, err := tasks.FindTaskScripts(root, tasks.WithPrefix("test-e2e"))
 	if err != nil {
@@ -310,7 +310,7 @@ cd "${REPO_ROOT}"
 	return nil
 }
 
-func runGithubActionsGenerator(ctx context.Context, root string) error {
+func runGithubActionsGenerator(_ context.Context, root string) error {
 	presubmitsDir := filepath.Join(root, "dev", "ci", "presubmits")
 	workflowsDir := filepath.Join(root, ".github", "workflows")
 	outputFile := filepath.Join(workflowsDir, "ci-presubmits.yaml")

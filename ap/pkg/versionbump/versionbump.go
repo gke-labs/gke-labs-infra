@@ -49,7 +49,7 @@ func Run(ctx context.Context, root string) error {
 
 	ignore := walker.NewIgnoreList([]string{".git", "vendor", "node_modules"})
 
-	files, err := walker.Walk(root, ignore, func(path string, info os.FileInfo) bool {
+	files, err := walker.Walk(root, ignore, func(path string, _ os.FileInfo) bool {
 		name := filepath.Base(path)
 		return name == "go.mod" || name == "Dockerfile" || strings.HasPrefix(name, "Dockerfile.")
 	})

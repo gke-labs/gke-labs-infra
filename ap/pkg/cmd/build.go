@@ -36,7 +36,7 @@ func BuildBuildCommand(rootOpt *RootOptions) *cobra.Command {
 		Use:   "build",
 		Short: "Build artifacts",
 		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			return RunBuild(cmd.Context(), opt)
 		},
 	}

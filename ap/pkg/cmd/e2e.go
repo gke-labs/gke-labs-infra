@@ -38,7 +38,7 @@ func BuildE2eCommand(rootOpt *RootOptions) *cobra.Command {
 		Use:   "e2e",
 		Short: "Run e2e tests",
 		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			return RunE2e(cmd.Context(), opt)
 		},
 	}

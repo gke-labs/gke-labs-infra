@@ -35,7 +35,7 @@ func Build(ctx context.Context, root string) error {
 	}
 
 	ignoreList := walker.NewIgnoreList([]string{".git", "vendor", "node_modules"})
-	dockerfiles, err := walker.Walk(root, ignoreList, func(path string, info os.FileInfo) bool {
+	dockerfiles, err := walker.Walk(root, ignoreList, func(_ string, info os.FileInfo) bool {
 		return info.Name() == "Dockerfile"
 	})
 	if err != nil {

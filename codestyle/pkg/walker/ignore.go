@@ -39,7 +39,7 @@ func (m globMatcher) Match(segment string) bool {
 
 type doubleStarMatcher struct{}
 
-func (m doubleStarMatcher) Match(segment string) bool {
+func (m doubleStarMatcher) Match(_ string) bool {
 	return true
 }
 

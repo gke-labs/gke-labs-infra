@@ -37,7 +37,7 @@ func BuildGenerateCommand(rootOpt *RootOptions) *cobra.Command {
 		Use:   "generate",
 		Short: "Run generation tasks",
 		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			return RunGenerate(cmd.Context(), opt)
 		},
 	}
