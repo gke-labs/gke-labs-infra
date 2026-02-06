@@ -45,6 +45,15 @@ func Lint(ctx context.Context, root string) error {
 	for _, goMod := range goMods {
 		dir := filepath.Dir(goMod)
 
+		hasGo, err := hasGoFiles(dir)
+		if err != nil {
+			return fmt.Errorf("failed to check for Go files in %s: %w", dir, err)
+		}
+		if !hasGo {
+			klog.Infof("Skipping %s as it contains no Go files", dir)
+			continue
+		}
+
 		if cfg.IsGovetEnabled() {
 			klog.Infof("Running go vet in %s", dir)
 			vetCmd := exec.CommandContext(ctx, "go", "vet", "./...")
@@ -73,7 +82,14 @@ func Lint(ctx context.Context, root string) error {
 			if err != nil {
 				return fmt.Errorf("could not find ap executable: %w", err)
 			}
-			unusedCmd := exec.CommandContext(ctx, apPath, "unused", "./...")
+			args := []string{"unused"}
+			if cfg.IsUnusedParametersEnabled() {
+				args = append(args, "-unused.check-parameters=true")
+			} else {
+				args = append(args, "-unused.check-parameters=false")
+			}
+			args = append(args, "./...")
+			unusedCmd := exec.CommandContext(ctx, apPath, args...)
 			unusedCmd.Dir = dir
 			unusedCmd.Stdout = os.Stdout
 			unusedCmd.Stderr = os.Stderr
@@ -83,4 +99,34 @@ func Lint(ctx context.Context, root string) error {
 		}
 	}
 	return nil
+}
+
+// hasGoFiles returns true if the directory or any of its subdirectories
+// (excluding those that are themselves Go modules) contain at least one .go file.
+func hasGoFiles(root string) (bool, error) {
+	found := false
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if path != root {
+				// If this directory contains a go.mod file, it's a separate module.
+				// We should not look for Go files inside it.
+				if _, err := os.Stat(filepath.Join(path, "go.mod")); err == nil {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		if filepath.Ext(path) == ".go" {
+			found = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	if err == filepath.SkipAll {
+		err = nil
+	}
+	return found, err
 }

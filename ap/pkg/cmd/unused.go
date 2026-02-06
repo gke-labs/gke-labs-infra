@@ -26,9 +26,10 @@ import (
 // This is a hidden command used by "ap lint" to run the unused analyzer.
 func BuildUnusedCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:    "unused",
-		Short:  "Run the unused analyzer",
-		Hidden: true,
+		Use:                "unused",
+		Short:              "Run the unused analyzer",
+		Hidden:             true,
+		DisableFlagParsing: true,
 		Run: func(_ *cobra.Command, args []string) {
 			// multichecker.Main expects the first argument to be the program name,
 			// and subsequent arguments to be flags and packages.

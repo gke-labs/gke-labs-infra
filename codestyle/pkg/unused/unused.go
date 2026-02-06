@@ -22,10 +22,16 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
+var checkParameters bool
+
 var Analyzer = &analysis.Analyzer{
 	Name: "unused",
 	Doc:  "check for unused parameters, methods, and fields",
 	Run:  run,
+}
+
+func init() {
+	Analyzer.Flags.BoolVar(&checkParameters, "check-parameters", false, "report unused parameters")
 }
 
 func run(pass *analysis.Pass) (interface{}, error) {
@@ -55,6 +61,9 @@ func run(pass *analysis.Pass) (interface{}, error) {
 }
 
 func checkUnusedParams(pass *analysis.Pass, params *ast.FieldList, body *ast.BlockStmt, used map[types.Object]bool) {
+	if !checkParameters {
+		return
+	}
 	if body == nil || params == nil {
 		return
 	}
