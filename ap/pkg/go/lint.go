@@ -69,10 +69,11 @@ func Lint(ctx context.Context, root string) error {
 
 		if cfg.IsUnusedEnabled() {
 			klog.Infof("Running unused check in %s", dir)
-			// Find the path to the ap-unused tool.
-			// Since we're in the same repo, we can find it relative to the root.
-			toolPath := filepath.Join(root, "codestyle/cmd/ap-unused")
-			unusedCmd := exec.CommandContext(ctx, "go", "run", toolPath, "./...")
+			apPath, err := os.Executable()
+			if err != nil {
+				return fmt.Errorf("could not find ap executable: %w", err)
+			}
+			unusedCmd := exec.CommandContext(ctx, apPath, "unused", "./...")
 			unusedCmd.Dir = dir
 			unusedCmd.Stdout = os.Stdout
 			unusedCmd.Stderr = os.Stderr
