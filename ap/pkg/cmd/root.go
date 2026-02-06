@@ -62,6 +62,7 @@ func BuildRootCommand() *cobra.Command {
 	cmd.AddCommand(BuildAlphaCommand(&opt))
 	cmd.AddCommand(BuildServeCommand(&opt))
 	cmd.AddCommand(BuildVersionCommand(&opt))
+	cmd.AddCommand(BuildUnusedCommand())
 
 	return cmd
 }
