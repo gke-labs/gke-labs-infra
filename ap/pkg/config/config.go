@@ -26,8 +26,6 @@ type Config struct {
 	Gofmt       *GofmtConfig       `json:"gofmt"`
 	Govet       *GovetConfig       `json:"govet"`
 	Govulncheck *GovulncheckConfig `json:"govulncheck"`
-	Unused      *UnusedConfig      `json:"unused"`
-	TestContext *TestContextConfig `json:"testcontext"`
 	Skip        []string           `json:"skip"`
 	Lint        *LintConfig        `json:"lint"`
 }
@@ -44,17 +42,18 @@ type GovulncheckConfig struct {
 	Enabled *bool `json:"enabled"`
 }
 
+type LintConfig struct {
+	Unused           *UnusedConfig           `json:"unused"`
+	TestContext      *TestContextConfig      `json:"testcontext"`
+	UnusedParameters *UnusedParametersConfig `json:"unusedparameters"`
+}
+
 type UnusedConfig struct {
 	Enabled *bool `json:"enabled"`
 }
 
 type TestContextConfig struct {
-	Enabled *bool  `json:"enabled"`
-	Mode    string `json:"mode"`
-}
-
-type LintConfig struct {
-	UnusedParameters *UnusedParametersConfig `json:"unusedparameters"`
+	Mode string `json:"mode"`
 }
 
 type UnusedParametersConfig struct {
@@ -108,8 +107,8 @@ func (c *Config) IsGovulncheckEnabled() bool {
 
 // IsUnusedEnabled returns true if unused detection is enabled in the config (defaulting to true).
 func (c *Config) IsUnusedEnabled() bool {
-	if c.Unused != nil && c.Unused.Enabled != nil {
-		return *c.Unused.Enabled
+	if c.Lint != nil && c.Lint.Unused != nil && c.Lint.Unused.Enabled != nil {
+		return *c.Lint.Unused.Enabled
 	}
 	return true
 }
@@ -125,8 +124,8 @@ func (c *Config) IsUnusedParametersEnabled() bool {
 
 // IsTestContextEnabled returns true if testcontext detection is enabled in the config (defaulting to true).
 func (c *Config) IsTestContextEnabled() bool {
-	if c.TestContext != nil && c.TestContext.Enabled != nil {
-		return *c.TestContext.Enabled
+	if c.Lint != nil && c.Lint.TestContext != nil {
+		return c.Lint.TestContext.Mode != "ignore"
 	}
 	return true
 }
@@ -134,8 +133,8 @@ func (c *Config) IsTestContextEnabled() bool {
 // IsTestContextError returns true if testcontext should be reported as an error.
 // Default is false (warning).
 func (c *Config) IsTestContextError() bool {
-	if c.TestContext != nil {
-		return c.TestContext.Mode == "error"
+	if c.Lint != nil && c.Lint.TestContext != nil {
+		return c.Lint.TestContext.Mode == "error"
 	}
 	return false
 }
