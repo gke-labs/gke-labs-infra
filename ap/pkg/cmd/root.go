@@ -63,6 +63,7 @@ func BuildRootCommand() *cobra.Command {
 	cmd.AddCommand(BuildServeCommand(&opt))
 	cmd.AddCommand(BuildVersionCommand(&opt))
 	cmd.AddCommand(BuildUnusedCommand())
+	cmd.AddCommand(BuildTestContextCommand())
 
 	return cmd
 }

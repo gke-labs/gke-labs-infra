@@ -97,6 +97,25 @@ func Lint(ctx context.Context, root string) error {
 				return fmt.Errorf("unused check failed in %s: %w", dir, err)
 			}
 		}
+
+		if cfg.IsTestContextEnabled() {
+			klog.Infof("Running testcontext check in %s", dir)
+			apPath, err := os.Executable()
+			if err != nil {
+				return fmt.Errorf("could not find ap executable: %w", err)
+			}
+			args := []string{"testcontext", "./..."}
+			testcontextCmd := exec.CommandContext(ctx, apPath, args...)
+			testcontextCmd.Dir = dir
+			testcontextCmd.Stdout = os.Stdout
+			testcontextCmd.Stderr = os.Stderr
+			if err := testcontextCmd.Run(); err != nil {
+				if cfg.IsTestContextError() {
+					return fmt.Errorf("testcontext check failed in %s: %w", dir, err)
+				}
+				klog.Warningf("testcontext check failed in %s: %v", dir, err)
+			}
+		}
 	}
 	return nil
 }

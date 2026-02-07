@@ -27,6 +27,7 @@ type Config struct {
 	Govet       *GovetConfig       `json:"govet"`
 	Govulncheck *GovulncheckConfig `json:"govulncheck"`
 	Unused      *UnusedConfig      `json:"unused"`
+	TestContext *TestContextConfig `json:"testcontext"`
 	Skip        []string           `json:"skip"`
 	Lint        *LintConfig        `json:"lint"`
 }
@@ -45,6 +46,11 @@ type GovulncheckConfig struct {
 
 type UnusedConfig struct {
 	Enabled *bool `json:"enabled"`
+}
+
+type TestContextConfig struct {
+	Enabled *bool  `json:"enabled"`
+	Mode    string `json:"mode"`
 }
 
 type LintConfig struct {
@@ -113,6 +119,23 @@ func (c *Config) IsUnusedEnabled() bool {
 func (c *Config) IsUnusedParametersEnabled() bool {
 	if c.Lint != nil && c.Lint.UnusedParameters != nil {
 		return c.Lint.UnusedParameters.Mode != "skip"
+	}
+	return false
+}
+
+// IsTestContextEnabled returns true if testcontext detection is enabled in the config (defaulting to true).
+func (c *Config) IsTestContextEnabled() bool {
+	if c.TestContext != nil && c.TestContext.Enabled != nil {
+		return *c.TestContext.Enabled
+	}
+	return true
+}
+
+// IsTestContextError returns true if testcontext should be reported as an error.
+// Default is false (warning).
+func (c *Config) IsTestContextError() bool {
+	if c.TestContext != nil {
+		return c.TestContext.Mode == "error"
 	}
 	return false
 }
