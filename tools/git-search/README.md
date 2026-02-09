@@ -23,8 +23,6 @@ git-search --repo https://github.com/foo/bar --ref develop needle
 ## How it works
 
 1. It creates a bare clone of the repository in a local cache directory (typically `~/.cache/git-search/repos`).
-2. It uses `git archive` to quickly extract the files of the requested ref into a temporary directory.
-3. It runs `grep -r` in the temporary directory.
-4. It cleans up the temporary directory after the search is complete.
+2. It uses `git grep` to search for the regex directly within the git objects of the requested ref.
 
 Subsequent searches against the same repository will reuse the bare clone, only fetching updates if necessary.

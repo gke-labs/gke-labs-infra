@@ -77,36 +77,8 @@ func runSearch(ctx context.Context, opt *options, needle string) error {
 		_ = fetchCmd.Run()
 	}
 
-	tempDir, err := os.MkdirTemp("", "git-search-*")
-	if err != nil {
-		return fmt.Errorf("failed to create temp directory: %w", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	fmt.Fprintf(os.Stderr, "Checking out %s to %s...\n", opt.ref, tempDir)
-	archiveCmd := exec.CommandContext(ctx, "git", "--git-dir", barePath, "archive", opt.ref)
-	archiveOut, err := archiveCmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("failed to create archive pipe: %w", err)
-	}
-
-	tarCmd := exec.CommandContext(ctx, "tar", "-x", "-C", tempDir)
-	tarCmd.Stdin = archiveOut
-	tarCmd.Stderr = os.Stderr
-
-	if err := archiveCmd.Start(); err != nil {
-		return fmt.Errorf("failed to start git archive: %w", err)
-	}
-	if err := tarCmd.Run(); err != nil {
-		return fmt.Errorf("failed to extract archive: %w", err)
-	}
-	if err := archiveCmd.Wait(); err != nil {
-		return fmt.Errorf("git archive failed: %w", err)
-	}
-
-	fmt.Fprintf(os.Stderr, "Searching for \"%s\"...\n", needle)
-	grepCmd := exec.CommandContext(ctx, "grep", "-E", "-r", "-n", needle, ".")
-	grepCmd.Dir = tempDir
+	fmt.Fprintf(os.Stderr, "Searching for \"%s\" in %s...\n", needle, opt.ref)
+	grepCmd := exec.CommandContext(ctx, "git", "--git-dir", barePath, "grep", "-E", "-n", needle, opt.ref)
 	grepCmd.Stdout = os.Stdout
 	grepCmd.Stderr = os.Stderr
 
@@ -115,7 +87,7 @@ func runSearch(ctx context.Context, opt *options, needle string) error {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 			return nil
 		}
-		return fmt.Errorf("grep failed: %w", err)
+		return fmt.Errorf("git grep failed: %w", err)
 	}
 
 	return nil
