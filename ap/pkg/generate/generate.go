@@ -15,6 +15,7 @@
 package generate
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -196,7 +197,7 @@ if [[ -n $(git status --porcelain) ]]; then
   exit 1
 fi
 `, cdCmd, apCmd, apCmd)
-	if err := os.WriteFile(targetFile, []byte(content), 0755); err != nil {
+	if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
 
@@ -256,7 +257,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 # Run tests
 %s test
 `, cdCmd, apCmd)
-	if err := os.WriteFile(targetFile, []byte(content), 0755); err != nil {
+	if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
 
@@ -316,7 +317,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 # Run linting
 %s lint
 `, cdCmd, apCmd)
-	if err := os.WriteFile(targetFile, []byte(content), 0755); err != nil {
+	if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
 
@@ -393,7 +394,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 # Run e2e tests
 %s e2e
 `, cdCmd, apCmd)
-	if err := os.WriteFile(targetFile, []byte(content), 0755); err != nil {
+	if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
 
@@ -494,7 +495,7 @@ jobs:
 		return fmt.Errorf("failed to create workflows dir: %w", err)
 	}
 
-	if err := os.WriteFile(outputFile, []byte(sb.String()), 0644); err != nil {
+	if err := writeFileIfChanged(outputFile, []byte(sb.String()), 0644); err != nil {
 		return fmt.Errorf("failed to write %s: %w", outputFile, err)
 	}
 
@@ -526,8 +527,20 @@ func GetApCommand(repoRoot, apRoot string) (string, error) {
 		if err != nil {
 			return "go run ./ap", nil
 		}
-		return fmt.Sprintf("go run %s", filepath.Join(rel, "ap")), nil
+		apDir := filepath.Join(rel, "ap")
+		if !strings.HasPrefix(apDir, ".") && !filepath.IsAbs(apDir) {
+			apDir = "./" + apDir
+		}
+		return fmt.Sprintf("go run %s", apDir), nil
 	}
 
 	return defaultCmd, nil
+}
+
+func writeFileIfChanged(path string, content []byte, perm os.FileMode) error {
+	existing, err := os.ReadFile(path)
+	if err == nil && bytes.Equal(existing, content) {
+		return nil
+	}
+	return os.WriteFile(path, content, perm)
 }
