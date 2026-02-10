@@ -56,5 +56,5 @@ func RunLint(ctx context.Context, opt LintOptions) error {
 	if err := prlinter.Lint(ctx, opt.RepoRoot); err != nil {
 		return err
 	}
-	return golang.Lint(ctx, opt.RepoRoot)
+	return golang.Lint(ctx, opt.APRoot)
 }

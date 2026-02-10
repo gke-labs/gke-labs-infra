@@ -27,38 +27,84 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-func Run(ctx context.Context, root string) error {
-	// 1. Run legacy scripts
-	if err := runLegacyScripts(ctx, root); err != nil {
+func Run(ctx context.Context, repoRoot string) error {
+	apRoots, err := findAllAPRoots(repoRoot)
+	if err != nil {
 		return err
 	}
 
-	// 2. Run built-in generators
-	if err := runGenerateVerifierGenerator(ctx, root); err != nil {
-		return err
+	for _, apRoot := range apRoots {
+		suffix := getSuffix(repoRoot, apRoot)
+		klog.Infof("Generating for AP root: %s (suffix: %s)", apRoot, suffix)
+
+		// 1. Run legacy scripts
+		if err := runLegacyScripts(ctx, apRoot); err != nil {
+			return err
+		}
+
+		// 2. Run built-in generators
+		if err := runGenerateVerifierGenerator(ctx, repoRoot, apRoot, suffix); err != nil {
+			return err
+		}
+
+		if err := runApTestGenerator(ctx, repoRoot, apRoot, suffix); err != nil {
+			return err
+		}
+
+		if err := runApLintGenerator(ctx, repoRoot, apRoot, suffix); err != nil {
+			return err
+		}
+
+		if err := runApE2eGenerator(ctx, repoRoot, apRoot, suffix); err != nil {
+			return err
+		}
 	}
 
-	if err := runApTestGenerator(ctx, root); err != nil {
-		return err
-	}
-
-	if err := runApLintGenerator(ctx, root); err != nil {
-		return err
-	}
-
-	if err := runApE2eGenerator(ctx, root); err != nil {
-		return err
-	}
-
-	if err := runGithubActionsGenerator(ctx, root); err != nil {
+	if err := runGithubActionsGenerator(ctx, repoRoot, apRoots); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func runLegacyScripts(ctx context.Context, root string) error {
-	tasksDir := filepath.Join(root, "dev", "tasks")
+func findAllAPRoots(repoRoot string) ([]string, error) {
+	var roots []string
+	err := filepath.Walk(repoRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if info.Name() == ".git" && path != filepath.Join(repoRoot, ".git") {
+				return filepath.SkipDir
+			}
+			if info.Name() == "vendor" || info.Name() == "node_modules" {
+				return filepath.SkipDir
+			}
+			if _, err := os.Stat(filepath.Join(path, ".ap")); err == nil {
+				roots = append(roots, path)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return roots, nil
+}
+
+func getSuffix(repoRoot, apRoot string) string {
+	if repoRoot == apRoot {
+		return ""
+	}
+	rel, err := filepath.Rel(repoRoot, apRoot)
+	if err != nil {
+		return ""
+	}
+	return "-" + strings.ReplaceAll(rel, string(filepath.Separator), "-")
+}
+
+func runLegacyScripts(ctx context.Context, apRoot string) error {
+	tasksDir := filepath.Join(apRoot, "dev", "tasks")
 	entries, err := os.ReadDir(tasksDir)
 	if os.IsNotExist(err) {
 		return nil
@@ -78,7 +124,7 @@ func runLegacyScripts(ctx context.Context, root string) error {
 			path := filepath.Join(tasksDir, name)
 			klog.Infof("Running legacy generate script: %s", name)
 			cmd := exec.CommandContext(ctx, path)
-			cmd.Dir = root
+			cmd.Dir = apRoot
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 			if err := cmd.Run(); err != nil {
@@ -89,20 +135,31 @@ func runLegacyScripts(ctx context.Context, root string) error {
 	return nil
 }
 
-func runGenerateVerifierGenerator(_ context.Context, root string) error {
-	presubmitsDir := filepath.Join(root, "dev", "ci", "presubmits")
+func runGenerateVerifierGenerator(_ context.Context, repoRoot, apRoot, suffix string) error {
+	presubmitsDir := filepath.Join(apRoot, "dev", "ci", "presubmits")
 
 	// Check if dev/ci/presubmits exists
 	if _, err := os.Stat(presubmitsDir); os.IsNotExist(err) {
 		return nil
 	}
 
-	targetFile := filepath.Join(presubmitsDir, "ap-verify-generate")
+	targetFile := filepath.Join(presubmitsDir, "ap-verify-generate"+suffix)
 	klog.Infof("Generating %s", targetFile)
 
-	apCmd, err := GetApCommand(root)
+	apCmd, err := GetApCommand(repoRoot, apRoot)
 	if err != nil {
 		return err
+	}
+
+	relApRoot, err := filepath.Rel(repoRoot, apRoot)
+	if err != nil {
+		return err
+	}
+	cdCmd := ""
+	if relApRoot != "." {
+		cdCmd = fmt.Sprintf("cd \"${REPO_ROOT}/%s\"", relApRoot)
+	} else {
+		cdCmd = "cd \"${REPO_ROOT}\""
 	}
 
 	content := fmt.Sprintf(`#!/bin/bash
@@ -126,7 +183,7 @@ set -o nounset
 set -o pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-cd "${REPO_ROOT}"
+%s
 
 # Run generation
 %s generate
@@ -138,7 +195,7 @@ if [[ -n $(git status --porcelain) ]]; then
   git status
   exit 1
 fi
-`, apCmd, apCmd)
+`, cdCmd, apCmd, apCmd)
 	if err := os.WriteFile(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
@@ -146,20 +203,31 @@ fi
 	return nil
 }
 
-func runApTestGenerator(_ context.Context, root string) error {
-	presubmitsDir := filepath.Join(root, "dev", "ci", "presubmits")
+func runApTestGenerator(_ context.Context, repoRoot, apRoot, suffix string) error {
+	presubmitsDir := filepath.Join(apRoot, "dev", "ci", "presubmits")
 
 	// Check if dev/ci/presubmits exists
 	if _, err := os.Stat(presubmitsDir); os.IsNotExist(err) {
 		return nil
 	}
 
-	targetFile := filepath.Join(presubmitsDir, "ap-test")
+	targetFile := filepath.Join(presubmitsDir, "ap-test"+suffix)
 	klog.Infof("Generating %s", targetFile)
 
-	apCmd, err := GetApCommand(root)
+	apCmd, err := GetApCommand(repoRoot, apRoot)
 	if err != nil {
 		return err
+	}
+
+	relApRoot, err := filepath.Rel(repoRoot, apRoot)
+	if err != nil {
+		return err
+	}
+	cdCmd := ""
+	if relApRoot != "." {
+		cdCmd = fmt.Sprintf("cd \"${REPO_ROOT}/%s\"", relApRoot)
+	} else {
+		cdCmd = "cd \"${REPO_ROOT}\""
 	}
 
 	content := fmt.Sprintf(`#!/bin/bash
@@ -183,11 +251,11 @@ set -o nounset
 set -o pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-cd "${REPO_ROOT}"
+%s
 
 # Run tests
 %s test
-`, apCmd)
+`, cdCmd, apCmd)
 	if err := os.WriteFile(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
@@ -195,20 +263,31 @@ cd "${REPO_ROOT}"
 	return nil
 }
 
-func runApLintGenerator(_ context.Context, root string) error {
-	presubmitsDir := filepath.Join(root, "dev", "ci", "presubmits")
+func runApLintGenerator(_ context.Context, repoRoot, apRoot, suffix string) error {
+	presubmitsDir := filepath.Join(apRoot, "dev", "ci", "presubmits")
 
 	// Check if dev/ci/presubmits exists
 	if _, err := os.Stat(presubmitsDir); os.IsNotExist(err) {
 		return nil
 	}
 
-	targetFile := filepath.Join(presubmitsDir, "ap-lint")
+	targetFile := filepath.Join(presubmitsDir, "ap-lint"+suffix)
 	klog.Infof("Generating %s", targetFile)
 
-	apCmd, err := GetApCommand(root)
+	apCmd, err := GetApCommand(repoRoot, apRoot)
 	if err != nil {
 		return err
+	}
+
+	relApRoot, err := filepath.Rel(repoRoot, apRoot)
+	if err != nil {
+		return err
+	}
+	cdCmd := ""
+	if relApRoot != "." {
+		cdCmd = fmt.Sprintf("cd \"${REPO_ROOT}/%s\"", relApRoot)
+	} else {
+		cdCmd = "cd \"${REPO_ROOT}\""
 	}
 
 	content := fmt.Sprintf(`#!/bin/bash
@@ -232,11 +311,11 @@ set -o nounset
 set -o pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-cd "${REPO_ROOT}"
+%s
 
 # Run linting
 %s lint
-`, apCmd)
+`, cdCmd, apCmd)
 	if err := os.WriteFile(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
@@ -244,15 +323,15 @@ cd "${REPO_ROOT}"
 	return nil
 }
 
-func runApE2eGenerator(_ context.Context, root string) error {
+func runApE2eGenerator(_ context.Context, repoRoot, apRoot, suffix string) error {
 	// Check if we have any e2e tasks
-	e2eTasks, err := tasks.FindTaskScripts(root, tasks.WithPrefix("test-e2e"))
+	e2eTasks, err := tasks.FindTaskScripts(apRoot, tasks.WithPrefix("test-e2e"))
 	if err != nil {
 		return fmt.Errorf("failed to discover e2e tasks: %w", err)
 	}
 
-	presubmitsDir := filepath.Join(root, "dev", "ci", "presubmits")
-	targetFile := filepath.Join(presubmitsDir, "ap-e2e")
+	presubmitsDir := filepath.Join(apRoot, "dev", "ci", "presubmits")
+	targetFile := filepath.Join(presubmitsDir, "ap-e2e"+suffix)
 
 	// If no e2e tasks, we should remove the file if it exists
 	if len(e2eTasks) == 0 {
@@ -272,9 +351,20 @@ func runApE2eGenerator(_ context.Context, root string) error {
 
 	klog.Infof("Generating %s", targetFile)
 
-	apCmd, err := GetApCommand(root)
+	apCmd, err := GetApCommand(repoRoot, apRoot)
 	if err != nil {
 		return err
+	}
+
+	relApRoot, err := filepath.Rel(repoRoot, apRoot)
+	if err != nil {
+		return err
+	}
+	cdCmd := ""
+	if relApRoot != "." {
+		cdCmd = fmt.Sprintf("cd \"${REPO_ROOT}/%s\"", relApRoot)
+	} else {
+		cdCmd = "cd \"${REPO_ROOT}\""
 	}
 
 	content := fmt.Sprintf(`#!/bin/bash
@@ -298,11 +388,11 @@ set -o nounset
 set -o pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-cd "${REPO_ROOT}"
+%s
 
 # Run e2e tests
 %s e2e
-`, apCmd)
+`, cdCmd, apCmd)
 	if err := os.WriteFile(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
@@ -310,22 +400,11 @@ cd "${REPO_ROOT}"
 	return nil
 }
 
-func runGithubActionsGenerator(_ context.Context, root string) error {
-	presubmitsDir := filepath.Join(root, "dev", "ci", "presubmits")
-	workflowsDir := filepath.Join(root, ".github", "workflows")
+func runGithubActionsGenerator(_ context.Context, repoRoot string, apRoots []string) error {
+	workflowsDir := filepath.Join(repoRoot, ".github", "workflows")
 	outputFile := filepath.Join(workflowsDir, "ci-presubmits.yaml")
 
 	klog.Infof("Generating %s", outputFile)
-
-	entries, err := os.ReadDir(presubmitsDir)
-	if os.IsNotExist(err) {
-		// If no presubmits, maybe we shouldn't generate the workflow?
-		// Or generate an empty one? The original script would iterate over nothing.
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("failed to read presubmits dir: %w", err)
-	}
 
 	var sb strings.Builder
 	sb.WriteString(`# Copyright 2026 Google LLC
@@ -354,39 +433,61 @@ on:
 jobs:
 `)
 
-	goModExists := false
-	if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
-		goModExists = true
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
+	for _, apRoot := range apRoots {
+		suffix := getSuffix(repoRoot, apRoot)
+		presubmitsDir := filepath.Join(apRoot, "dev", "ci", "presubmits")
+		entries, err := os.ReadDir(presubmitsDir)
+		if os.IsNotExist(err) {
 			continue
 		}
-		scriptName := entry.Name()
-		// Basic validation or filtering if needed
+		if err != nil {
+			return fmt.Errorf("failed to read presubmits dir %s: %w", presubmitsDir, err)
+		}
 
-		sb.WriteString(fmt.Sprintf(`  %s:
+		goModExists := false
+		if _, err := os.Stat(filepath.Join(apRoot, "go.mod")); err == nil {
+			goModExists = true
+		}
+
+		relPresubmitsDir, err := filepath.Rel(repoRoot, presubmitsDir)
+		if err != nil {
+			return err
+		}
+
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			scriptName := entry.Name()
+
+			jobName := scriptName
+			if suffix != "" && !strings.HasSuffix(jobName, suffix) {
+				jobName = jobName + suffix
+			}
+
+			sb.WriteString(fmt.Sprintf(`  %s:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-`, scriptName))
+`, jobName))
 
-		if goModExists {
-			sb.WriteString(`
+			if goModExists {
+				relGoMod, _ := filepath.Rel(repoRoot, filepath.Join(apRoot, "go.mod"))
+				sb.WriteString(fmt.Sprintf(`
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: 'go.mod'
-`)
-		}
+          go-version-file: '%s'
+`, relGoMod))
+			}
 
-		sb.WriteString(fmt.Sprintf(`
+			sb.WriteString(fmt.Sprintf(`
       - name: Run %s
-        run: ./dev/ci/presubmits/%s
+        run: ./%s/%s
 
-`, scriptName, scriptName))
+`, jobName, relPresubmitsDir, scriptName))
+		}
 	}
 
 	if err := os.MkdirAll(workflowsDir, 0755); err != nil {
@@ -400,8 +501,8 @@ jobs:
 	return nil
 }
 
-func GetApCommand(root string) (string, error) {
-	configPath := filepath.Join(root, ".ap", "ap.yaml")
+func GetApCommand(repoRoot, apRoot string) (string, error) {
+	configPath := filepath.Join(apRoot, ".ap", "ap.yaml")
 	defaultCmd := "go run github.com/gke-labs/gke-labs-infra/ap@latest"
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
@@ -421,7 +522,11 @@ func GetApCommand(root string) (string, error) {
 	}
 
 	if config.Version == "!self" {
-		return "go run ./ap", nil
+		rel, err := filepath.Rel(apRoot, repoRoot)
+		if err != nil {
+			return "go run ./ap", nil
+		}
+		return fmt.Sprintf("go run %s", filepath.Join(rel, "ap")), nil
 	}
 
 	return defaultCmd, nil

@@ -52,7 +52,7 @@ func RunE2e(ctx context.Context, opt E2eOptions) error {
 		return err
 	}
 	// Run test-e2e* scripts
-	e2eTasks, err := tasks.FindTaskScripts(opt.RepoRoot, tasks.WithPrefix("test-e2e"))
+	e2eTasks, err := tasks.FindTaskScripts(opt.APRoot, tasks.WithPrefix("test-e2e"))
 	if err != nil {
 		return fmt.Errorf("failed to discover e2e tasks: %w", err)
 	}
@@ -62,5 +62,5 @@ func RunE2e(ctx context.Context, opt E2eOptions) error {
 		return nil
 	}
 
-	return tasks.Run(ctx, opt.RepoRoot, e2eTasks)
+	return tasks.Run(ctx, opt.APRoot, e2eTasks)
 }

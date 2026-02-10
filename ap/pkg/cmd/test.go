@@ -51,14 +51,14 @@ func RunTest(ctx context.Context, opt TestOptions) error {
 	if err := requireRepoRoot(opt.RootOptions); err != nil {
 		return err
 	}
-	if err := golang.Test(ctx, opt.RepoRoot); err != nil {
+	if err := golang.Test(ctx, opt.APRoot); err != nil {
 		return err
 	}
 
 	// Run test-* scripts (excluding test-e2e*)
-	testTasks, err := tasks.FindTaskScripts(opt.RepoRoot, tasks.WithPrefix("test-"), tasks.WithExcludePrefix("test-e2e"))
+	testTasks, err := tasks.FindTaskScripts(opt.APRoot, tasks.WithPrefix("test-"), tasks.WithExcludePrefix("test-e2e"))
 	if err != nil {
 		return fmt.Errorf("failed to discover test tasks: %w", err)
 	}
-	return tasks.Run(ctx, opt.RepoRoot, testTasks)
+	return tasks.Run(ctx, opt.APRoot, testTasks)
 }

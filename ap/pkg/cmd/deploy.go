@@ -52,8 +52,8 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		return err
 	}
 	// Deploy typically also builds
-	if err := images.Build(ctx, opt.RepoRoot); err != nil {
+	if err := images.Build(ctx, opt.APRoot); err != nil {
 		return fmt.Errorf("build failed during deploy: %w", err)
 	}
-	return k8s.Deploy(ctx, opt.RepoRoot)
+	return k8s.Deploy(ctx, opt.APRoot)
 }

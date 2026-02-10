@@ -28,6 +28,7 @@ import (
 // RootOptions holds the configuration for the root command.
 type RootOptions struct {
 	RepoRoot string
+	APRoot   string
 }
 
 // BuildRootCommand constructs the root cobra command.
@@ -38,9 +39,10 @@ func BuildRootCommand() *cobra.Command {
 		Use:   "ap",
 		Short: "ap is a tool for managing gke-labs projects",
 		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
-			root, err := findRepoRoot()
+			repoRoot, apRoot, err := findRoots()
 			if err == nil {
-				opt.RepoRoot = root
+				opt.RepoRoot = repoRoot
+				opt.APRoot = apRoot
 			}
 			return nil
 		},
@@ -66,21 +68,35 @@ func BuildRootCommand() *cobra.Command {
 	return cmd
 }
 
-// findRepoRoot attempts to find the root of the git repository
-func findRepoRoot() (string, error) {
-	if root := os.Getenv("AP_ROOT"); root != "" {
-		return root, nil
+// findRoots attempts to find the root of the git repository and the closest ap root
+func findRoots() (string, string, error) {
+	repoRoot := os.Getenv("REPO_ROOT")
+	apRoot := os.Getenv("AP_ROOT")
+
+	if repoRoot != "" && apRoot != "" {
+		return repoRoot, apRoot, nil
 	}
 
 	startDir, err := os.Getwd()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	dir := startDir
 	for {
+		if apRoot == "" {
+			if _, err := os.Stat(filepath.Join(dir, ".ap")); err == nil {
+				apRoot = dir
+			}
+		}
 		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-			return dir, nil
+			if repoRoot == "" {
+				repoRoot = dir
+			}
+			if apRoot == "" {
+				apRoot = dir
+			}
+			return repoRoot, apRoot, nil
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -89,12 +105,20 @@ func findRepoRoot() (string, error) {
 		dir = parent
 	}
 
-	return "", fmt.Errorf("could not find git repository root (starting at %s)", startDir)
+	if repoRoot == "" {
+		repoRoot = os.Getenv("AP_ROOT")
+	}
+
+	if repoRoot != "" {
+		return repoRoot, apRoot, nil
+	}
+
+	return "", "", fmt.Errorf("could not find git repository root (starting at %s)", startDir)
 }
 
 func requireRepoRoot(opt *RootOptions) error {
 	if opt.RepoRoot == "" {
-		return fmt.Errorf("this command must be run inside a git repository (or set AP_ROOT)")
+		return fmt.Errorf("this command must be run inside a git repository (or set REPO_ROOT or AP_ROOT)")
 	}
 	return nil
 }

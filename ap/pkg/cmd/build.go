@@ -49,5 +49,5 @@ func RunBuild(ctx context.Context, opt BuildOptions) error {
 	if err := requireRepoRoot(opt.RootOptions); err != nil {
 		return err
 	}
-	return images.Build(ctx, opt.RepoRoot)
+	return images.Build(ctx, opt.APRoot)
 }
