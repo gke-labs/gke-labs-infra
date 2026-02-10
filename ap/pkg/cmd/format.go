@@ -50,5 +50,5 @@ func RunFormat(ctx context.Context, opt FormatOptions) error {
 	if err := requireRepoRoot(opt.RootOptions); err != nil {
 		return err
 	}
-	return format.Run(ctx, opt.RepoRoot)
+	return format.Run(ctx, opt.APRoot)
 }
