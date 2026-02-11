@@ -139,13 +139,12 @@ func runLegacyScripts(ctx context.Context, apRoot string) error {
 func runGenerateVerifierGenerator(_ context.Context, repoRoot, apRoot, suffix string) error {
 	presubmitsDir := filepath.Join(apRoot, "dev", "ci", "presubmits")
 
-	// Check if dev/ci/presubmits exists
-	if _, err := os.Stat(presubmitsDir); os.IsNotExist(err) {
-		return nil
-	}
-
-	targetFile := filepath.Join(presubmitsDir, "ap-verify-generate"+suffix)
+	targetFile := filepath.Join(presubmitsDir, "ap-verify-generate")
 	klog.Infof("Generating %s", targetFile)
+
+	if err := os.MkdirAll(presubmitsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create presubmits dir: %w", err)
+	}
 
 	apCmd, err := GetApCommand(repoRoot, apRoot)
 	if err != nil {
@@ -207,13 +206,12 @@ fi
 func runApTestGenerator(_ context.Context, repoRoot, apRoot, suffix string) error {
 	presubmitsDir := filepath.Join(apRoot, "dev", "ci", "presubmits")
 
-	// Check if dev/ci/presubmits exists
-	if _, err := os.Stat(presubmitsDir); os.IsNotExist(err) {
-		return nil
-	}
-
-	targetFile := filepath.Join(presubmitsDir, "ap-test"+suffix)
+	targetFile := filepath.Join(presubmitsDir, "ap-test")
 	klog.Infof("Generating %s", targetFile)
+
+	if err := os.MkdirAll(presubmitsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create presubmits dir: %w", err)
+	}
 
 	apCmd, err := GetApCommand(repoRoot, apRoot)
 	if err != nil {
@@ -267,13 +265,12 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 func runApLintGenerator(_ context.Context, repoRoot, apRoot, suffix string) error {
 	presubmitsDir := filepath.Join(apRoot, "dev", "ci", "presubmits")
 
-	// Check if dev/ci/presubmits exists
-	if _, err := os.Stat(presubmitsDir); os.IsNotExist(err) {
-		return nil
-	}
-
-	targetFile := filepath.Join(presubmitsDir, "ap-lint"+suffix)
+	targetFile := filepath.Join(presubmitsDir, "ap-lint")
 	klog.Infof("Generating %s", targetFile)
+
+	if err := os.MkdirAll(presubmitsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create presubmits dir: %w", err)
+	}
 
 	apCmd, err := GetApCommand(repoRoot, apRoot)
 	if err != nil {
@@ -332,7 +329,7 @@ func runApE2eGenerator(_ context.Context, repoRoot, apRoot, suffix string) error
 	}
 
 	presubmitsDir := filepath.Join(apRoot, "dev", "ci", "presubmits")
-	targetFile := filepath.Join(presubmitsDir, "ap-e2e"+suffix)
+	targetFile := filepath.Join(presubmitsDir, "ap-e2e")
 
 	// If no e2e tasks, we should remove the file if it exists
 	if len(e2eTasks) == 0 {
@@ -345,12 +342,11 @@ func runApE2eGenerator(_ context.Context, repoRoot, apRoot, suffix string) error
 		return nil
 	}
 
-	// Check if dev/ci/presubmits exists
-	if _, err := os.Stat(presubmitsDir); os.IsNotExist(err) {
-		return nil
-	}
-
 	klog.Infof("Generating %s", targetFile)
+
+	if err := os.MkdirAll(presubmitsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create presubmits dir: %w", err)
+	}
 
 	apCmd, err := GetApCommand(repoRoot, apRoot)
 	if err != nil {

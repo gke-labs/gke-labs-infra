@@ -24,14 +24,7 @@
     Ensure `.ap/ap.yaml` is configured with `version: latest`.
     (Note: The source repo uses `version: "!self"` which is for internal development only).
 
-2.  **Prepare CI directories**:
-    Create the directory where `ap` will generate CI presubmit scripts. This signals `ap` to manage CI generation.
-
-    ```bash
-    mkdir -p dev/ci/presubmits
-    ```
-
-3.  **Run generation**:
+2.  **Run generation**:
     Run `ap generate` to create the initial CI scripts and GitHub Actions workflows.
 
     ```bash
@@ -39,10 +32,11 @@
     ```
 
     This command will:
-    *   Generate standard presubmit scripts in `dev/ci/presubmits/` (e.g., `ap-test`, `ap-verify-generate`).
+    *   Create the `dev/ci/presubmits/` directory if it doesn't exist.
+    *   Generate standard presubmit scripts (e.g., `ap-test`, `ap-verify-generate`).
     *   Generate a GitHub Actions workflow in `.github/workflows/ci-presubmits.yaml` that runs these scripts.
 
-4.  **Commit changes**:
+3.  **Commit changes**:
     Review the generated files and commit them to your repository.
 
     ```bash
