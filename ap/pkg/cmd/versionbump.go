@@ -49,5 +49,10 @@ func RunVersionBump(ctx context.Context, opt VersionBumpOptions) error {
 	if err := requireRepoRoot(opt.RootOptions); err != nil {
 		return err
 	}
-	return versionbump.Run(ctx, opt.APRoot)
+	for _, apRoot := range opt.APRoots {
+		if err := versionbump.Run(ctx, apRoot); err != nil {
+			return err
+		}
+	}
+	return nil
 }

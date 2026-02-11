@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
 )
@@ -29,6 +30,7 @@ import (
 type RootOptions struct {
 	RepoRoot string
 	APRoot   string
+	APRoots  []string
 }
 
 // BuildRootCommand constructs the root cobra command.
@@ -43,6 +45,14 @@ func BuildRootCommand() *cobra.Command {
 			if err == nil {
 				opt.RepoRoot = repoRoot
 				opt.APRoot = apRoot
+
+				if repoRoot != "" {
+					apRoots, err := config.FindAllAPRoots(repoRoot)
+					if err != nil {
+						return fmt.Errorf("failed to find all ap roots: %w", err)
+					}
+					opt.APRoots = apRoots
+				}
 			}
 			return nil
 		},

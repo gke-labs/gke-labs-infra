@@ -20,7 +20,6 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
-	"k8s.io/klog/v2"
 )
 
 // E2eOptions holds the configuration for the "e2e" command.
@@ -51,16 +50,20 @@ func RunE2e(ctx context.Context, opt E2eOptions) error {
 	if err := requireRepoRoot(opt.RootOptions); err != nil {
 		return err
 	}
-	// Run test-e2e* scripts
-	e2eTasks, err := tasks.FindTaskScripts(opt.APRoot, tasks.WithPrefix("test-e2e"))
-	if err != nil {
-		return fmt.Errorf("failed to discover e2e tasks: %w", err)
-	}
+	for _, apRoot := range opt.APRoots {
+		// Run test-e2e* scripts
+		e2eTasks, err := tasks.FindTaskScripts(apRoot, tasks.WithPrefix("test-e2e"))
+		if err != nil {
+			return fmt.Errorf("failed to discover e2e tasks in %s: %w", apRoot, err)
+		}
 
-	if len(e2eTasks) == 0 {
-		klog.Warning("No e2e tasks found (looking for dev/tasks/test-e2e*)")
-		return nil
-	}
+		if len(e2eTasks) == 0 {
+			continue
+		}
 
-	return tasks.Run(ctx, opt.APRoot, e2eTasks)
+		if err := tasks.Run(ctx, apRoot, e2eTasks); err != nil {
+			return err
+		}
+	}
+	return nil
 }
