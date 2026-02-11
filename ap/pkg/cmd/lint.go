@@ -56,5 +56,10 @@ func RunLint(ctx context.Context, opt LintOptions) error {
 	if err := prlinter.Lint(ctx, opt.RepoRoot); err != nil {
 		return err
 	}
-	return golang.Lint(ctx, opt.APRoot)
+	for _, apRoot := range opt.APRoots {
+		if err := golang.Lint(ctx, apRoot); err != nil {
+			return err
+		}
+	}
+	return nil
 }
