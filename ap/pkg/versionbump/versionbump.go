@@ -44,7 +44,7 @@ func Run(ctx context.Context, root string) error {
 	}
 	klog.Infof("Latest Go version: %s", latestGo)
 
-	// Strip 'go' prefix from 'go1.25.6' -> '1.25.6'
+	// Strip 'go' prefix from 'go1.26.0' -> '1.26.0'
 	version := strings.TrimPrefix(latestGo, "go")
 
 	ignore := walker.NewIgnoreList([]string{".git", "vendor", "node_modules"})
@@ -101,7 +101,7 @@ func fetchLatestGoVersion(ctx context.Context) (string, error) {
 
 var (
 	goModRegex = regexp.MustCompile(`(?m)^go\s+(\d+\.\d+(?:\.\d+)?)$`)
-	// In Dockerfiles, look for images like golang:1.25.6-trixie, golang:1.25-trixie, golang:1.25.6-bookworm, golang:1.25-bookworm
+	// In Dockerfiles, look for images like golang:1.26.0-trixie, golang:1.26-trixie, golang:1.26.0-bookworm, golang:1.26-bookworm
 	dockerfileRegex = regexp.MustCompile(`golang:(\d+\.\d+(?:\.\d+)?)(-[a-z0-9]+)?`)
 )
 
