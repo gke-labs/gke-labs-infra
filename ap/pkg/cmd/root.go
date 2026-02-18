@@ -40,7 +40,8 @@ func BuildRootCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "ap",
 		Short: "ap is a tool for managing gke-labs projects",
-		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			cmd.SilenceUsage = true
 			repoRoot, apRoot, err := findRoots()
 			if err == nil {
 				opt.RepoRoot = repoRoot
