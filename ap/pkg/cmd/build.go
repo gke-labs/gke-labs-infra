@@ -16,8 +16,10 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
 )
 
@@ -51,6 +53,15 @@ func RunBuild(ctx context.Context, opt BuildOptions) error {
 	}
 	for _, apRoot := range opt.APRoots {
 		if err := images.Build(ctx, apRoot); err != nil {
+			return err
+		}
+
+		// Run build-* scripts
+		buildTasks, err := tasks.FindTaskScripts(apRoot, tasks.WithPrefix("build-"))
+		if err != nil {
+			return fmt.Errorf("failed to discover build tasks in %s: %w", apRoot, err)
+		}
+		if err := tasks.Run(ctx, apRoot, buildTasks); err != nil {
 			return err
 		}
 	}

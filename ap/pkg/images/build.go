@@ -34,10 +34,7 @@ func Build(ctx context.Context, root string) error {
 		imagePrefix = "local"
 	}
 
-	ignoreList := walker.NewIgnoreList([]string{".git", "vendor", "node_modules"})
-	dockerfiles, err := walker.Walk(root, ignoreList, func(_ string, info os.FileInfo) bool {
-		return info.Name() == "Dockerfile"
-	})
+	dockerfiles, err := findDockerfiles(root)
 	if err != nil {
 		return err
 	}
@@ -48,19 +45,8 @@ func Build(ctx context.Context, root string) error {
 			continue
 		}
 
-		parts := strings.Split(relPath, string(os.PathSeparator))
-		name := ""
-
-		// Look for images/<name>/Dockerfile structure
-		for i, part := range parts {
-			if part == "images" && i+2 < len(parts) && parts[len(parts)-1] == "Dockerfile" {
-				name = parts[i+1]
-				break
-			}
-		}
-
+		name := getImageName(relPath)
 		if name == "" {
-			klog.V(2).Infof("Skipping Dockerfile not in images/<name>/Dockerfile structure: %s", relPath)
 			continue
 		}
 
@@ -76,4 +62,43 @@ func Build(ctx context.Context, root string) error {
 		}
 	}
 	return nil
+}
+
+// HasImages returns true if there are any images to build under root.
+func HasImages(root string) (bool, error) {
+	dockerfiles, err := findDockerfiles(root)
+	if err != nil {
+		return false, err
+	}
+
+	for _, dockerfile := range dockerfiles {
+		relPath, err := filepath.Rel(root, dockerfile)
+		if err != nil {
+			continue
+		}
+		if getImageName(relPath) != "" {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+func findDockerfiles(root string) ([]string, error) {
+	ignoreList := walker.NewIgnoreList([]string{".git", "vendor", "node_modules"})
+	return walker.Walk(root, ignoreList, func(_ string, info os.FileInfo) bool {
+		return info.Name() == "Dockerfile"
+	})
+}
+
+func getImageName(relPath string) string {
+	parts := strings.Split(relPath, string(os.PathSeparator))
+
+	// Look for images/<name>/Dockerfile structure
+	for i, part := range parts {
+		if part == "images" && i+2 < len(parts) && parts[len(parts)-1] == "Dockerfile" {
+			return parts[i+1]
+		}
+	}
+	return ""
 }
