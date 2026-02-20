@@ -62,6 +62,17 @@ func TestHasImages(t *testing.T) {
 			},
 			expected: false,
 		},
+		{
+			name: "nested ap root",
+			setup: func(root string) {
+				// Inner root
+				inner := filepath.Join(root, "inner")
+				os.MkdirAll(filepath.Join(inner, ".ap"), 0755)
+				os.MkdirAll(filepath.Join(inner, "images", "foo"), 0755)
+				os.WriteFile(filepath.Join(inner, "images", "foo", "Dockerfile"), []byte("FROM scratch"), 0644)
+			},
+			expected: false, // Because the only Dockerfile is inside another ap root
+		},
 	}
 
 	for _, tt := range tests {
