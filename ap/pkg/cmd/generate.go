@@ -19,6 +19,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/format"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/generate"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
 )
 
@@ -50,8 +51,20 @@ func RunGenerate(ctx context.Context, opt GenerateOptions) error {
 	if err := requireRepoRoot(opt.RootOptions); err != nil {
 		return err
 	}
-	if err := generate.Run(ctx, opt.RepoRoot); err != nil {
+
+	var allTasks []tasks.Task
+
+	generateTasks, err := generate.GenerateTasks(opt.RepoRoot)
+	if err != nil {
 		return err
 	}
-	return format.Run(ctx, opt.RepoRoot)
+	allTasks = append(allTasks, generateTasks)
+
+	formatTasks, err := format.FormatTasks(opt.RepoRoot)
+	if err != nil {
+		return err
+	}
+	allTasks = append(allTasks, formatTasks)
+
+	return tasks.Run(ctx, opt.RepoRoot, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
 }

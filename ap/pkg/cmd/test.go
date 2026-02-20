@@ -17,6 +17,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 
 	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
@@ -52,19 +53,27 @@ func RunTest(ctx context.Context, opt TestOptions) error {
 		return err
 	}
 
+	var allTasks []tasks.Task
 	for _, apRoot := range opt.APRoots {
-		if err := golang.Test(ctx, apRoot); err != nil {
-			return err
+		group := &tasks.Group{
+			Name: fmt.Sprintf("test-%s", filepath.Base(apRoot)),
 		}
 
+		goTasks, err := golang.TestTasks(apRoot)
+		if err != nil {
+			return err
+		}
+		group.Tasks = append(group.Tasks, goTasks)
+
 		// Run test-* scripts (excluding test-e2e*)
-		testTasks, err := tasks.FindTaskScripts(apRoot, tasks.WithPrefix("test-"), tasks.WithExcludePrefix("test-e2e"))
+		testScripts, err := tasks.FindTaskScripts(apRoot, tasks.WithPrefix("test-"), tasks.WithExcludePrefix("test-e2e"))
 		if err != nil {
 			return fmt.Errorf("failed to discover test tasks in %s: %w", apRoot, err)
 		}
-		if err := tasks.Run(ctx, apRoot, testTasks); err != nil {
-			return err
-		}
+		group.Tasks = append(group.Tasks, testScripts...)
+
+		allTasks = append(allTasks, group)
 	}
-	return nil
+
+	return tasks.Run(ctx, opt.RepoRoot, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
 }

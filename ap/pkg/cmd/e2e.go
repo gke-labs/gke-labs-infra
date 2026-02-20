@@ -17,6 +17,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
@@ -50,20 +51,25 @@ func RunE2e(ctx context.Context, opt E2eOptions) error {
 	if err := requireRepoRoot(opt.RootOptions); err != nil {
 		return err
 	}
+
+	var allTasks []tasks.Task
 	for _, apRoot := range opt.APRoots {
 		// Run test-e2e* scripts
-		e2eTasks, err := tasks.FindTaskScripts(apRoot, tasks.WithPrefix("test-e2e"))
+		e2eScripts, err := tasks.FindTaskScripts(apRoot, tasks.WithPrefix("test-e2e"))
 		if err != nil {
 			return fmt.Errorf("failed to discover e2e tasks in %s: %w", apRoot, err)
 		}
 
-		if len(e2eTasks) == 0 {
+		if len(e2eScripts) == 0 {
 			continue
 		}
 
-		if err := tasks.Run(ctx, apRoot, e2eTasks); err != nil {
-			return err
+		group := &tasks.Group{
+			Name:  fmt.Sprintf("e2e-%s", filepath.Base(apRoot)),
+			Tasks: e2eScripts,
 		}
+		allTasks = append(allTasks, group)
 	}
-	return nil
+
+	return tasks.Run(ctx, opt.RepoRoot, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
 }

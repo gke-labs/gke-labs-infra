@@ -18,9 +18,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
 )
 
@@ -57,14 +59,27 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		return fmt.Errorf("IMAGE_PREFIX is not set; it is required for deploy")
 	}
 
+	var allTasks []tasks.Task
 	for _, apRoot := range opt.APRoots {
+		group := &tasks.Group{
+			Name: fmt.Sprintf("deploy-%s", filepath.Base(apRoot)),
+		}
+
 		// Deploy typically also builds
-		if err := images.Build(ctx, apRoot, true); err != nil {
+		buildTasks, err := images.BuildTasks(apRoot, true)
+		if err != nil {
 			return fmt.Errorf("build failed during deploy for %s: %w", apRoot, err)
 		}
-		if err := k8s.Deploy(ctx, apRoot); err != nil {
+		group.Tasks = append(group.Tasks, buildTasks)
+
+		deployTasks, err := k8s.DeployTasks(apRoot)
+		if err != nil {
 			return fmt.Errorf("deploy failed for %s: %w", apRoot, err)
 		}
+		group.Tasks = append(group.Tasks, deployTasks)
+
+		allTasks = append(allTasks, group)
 	}
-	return nil
+
+	return tasks.Run(ctx, opt.RepoRoot, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
 }

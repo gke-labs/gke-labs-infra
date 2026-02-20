@@ -30,47 +30,136 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-func Run(ctx context.Context, repoRoot string) error {
+// LegacyScriptTask represents a task to run a legacy generate script.
+type LegacyScriptTask struct {
+	Name string
+	Path string
+	Dir  string
+}
+
+func (t *LegacyScriptTask) Run(ctx context.Context, _ string) error {
+	klog.Infof("Running legacy generate script: %s", t.Name)
+	cmd := exec.CommandContext(ctx, t.Path)
+	cmd.Dir = t.Dir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to run %s: %w", t.Name, err)
+	}
+	return nil
+}
+
+func (t *LegacyScriptTask) GetName() string {
+	return fmt.Sprintf("legacy-generate-%s", t.Name)
+}
+
+func (t *LegacyScriptTask) GetChildren() []tasks.Task {
+	return nil
+}
+
+// BuiltinGeneratorTask represents a task to run a built-in generator.
+type BuiltinGeneratorTask struct {
+	Name string
+	RunFunc func(ctx context.Context, repoRoot string) error
+}
+
+func (t *BuiltinGeneratorTask) Run(ctx context.Context, repoRoot string) error {
+	klog.Infof("Running built-in generator: %s", t.Name)
+	return t.RunFunc(ctx, repoRoot)
+}
+
+func (t *BuiltinGeneratorTask) GetName() string {
+	return fmt.Sprintf("builtin-generator-%s", t.Name)
+}
+
+func (t *BuiltinGeneratorTask) GetChildren() []tasks.Task {
+	return nil
+}
+
+// GenerateTasks returns a task group for all generation tasks.
+func GenerateTasks(repoRoot string) (tasks.Task, error) {
 	apRoots, err := config.FindAllAPRoots(repoRoot)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
+	var allTasks []tasks.Task
+
 	for _, apRoot := range apRoots {
-		klog.Infof("Generating for AP root: %s", apRoot)
+		group := &tasks.Group{
+			Name: fmt.Sprintf("generate-%s", filepath.Base(apRoot)),
+		}
 
 		// 1. Run legacy scripts
-		if err := runLegacyScripts(ctx, apRoot); err != nil {
-			return err
+		tasksDir := filepath.Join(apRoot, "dev", "tasks")
+		entries, err := os.ReadDir(tasksDir)
+		if err == nil {
+			for _, entry := range entries {
+				name := entry.Name()
+				if strings.HasPrefix(name, "generate-") && !entry.IsDir() {
+					// Skip generate-github-actions as we are replacing it
+					if name == "generate-github-actions" {
+						continue
+					}
+
+					group.Tasks = append(group.Tasks, &LegacyScriptTask{
+						Name: name,
+						Path: filepath.Join(tasksDir, name),
+						Dir:  apRoot,
+					})
+				}
+			}
+		}
+
+		if len(group.Tasks) > 0 {
+			allTasks = append(allTasks, group)
 		}
 	}
 
-	// 2. Run built-in generators (only in repoRoot)
-	if err := runGenerateVerifierGenerator(ctx, repoRoot); err != nil {
+	// 2. Run built-in generators
+	allTasks = append(allTasks, &BuiltinGeneratorTask{
+		Name: "verify-generate",
+		RunFunc: runGenerateVerifierGenerator,
+	})
+	allTasks = append(allTasks, &BuiltinGeneratorTask{
+		Name: "ap-test",
+		RunFunc: runApTestGenerator,
+	})
+	allTasks = append(allTasks, &BuiltinGeneratorTask{
+		Name: "ap-lint",
+		RunFunc: runApLintGenerator,
+	})
+	allTasks = append(allTasks, &BuiltinGeneratorTask{
+		Name: "ap-build",
+		RunFunc: func(ctx context.Context, repoRoot string) error {
+			return runApBuildGenerator(ctx, repoRoot, apRoots)
+		},
+	})
+	allTasks = append(allTasks, &BuiltinGeneratorTask{
+		Name: "ap-e2e",
+		RunFunc: func(ctx context.Context, repoRoot string) error {
+			return runApE2eGenerator(ctx, repoRoot, apRoots)
+		},
+	})
+	allTasks = append(allTasks, &BuiltinGeneratorTask{
+		Name: "github-actions",
+		RunFunc: func(ctx context.Context, repoRoot string) error {
+			return runGithubActionsGenerator(ctx, repoRoot, apRoots)
+		},
+	})
+
+	return &tasks.Group{
+		Name:  "generate",
+		Tasks: allTasks,
+	}, nil
+}
+
+func Run(ctx context.Context, repoRoot string) error {
+	t, err := GenerateTasks(repoRoot)
+	if err != nil {
 		return err
 	}
-
-	if err := runApTestGenerator(ctx, repoRoot); err != nil {
-		return err
-	}
-
-	if err := runApLintGenerator(ctx, repoRoot); err != nil {
-		return err
-	}
-
-	if err := runApBuildGenerator(ctx, repoRoot, apRoots); err != nil {
-		return err
-	}
-
-	if err := runApE2eGenerator(ctx, repoRoot, apRoots); err != nil {
-		return err
-	}
-
-	if err := runGithubActionsGenerator(ctx, repoRoot, apRoots); err != nil {
-		return err
-	}
-
-	return nil
+	return t.Run(ctx, repoRoot)
 }
 
 func getSuffix(repoRoot, apRoot string) string {
@@ -82,38 +171,6 @@ func getSuffix(repoRoot, apRoot string) string {
 		return ""
 	}
 	return "-" + strings.ReplaceAll(rel, string(filepath.Separator), "-")
-}
-
-func runLegacyScripts(ctx context.Context, apRoot string) error {
-	tasksDir := filepath.Join(apRoot, "dev", "tasks")
-	entries, err := os.ReadDir(tasksDir)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("failed to read tasks dir: %w", err)
-	}
-
-	for _, entry := range entries {
-		name := entry.Name()
-		if strings.HasPrefix(name, "generate-") && !entry.IsDir() {
-			// Skip generate-github-actions as we are replacing it
-			if name == "generate-github-actions" {
-				continue
-			}
-
-			path := filepath.Join(tasksDir, name)
-			klog.Infof("Running legacy generate script: %s", name)
-			cmd := exec.CommandContext(ctx, path)
-			cmd.Dir = apRoot
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			if err := cmd.Run(); err != nil {
-				return fmt.Errorf("failed to run %s: %w", name, err)
-			}
-		}
-	}
-	return nil
 }
 
 func runGenerateVerifierGenerator(_ context.Context, repoRoot string) error {

@@ -30,6 +30,7 @@ import (
 type Task interface {
 	Run(ctx context.Context, root string) error
 	GetName() string
+	GetChildren() []Task
 }
 
 // TaskScript represents a discoverable task script.
@@ -52,6 +53,33 @@ func (t *TaskScript) Run(ctx context.Context, root string) error {
 
 func (t *TaskScript) GetName() string {
 	return t.Name
+}
+
+func (t *TaskScript) GetChildren() []Task {
+	return nil
+}
+
+// Group represents a collection of tasks.
+type Group struct {
+	Name  string
+	Tasks []Task
+}
+
+func (g *Group) Run(ctx context.Context, root string) error {
+	for _, t := range g.Tasks {
+		if err := t.Run(ctx, root); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (g *Group) GetName() string {
+	return g.Name
+}
+
+func (g *Group) GetChildren() []Task {
+	return g.Tasks
 }
 
 type FindOptions struct {
@@ -115,12 +143,31 @@ func FindTaskScripts(root string, opts ...FindOption) ([]Task, error) {
 	return tasks, nil
 }
 
+// RunOptions holds options for running tasks.
+type RunOptions struct {
+	DryRun bool
+}
+
 // Run executes a list of tasks.
-func Run(ctx context.Context, root string, tasks []Task) error {
+func Run(ctx context.Context, root string, tasks []Task, opts RunOptions) error {
+	if opts.DryRun {
+		for _, task := range tasks {
+			PrintTree(task, 0)
+		}
+		return nil
+	}
 	for _, task := range tasks {
 		if err := task.Run(ctx, root); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// PrintTree prints the task tree to stdout.
+func PrintTree(t Task, indent int) {
+	fmt.Printf("%s%s\n", strings.Repeat("  ", indent), t.GetName())
+	for _, child := range t.GetChildren() {
+		PrintTree(child, indent+1)
+	}
 }

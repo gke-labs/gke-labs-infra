@@ -22,26 +22,17 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/fileheaders"
 	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/gostyle"
 	"k8s.io/klog/v2"
 )
 
-func Run(ctx context.Context, root string) error {
-	// 1. Run codestyle (headers, gofmt, etc)
-	if err := runCodestyle(ctx, root); err != nil {
-		return err
-	}
-
-	// 2. Run legacy format scripts
-	if err := runLegacyScripts(ctx, root); err != nil {
-		return err
-	}
-
-	return nil
+// CodestyleTask represents a task to run codestyle checks (headers, gofmt, etc).
+type CodestyleTask struct {
 }
 
-func runCodestyle(ctx context.Context, root string) error {
+func (t *CodestyleTask) Run(ctx context.Context, root string) error {
 	klog.Info("Running codestyle...")
 	if err := fileheaders.Run(ctx, root, nil); err != nil {
 		return fmt.Errorf("fileheaders failed: %w", err)
@@ -49,33 +40,75 @@ func runCodestyle(ctx context.Context, root string) error {
 	if err := gostyle.Run(ctx, root, nil); err != nil {
 		return fmt.Errorf("gostyle failed: %w", err)
 	}
-
 	return nil
 }
 
-func runLegacyScripts(ctx context.Context, root string) error {
+func (t *CodestyleTask) GetName() string {
+	return "codestyle"
+}
+
+func (t *CodestyleTask) GetChildren() []tasks.Task {
+	return nil
+}
+
+// LegacyFormatScriptTask represents a task to run a legacy format script.
+type LegacyFormatScriptTask struct {
+	Name string
+	Path string
+}
+
+func (t *LegacyFormatScriptTask) Run(ctx context.Context, root string) error {
+	klog.Infof("Running legacy format script: %s", t.Name)
+	cmd := exec.CommandContext(ctx, t.Path)
+	cmd.Dir = root
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to run %s: %w", t.Name, err)
+	}
+	return nil
+}
+
+func (t *LegacyFormatScriptTask) GetName() string {
+	return fmt.Sprintf("legacy-format-%s", t.Name)
+}
+
+func (t *LegacyFormatScriptTask) GetChildren() []tasks.Task {
+	return nil
+}
+
+// FormatTasks returns a task group for all formatting tasks.
+func FormatTasks(root string) (tasks.Task, error) {
+	var allTasks []tasks.Task
+
+	// 1. Run codestyle (headers, gofmt, etc)
+	allTasks = append(allTasks, &CodestyleTask{})
+
+	// 2. Run legacy format scripts
 	tasksDir := filepath.Join(root, "dev", "tasks")
 	entries, err := os.ReadDir(tasksDir)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("failed to read tasks dir: %w", err)
-	}
-
-	for _, entry := range entries {
-		name := entry.Name()
-		if strings.HasPrefix(name, "format-") && !entry.IsDir() {
-			path := filepath.Join(tasksDir, name)
-			klog.Infof("Running legacy format script: %s", name)
-			cmd := exec.CommandContext(ctx, path)
-			cmd.Dir = root
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			if err := cmd.Run(); err != nil {
-				return fmt.Errorf("failed to run %s: %w", name, err)
+	if err == nil {
+		for _, entry := range entries {
+			name := entry.Name()
+			if strings.HasPrefix(name, "format-") && !entry.IsDir() {
+				allTasks = append(allTasks, &LegacyFormatScriptTask{
+					Name: name,
+					Path: filepath.Join(tasksDir, name),
+				})
 			}
 		}
 	}
-	return nil
+
+	return &tasks.Group{
+		Name:  "format",
+		Tasks: allTasks,
+	}, nil
+}
+
+func Run(ctx context.Context, root string) error {
+	t, err := FormatTasks(root)
+	if err != nil {
+		return err
+	}
+	return t.Run(ctx, root)
 }

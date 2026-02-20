@@ -22,26 +22,70 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/walker"
 	"k8s.io/klog/v2"
 )
 
-// Build builds docker images found in images/<name>/Dockerfile.
-func Build(ctx context.Context, root string, push bool) error {
+// DockerBuildTask represents a task to build a single docker image.
+type DockerBuildTask struct {
+	ImageName string
+	Dockerfile string
+	Root      string
+	Push      bool
+}
+
+func (t *DockerBuildTask) Run(ctx context.Context, root string) error {
 	imagePrefix := os.Getenv("IMAGE_PREFIX")
-	if push && imagePrefix == "" {
-		return fmt.Errorf("IMAGE_PREFIX is not set; it is required for pushing images")
-	}
 	tag := os.Getenv("IMAGE_TAG")
 	if tag == "" {
 		tag = "latest"
 	}
 
-	dockerfiles, err := findDockerfiles(root)
-	if err != nil {
-		return err
+	var fullImageName string
+	if imagePrefix != "" {
+		fullImageName = fmt.Sprintf("%s/%s:%s", imagePrefix, t.ImageName, tag)
+	} else {
+		fullImageName = fmt.Sprintf("%s:%s", t.ImageName, tag)
 	}
 
+	klog.Infof("Building image %s from %s", fullImageName, t.Root)
+	args := []string{"buildx", "build", "-t", fullImageName, "-f", t.Dockerfile}
+	if t.Push {
+		args = append(args, "--push")
+	}
+	args = append(args, ".")
+
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.Dir = t.Root
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("docker build failed for %s: %w", t.ImageName, err)
+	}
+	return nil
+}
+
+func (t *DockerBuildTask) GetName() string {
+	return fmt.Sprintf("docker-build-%s", t.ImageName)
+}
+
+func (t *DockerBuildTask) GetChildren() []tasks.Task {
+	return nil
+}
+
+// BuildTasks returns a task group for building all docker images found in images/<name>/Dockerfile.
+func BuildTasks(root string, push bool) (tasks.Task, error) {
+	if push && os.Getenv("IMAGE_PREFIX") == "" {
+		return nil, fmt.Errorf("IMAGE_PREFIX is not set; it is required for pushing images")
+	}
+
+	dockerfiles, err := findDockerfiles(root)
+	if err != nil {
+		return nil, err
+	}
+
+	var buildTasks []tasks.Task
 	for _, dockerfile := range dockerfiles {
 		relPath, err := filepath.Rel(root, dockerfile)
 		if err != nil {
@@ -53,29 +97,27 @@ func Build(ctx context.Context, root string, push bool) error {
 			continue
 		}
 
-		var fullImageName string
-		if imagePrefix != "" {
-			fullImageName = fmt.Sprintf("%s/%s:%s", imagePrefix, name, tag)
-		} else {
-			fullImageName = fmt.Sprintf("%s:%s", name, tag)
-		}
-
-		klog.Infof("Building image %s from %s", fullImageName, root)
-		args := []string{"buildx", "build", "-t", fullImageName, "-f", relPath}
-		if push {
-			args = append(args, "--push")
-		}
-		args = append(args, ".")
-
-		cmd := exec.CommandContext(ctx, "docker", args...)
-		cmd.Dir = root
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("docker build failed for %s: %w", name, err)
-		}
+		buildTasks = append(buildTasks, &DockerBuildTask{
+			ImageName:  name,
+			Dockerfile: relPath,
+			Root:       root,
+			Push:       push,
+		})
 	}
-	return nil
+
+	return &tasks.Group{
+		Name:  "build-images",
+		Tasks: buildTasks,
+	}, nil
+}
+
+// Build builds docker images found in images/<name>/Dockerfile.
+func Build(ctx context.Context, root string, push bool) error {
+	t, err := BuildTasks(root, push)
+	if err != nil {
+		return err
+	}
+	return t.Run(ctx, root)
 }
 
 // HasImages returns true if there are any images to build under root.

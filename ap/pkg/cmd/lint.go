@@ -16,9 +16,12 @@ package cmd
 
 import (
 	"context"
+	"fmt"
+	"path/filepath"
 
 	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/prlinter"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
 )
 
@@ -53,13 +56,28 @@ func RunLint(ctx context.Context, opt LintOptions) error {
 	if err := requireRepoRoot(opt.RootOptions); err != nil {
 		return err
 	}
-	if err := prlinter.Lint(ctx, opt.RepoRoot); err != nil {
+
+	var allTasks []tasks.Task
+
+	prTask, err := prlinter.LintTasks(opt.RepoRoot)
+	if err != nil {
 		return err
 	}
+	allTasks = append(allTasks, prTask)
+
 	for _, apRoot := range opt.APRoots {
-		if err := golang.Lint(ctx, apRoot); err != nil {
+		group := &tasks.Group{
+			Name: fmt.Sprintf("lint-%s", filepath.Base(apRoot)),
+		}
+
+		goTasks, err := golang.LintTasks(apRoot)
+		if err != nil {
 			return err
 		}
+		group.Tasks = append(group.Tasks, goTasks)
+
+		allTasks = append(allTasks, group)
 	}
-	return nil
+
+	return tasks.Run(ctx, opt.RepoRoot, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
 }

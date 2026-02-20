@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/walker"
 	"k8s.io/klog/v2"
 )
@@ -40,27 +41,51 @@ type testEvent struct {
 	Output     string    `json:"Output"`
 }
 
-// Test runs go tests in discovered modules.
-func Test(ctx context.Context, root string) error {
+// GoTestTask represents a task to run go tests in a single module.
+type GoTestTask struct {
+	Dir        string
+	Name       string
+	ResultFile string
+}
+
+func (t *GoTestTask) Run(ctx context.Context, root string) error {
+	klog.Infof("Running go test in %s", t.Dir)
+	if err := runGoTest(ctx, t.Dir, t.ResultFile); err != nil {
+		return fmt.Errorf("go test failed in %s: %w", t.Dir, err)
+	}
+	return nil
+}
+
+func (t *GoTestTask) GetName() string {
+	return fmt.Sprintf("go-test-%s", t.Name)
+}
+
+func (t *GoTestTask) GetChildren() []tasks.Task {
+	return nil
+}
+
+// TestTasks returns a task group for running go tests in discovered modules.
+func TestTasks(root string) (tasks.Task, error) {
 	// Find all go.mod files
 	ignoreList := walker.NewIgnoreList([]string{".git", "vendor", "node_modules"})
 	goMods, err := walker.Walk(root, ignoreList, func(_ string, info os.FileInfo) bool {
 		return info.Name() == "go.mod"
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	buildDir := filepath.Join(root, ".build", "test-results", "go")
 	if err := os.MkdirAll(buildDir, 0755); err != nil {
-		return fmt.Errorf("failed to create build dir: %w", err)
+		return nil, fmt.Errorf("failed to create build dir: %w", err)
 	}
 
+	var testTasks []tasks.Task
 	for _, goMod := range goMods {
 		dir := filepath.Dir(goMod)
 		rel, err := filepath.Rel(root, dir)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		name := rel
@@ -69,15 +94,29 @@ func Test(ctx context.Context, root string) error {
 		}
 		resultFile := filepath.Join(buildDir, name+".json")
 		if err := os.MkdirAll(filepath.Dir(resultFile), 0755); err != nil {
-			return err
+			return nil, err
 		}
 
-		klog.Infof("Running go test in %s", dir)
-		if err := runGoTest(ctx, dir, resultFile); err != nil {
-			return fmt.Errorf("go test failed in %s: %w", dir, err)
-		}
+		testTasks = append(testTasks, &GoTestTask{
+			Dir:        dir,
+			Name:       name,
+			ResultFile: resultFile,
+		})
 	}
-	return nil
+
+	return &tasks.Group{
+		Name:  "go-tests",
+		Tasks: testTasks,
+	}, nil
+}
+
+// Test runs go tests in discovered modules.
+func Test(ctx context.Context, root string) error {
+	t, err := TestTasks(root)
+	if err != nil {
+		return err
+	}
+	return t.Run(ctx, root)
 }
 
 func runGoTest(ctx context.Context, dir string, resultFile string) error {

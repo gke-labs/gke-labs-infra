@@ -31,6 +31,7 @@ type RootOptions struct {
 	RepoRoot string
 	APRoot   string
 	APRoots  []string
+	DryRun   bool
 }
 
 // BuildRootCommand constructs the root cobra command.
@@ -60,6 +61,8 @@ func BuildRootCommand() *cobra.Command {
 	}
 
 	fs := cmd.PersistentFlags()
+	fs.BoolVar(&opt.DryRun, "dry-run", false, "If true, just print the tasks that would be executed")
+
 	klogFlags := flag.NewFlagSet("klog", flag.ContinueOnError)
 	klog.InitFlags(klogFlags)
 	fs.AddGoFlagSet(klogFlags)
