@@ -16,8 +16,11 @@ package cmd
 
 import (
 	"context"
+	"fmt"
+	"path/filepath"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/format"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
 )
 
@@ -50,10 +53,18 @@ func RunFormat(ctx context.Context, opt FormatOptions) error {
 	if err := requireRepoRoot(opt.RootOptions); err != nil {
 		return err
 	}
+
+	var allTasks []tasks.Task
 	for _, apRoot := range opt.APRoots {
-		if err := format.Run(ctx, apRoot); err != nil {
+		group, err := format.FormatTasks(apRoot)
+		if err != nil {
 			return err
 		}
+		if g, ok := group.(*tasks.Group); ok {
+			g.Name = fmt.Sprintf("format-%s", filepath.Base(apRoot))
+		}
+		allTasks = append(allTasks, group)
 	}
-	return nil
+
+	return tasks.Run(ctx, opt.RepoRoot, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
 }

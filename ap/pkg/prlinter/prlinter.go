@@ -21,12 +21,17 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"k8s.io/klog/v2"
 )
 
-// Lint runs PR-specific linting checks.
-func Lint(ctx context.Context, repoRoot string) error {
-	baseBranch, err := detectBaseBranch(ctx, repoRoot)
+// PRLintTask represents a task to run PR-specific linting checks.
+type PRLintTask struct {
+	RepoRoot string
+}
+
+func (t *PRLintTask) Run(ctx context.Context, root string) error {
+	baseBranch, err := detectBaseBranch(ctx, t.RepoRoot)
 	if err != nil {
 		klog.V(2).Infof("Could not detect base branch: %v", err)
 		return nil
@@ -39,7 +44,7 @@ func Lint(ctx context.Context, repoRoot string) error {
 
 	klog.Infof("Comparing against base branch %q", baseBranch)
 
-	diff, err := getDiff(ctx, repoRoot, baseBranch)
+	diff, err := getDiff(ctx, t.RepoRoot, baseBranch)
 	if err != nil {
 		return fmt.Errorf("error getting diff: %w", err)
 	}
@@ -49,6 +54,28 @@ func Lint(ctx context.Context, repoRoot string) error {
 	}
 
 	return nil
+}
+
+func (t *PRLintTask) GetName() string {
+	return "pr-linter"
+}
+
+func (t *PRLintTask) GetChildren() []tasks.Task {
+	return nil
+}
+
+// LintTasks returns a task for PR-specific linting.
+func LintTasks(repoRoot string) (tasks.Task, error) {
+	return &PRLintTask{RepoRoot: repoRoot}, nil
+}
+
+// Lint runs PR-specific linting checks.
+func Lint(ctx context.Context, repoRoot string) error {
+	t, err := LintTasks(repoRoot)
+	if err != nil {
+		return err
+	}
+	return t.Run(ctx, repoRoot)
 }
 
 func detectBaseBranch(ctx context.Context, repoRoot string) (string, error) {

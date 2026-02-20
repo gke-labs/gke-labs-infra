@@ -25,6 +25,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/walker"
 	"gopkg.in/yaml.v3"
 	"k8s.io/klog/v2"
@@ -223,13 +224,12 @@ func findEnd(content string, start int, style yaml.Style) int {
 	return len(content)
 }
 
-// Deploy deploys k8s manifests found in k8s directories.
-func Deploy(ctx context.Context, root string) error {
-	manifests, err := findManifests(root)
-	if err != nil {
-		return err
-	}
+// KubectlApplyTask represents a task to apply a single k8s manifest.
+type KubectlApplyTask struct {
+	ManifestPath string
+}
 
+func (t *KubectlApplyTask) Run(ctx context.Context, root string) error {
 	imageRepository := os.Getenv("IMAGE_PREFIX")
 	if imageRepository == "" {
 		return fmt.Errorf("IMAGE_PREFIX is not set; it is required for deploy")
@@ -239,31 +239,65 @@ func Deploy(ctx context.Context, root string) error {
 		tag = "latest"
 	}
 
-	for _, manifest := range manifests {
-		relPath, _ := filepath.Rel(root, manifest)
+	relPath, _ := filepath.Rel(root, t.ManifestPath)
+	klog.Infof("Applying manifest %s", relPath)
 
-		klog.Infof("Applying manifest %s", relPath)
+	content, err := os.ReadFile(t.ManifestPath)
+	if err != nil {
+		return err
+	}
 
-		content, err := os.ReadFile(manifest)
-		if err != nil {
-			return err
-		}
+	replaced, err := replacePlaceholderImages(string(content), imageRepository, tag)
+	if err != nil {
+		return fmt.Errorf("failed to replace placeholders in %s: %w", relPath, err)
+	}
 
-		replaced, err := replacePlaceholderImages(string(content), imageRepository, tag)
-		if err != nil {
-			return fmt.Errorf("failed to replace placeholders in %s: %w", relPath, err)
-		}
+	cmd := exec.CommandContext(ctx, "kubectl", "apply", "-f", "-")
+	cmd.Stdin = bytes.NewBufferString(replaced)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 
-		cmd := exec.CommandContext(ctx, "kubectl", "apply", "-f", "-")
-		cmd.Stdin = bytes.NewBufferString(replaced)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("kubectl apply failed for %s: %w", relPath, err)
-		}
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("kubectl apply failed for %s: %w", relPath, err)
 	}
 	return nil
+}
+
+func (t *KubectlApplyTask) GetName() string {
+	return fmt.Sprintf("kubectl-apply-%s", filepath.Base(t.ManifestPath))
+}
+
+func (t *KubectlApplyTask) GetChildren() []tasks.Task {
+	return nil
+}
+
+// DeployTasks returns a task group for deploying all k8s manifests found in k8s directories.
+func DeployTasks(root string) (tasks.Task, error) {
+	manifests, err := findManifests(root)
+	if err != nil {
+		return nil, err
+	}
+
+	var deployTasks []tasks.Task
+	for _, manifest := range manifests {
+		deployTasks = append(deployTasks, &KubectlApplyTask{
+			ManifestPath: manifest,
+		})
+	}
+
+	return &tasks.Group{
+		Name:  "deploy-k8s",
+		Tasks: deployTasks,
+	}, nil
+}
+
+// Deploy deploys k8s manifests found in k8s directories.
+func Deploy(ctx context.Context, root string) error {
+	t, err := DeployTasks(root)
+	if err != nil {
+		return err
+	}
+	return t.Run(ctx, root)
 }
 
 func findManifests(root string) ([]string, error) {

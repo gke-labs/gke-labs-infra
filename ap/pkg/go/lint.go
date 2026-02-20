@@ -22,15 +22,137 @@ import (
 	"path/filepath"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/walker"
 	"k8s.io/klog/v2"
 )
 
-// Lint runs go vet and govulncheck in discovered modules.
-func Lint(ctx context.Context, root string) error {
+// GoVetTask represents a task to run go vet.
+type GoVetTask struct {
+	Dir string
+}
+
+func (t *GoVetTask) Run(ctx context.Context, root string) error {
+	klog.Infof("Running go vet in %s", t.Dir)
+	vetCmd := exec.CommandContext(ctx, "go", "vet", "./...")
+	vetCmd.Dir = t.Dir
+	vetCmd.Stdout = os.Stdout
+	vetCmd.Stderr = os.Stderr
+	if err := vetCmd.Run(); err != nil {
+		return fmt.Errorf("go vet failed in %s: %w", t.Dir, err)
+	}
+	return nil
+}
+
+func (t *GoVetTask) GetName() string {
+	return "go-vet"
+}
+
+func (t *GoVetTask) GetChildren() []tasks.Task {
+	return nil
+}
+
+// GovulncheckTask represents a task to run govulncheck.
+type GovulncheckTask struct {
+	Dir string
+}
+
+func (t *GovulncheckTask) Run(ctx context.Context, root string) error {
+	klog.Infof("Running govulncheck in %s", t.Dir)
+	vulnCmd := exec.CommandContext(ctx, "go", "run", "golang.org/x/vuln/cmd/govulncheck@latest", "./...")
+	vulnCmd.Dir = t.Dir
+	vulnCmd.Stdout = os.Stdout
+	vulnCmd.Stderr = os.Stderr
+	if err := vulnCmd.Run(); err != nil {
+		return fmt.Errorf("govulncheck failed in %s: %w", t.Dir, err)
+	}
+	return nil
+}
+
+func (t *GovulncheckTask) GetName() string {
+	return "govulncheck"
+}
+
+func (t *GovulncheckTask) GetChildren() []tasks.Task {
+	return nil
+}
+
+// UnusedCheckTask represents a task to run unused check.
+type UnusedCheckTask struct {
+	Dir             string
+	CheckParameters bool
+}
+
+func (t *UnusedCheckTask) Run(ctx context.Context, root string) error {
+	klog.Infof("Running unused check in %s", t.Dir)
+	apPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("could not find ap executable: %w", err)
+	}
+	args := []string{"lint", "unused"}
+	if t.CheckParameters {
+		args = append(args, "-unused.check-parameters=true")
+	} else {
+		args = append(args, "-unused.check-parameters=false")
+	}
+	args = append(args, "./...")
+	unusedCmd := exec.CommandContext(ctx, apPath, args...)
+	unusedCmd.Dir = t.Dir
+	unusedCmd.Stdout = os.Stdout
+	unusedCmd.Stderr = os.Stderr
+	if err := unusedCmd.Run(); err != nil {
+		return fmt.Errorf("unused check failed in %s: %w", t.Dir, err)
+	}
+	return nil
+}
+
+func (t *UnusedCheckTask) GetName() string {
+	return "unused-check"
+}
+
+func (t *UnusedCheckTask) GetChildren() []tasks.Task {
+	return nil
+}
+
+// TestContextCheckTask represents a task to run testcontext check.
+type TestContextCheckTask struct {
+	Dir      string
+	IsError  bool
+}
+
+func (t *TestContextCheckTask) Run(ctx context.Context, root string) error {
+	klog.Infof("Running testcontext check in %s", t.Dir)
+	apPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("could not find ap executable: %w", err)
+	}
+	args := []string{"lint", "testcontext", "./..."}
+	testcontextCmd := exec.CommandContext(ctx, apPath, args...)
+	testcontextCmd.Dir = t.Dir
+	testcontextCmd.Stdout = os.Stdout
+	testcontextCmd.Stderr = os.Stderr
+	if err := testcontextCmd.Run(); err != nil {
+		if t.IsError {
+			return fmt.Errorf("testcontext check failed in %s: %w", t.Dir, err)
+		}
+		klog.Warningf("testcontext check failed in %s: %v", t.Dir, err)
+	}
+	return nil
+}
+
+func (t *TestContextCheckTask) GetName() string {
+	return "testcontext-check"
+}
+
+func (t *TestContextCheckTask) GetChildren() []tasks.Task {
+	return nil
+}
+
+// LintTasks returns a task group for running go linting in discovered modules.
+func LintTasks(root string) (tasks.Task, error) {
 	cfg, err := config.Load(root)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Find all go.mod files
@@ -39,85 +161,62 @@ func Lint(ctx context.Context, root string) error {
 		return info.Name() == "go.mod"
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
+	var moduleTasks []tasks.Task
 	for _, goMod := range goMods {
 		dir := filepath.Dir(goMod)
 
 		hasGo, err := hasGoFiles(dir)
 		if err != nil {
-			return fmt.Errorf("failed to check for Go files in %s: %w", dir, err)
+			return nil, fmt.Errorf("failed to check for Go files in %s: %w", dir, err)
 		}
 		if !hasGo {
-			klog.Infof("Skipping %s as it contains no Go files", dir)
 			continue
 		}
 
+		modGroup := &tasks.Group{
+			Name: fmt.Sprintf("go-lint-%s", filepath.Base(dir)),
+		}
+
 		if cfg.IsGovetEnabled() {
-			klog.Infof("Running go vet in %s", dir)
-			vetCmd := exec.CommandContext(ctx, "go", "vet", "./...")
-			vetCmd.Dir = dir
-			vetCmd.Stdout = os.Stdout
-			vetCmd.Stderr = os.Stderr
-			if err := vetCmd.Run(); err != nil {
-				return fmt.Errorf("go vet failed in %s: %w", dir, err)
-			}
+			modGroup.Tasks = append(modGroup.Tasks, &GoVetTask{Dir: dir})
 		}
-
 		if cfg.IsGovulncheckEnabled() {
-			klog.Infof("Running govulncheck in %s", dir)
-			vulnCmd := exec.CommandContext(ctx, "go", "run", "golang.org/x/vuln/cmd/govulncheck@latest", "./...")
-			vulnCmd.Dir = dir
-			vulnCmd.Stdout = os.Stdout
-			vulnCmd.Stderr = os.Stderr
-			if err := vulnCmd.Run(); err != nil {
-				return fmt.Errorf("govulncheck failed in %s: %w", dir, err)
-			}
+			modGroup.Tasks = append(modGroup.Tasks, &GovulncheckTask{Dir: dir})
 		}
-
 		if cfg.IsUnusedEnabled() {
-			klog.Infof("Running unused check in %s", dir)
-			apPath, err := os.Executable()
-			if err != nil {
-				return fmt.Errorf("could not find ap executable: %w", err)
-			}
-			args := []string{"lint", "unused"}
-			if cfg.IsUnusedParametersEnabled() {
-				args = append(args, "-unused.check-parameters=true")
-			} else {
-				args = append(args, "-unused.check-parameters=false")
-			}
-			args = append(args, "./...")
-			unusedCmd := exec.CommandContext(ctx, apPath, args...)
-			unusedCmd.Dir = dir
-			unusedCmd.Stdout = os.Stdout
-			unusedCmd.Stderr = os.Stderr
-			if err := unusedCmd.Run(); err != nil {
-				return fmt.Errorf("unused check failed in %s: %w", dir, err)
-			}
+			modGroup.Tasks = append(modGroup.Tasks, &UnusedCheckTask{
+				Dir:             dir,
+				CheckParameters: cfg.IsUnusedParametersEnabled(),
+			})
+		}
+		if cfg.IsTestContextEnabled() {
+			modGroup.Tasks = append(modGroup.Tasks, &TestContextCheckTask{
+				Dir:     dir,
+				IsError: cfg.IsTestContextError(),
+			})
 		}
 
-		if cfg.IsTestContextEnabled() {
-			klog.Infof("Running testcontext check in %s", dir)
-			apPath, err := os.Executable()
-			if err != nil {
-				return fmt.Errorf("could not find ap executable: %w", err)
-			}
-			args := []string{"lint", "testcontext", "./..."}
-			testcontextCmd := exec.CommandContext(ctx, apPath, args...)
-			testcontextCmd.Dir = dir
-			testcontextCmd.Stdout = os.Stdout
-			testcontextCmd.Stderr = os.Stderr
-			if err := testcontextCmd.Run(); err != nil {
-				if cfg.IsTestContextError() {
-					return fmt.Errorf("testcontext check failed in %s: %w", dir, err)
-				}
-				klog.Warningf("testcontext check failed in %s: %v", dir, err)
-			}
+		if len(modGroup.Tasks) > 0 {
+			moduleTasks = append(moduleTasks, modGroup)
 		}
 	}
-	return nil
+
+	return &tasks.Group{
+		Name:  "go-lints",
+		Tasks: moduleTasks,
+	}, nil
+}
+
+// Lint runs go vet and govulncheck in discovered modules.
+func Lint(ctx context.Context, root string) error {
+	t, err := LintTasks(root)
+	if err != nil {
+		return err
+	}
+	return t.Run(ctx, root)
 }
 
 // hasGoFiles returns true if the directory or any of its subdirectories

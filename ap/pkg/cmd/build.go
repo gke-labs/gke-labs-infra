@@ -17,6 +17,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
@@ -51,19 +52,28 @@ func RunBuild(ctx context.Context, opt BuildOptions) error {
 	if err := requireRepoRoot(opt.RootOptions); err != nil {
 		return err
 	}
+
+	var allTasks []tasks.Task
 	for _, apRoot := range opt.APRoots {
-		if err := images.Build(ctx, apRoot, false); err != nil {
-			return err
+		group := &tasks.Group{
+			Name: fmt.Sprintf("build-%s", filepath.Base(apRoot)),
 		}
 
+		imageTasks, err := images.BuildTasks(apRoot, false)
+		if err != nil {
+			return err
+		}
+		group.Tasks = append(group.Tasks, imageTasks)
+
 		// Run build-* scripts
-		buildTasks, err := tasks.FindTaskScripts(apRoot, tasks.WithPrefix("build-"))
+		buildScripts, err := tasks.FindTaskScripts(apRoot, tasks.WithPrefix("build-"))
 		if err != nil {
 			return fmt.Errorf("failed to discover build tasks in %s: %w", apRoot, err)
 		}
-		if err := tasks.Run(ctx, apRoot, buildTasks); err != nil {
-			return err
-		}
+		group.Tasks = append(group.Tasks, buildScripts...)
+
+		allTasks = append(allTasks, group)
 	}
-	return nil
+
+	return tasks.Run(ctx, opt.RepoRoot, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
 }
