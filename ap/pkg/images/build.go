@@ -27,50 +27,9 @@ import (
 )
 
 // Build builds docker images found in images/<name>/Dockerfile.
-func Build(ctx context.Context, root string) error {
+func Build(ctx context.Context, root string, push bool) error {
 	imagePrefix := os.Getenv("IMAGE_PREFIX")
-	if imagePrefix == "" {
-		return fmt.Errorf("IMAGE_PREFIX is not set; it is required for building images")
-	}
-	tag := os.Getenv("IMAGE_TAG")
-	if tag == "" {
-		tag = "latest"
-	}
-
-	dockerfiles, err := findDockerfiles(root)
-	if err != nil {
-		return err
-	}
-
-	for _, dockerfile := range dockerfiles {
-		relPath, err := filepath.Rel(root, dockerfile)
-		if err != nil {
-			continue
-		}
-
-		name := getImageName(relPath)
-		if name == "" {
-			continue
-		}
-
-		fullImageName := fmt.Sprintf("%s/%s:%s", imagePrefix, name, tag)
-
-		klog.Infof("Building image %s from %s", fullImageName, root)
-		cmd := exec.CommandContext(ctx, "docker", "buildx", "build", "-t", fullImageName, "-f", relPath, ".")
-		cmd.Dir = root
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("docker build failed for %s: %w", name, err)
-		}
-	}
-	return nil
-}
-
-// Push pushes docker images found in images/<name>/Dockerfile.
-func Push(ctx context.Context, root string) error {
-	imagePrefix := os.Getenv("IMAGE_PREFIX")
-	if imagePrefix == "" {
+	if push && imagePrefix == "" {
 		return fmt.Errorf("IMAGE_PREFIX is not set; it is required for pushing images")
 	}
 	tag := os.Getenv("IMAGE_TAG")
@@ -94,14 +53,26 @@ func Push(ctx context.Context, root string) error {
 			continue
 		}
 
-		fullImageName := fmt.Sprintf("%s/%s:%s", imagePrefix, name, tag)
+		var fullImageName string
+		if imagePrefix != "" {
+			fullImageName = fmt.Sprintf("%s/%s:%s", imagePrefix, name, tag)
+		} else {
+			fullImageName = fmt.Sprintf("%s:%s", name, tag)
+		}
 
-		klog.Infof("Pushing image %s", fullImageName)
-		cmd := exec.CommandContext(ctx, "docker", "push", fullImageName)
+		klog.Infof("Building image %s from %s", fullImageName, root)
+		args := []string{"buildx", "build", "-t", fullImageName, "-f", relPath}
+		if push {
+			args = append(args, "--push")
+		}
+		args = append(args, ".")
+
+		cmd := exec.CommandContext(ctx, "docker", args...)
+		cmd.Dir = root
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("docker push failed for %s: %w", name, err)
+			return fmt.Errorf("docker build failed for %s: %w", name, err)
 		}
 	}
 	return nil
