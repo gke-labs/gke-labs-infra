@@ -21,11 +21,35 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/walker"
 	"k8s.io/klog/v2"
 )
+
+var imageRegex = regexp.MustCompile(`image:(\s+)(\S+)`)
+
+func replacePlaceholderImages(content string) string {
+	return imageRegex.ReplaceAllStringFunc(content, func(match string) string {
+		submatches := imageRegex.FindStringSubmatch(match)
+		if len(submatches) < 3 {
+			return match
+		}
+		spaces := submatches[1]
+		image := submatches[2]
+
+		// Remove optional quotes for checking
+		unquoted := strings.Trim(image, "\"'")
+
+		if strings.Contains(unquoted, "/") || strings.Contains(unquoted, ":") {
+			return match
+		}
+
+		// It's a placeholder.
+		return fmt.Sprintf("image:%s${IMAGE_PREFIX}/%s:${IMAGE_TAG}", spaces, unquoted)
+	})
+}
 
 // Deploy deploys k8s manifests found in k8s directories.
 func Deploy(ctx context.Context, root string) error {
@@ -39,6 +63,11 @@ func Deploy(ctx context.Context, root string) error {
 		// Ensure it is set for expansion
 		os.Setenv("IMAGE_PREFIX", "local")
 	}
+	tag := os.Getenv("IMAGE_TAG")
+	if tag == "" {
+		// Ensure it is set for expansion
+		os.Setenv("IMAGE_TAG", "latest")
+	}
 
 	for _, manifest := range manifests {
 		relPath, _ := filepath.Rel(root, manifest)
@@ -50,7 +79,8 @@ func Deploy(ctx context.Context, root string) error {
 			return err
 		}
 
-		expanded := os.ExpandEnv(string(content))
+		replaced := replacePlaceholderImages(string(content))
+		expanded := os.ExpandEnv(replaced)
 
 		cmd := exec.CommandContext(ctx, "kubectl", "apply", "-f", "-")
 		cmd.Stdin = bytes.NewBufferString(expanded)
