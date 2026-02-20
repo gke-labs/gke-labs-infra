@@ -27,12 +27,12 @@ func TestReplacePlaceholderImages(t *testing.T) {
 		{
 			name:     "simple image",
 			input:    "image: example-server",
-			expected: "image: ${IMAGE_PREFIX}/example-server:${IMAGE_TAG}",
+			expected: "image: my-repo/example-server:v1",
 		},
 		{
 			name:     "quoted image",
 			input:    `image: "example-server"`,
-			expected: `image: ${IMAGE_PREFIX}/example-server:${IMAGE_TAG}`,
+			expected: `image: my-repo/example-server:v1`,
 		},
 		{
 			name:     "image with prefix already",
@@ -77,9 +77,9 @@ spec:
     spec:
       containers:
       - name: server
-        image: ${IMAGE_PREFIX}/example-server:${IMAGE_TAG}
+        image: my-repo/example-server:v1
       - name: sidecar
-        image: ${IMAGE_PREFIX}/sidecar-image:${IMAGE_TAG}
+        image: my-repo/sidecar-image:v1
       - name: external
         image: gcr.io/other/image:latest
 `,
@@ -118,7 +118,7 @@ spec:
     spec:
       containers:
       - name: main
-        image: ${IMAGE_PREFIX}/main-image:${IMAGE_TAG}
+        image: my-repo/main-image:v1
 `,
 		},
 		{
@@ -148,10 +148,10 @@ spec:
     spec:
       containers:
       - name: server
-        image: ${IMAGE_PREFIX}/example-server:${IMAGE_TAG} # This is a placeholder
+        image: my-repo/example-server:v1 # This is a placeholder
         # Some comment
       - name: sidecar
-        image: ${IMAGE_PREFIX}/sidecar-image:${IMAGE_TAG}  # Another placeholder
+        image: my-repo/sidecar-image:v1  # Another placeholder
 `,
 		},
 		{
@@ -171,7 +171,7 @@ metadata:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := replacePlaceholderImages(tt.input)
+			got, err := replacePlaceholderImages(tt.input, "my-repo", "v1")
 			if err != nil {
 				t.Fatalf("replacePlaceholderImages() error = %v", err)
 			}

@@ -30,7 +30,7 @@ import (
 	"k8s.io/klog/v2"
 )
 
-func replacePlaceholderImages(content string) (string, error) {
+func replacePlaceholderImages(content string, imageRepository string, imageTag string) (string, error) {
 	decoder := yaml.NewDecoder(strings.NewReader(content))
 	var placeholders []*yaml.Node
 	for {
@@ -69,7 +69,7 @@ func replacePlaceholderImages(content string) (string, error) {
 
 		end := findEnd(content, start, p.Style)
 
-		newVal := fmt.Sprintf("${IMAGE_PREFIX}/%s:${IMAGE_TAG}", p.Value)
+		newVal := fmt.Sprintf("%s/%s:%s", imageRepository, p.Value, imageTag)
 		replacements = append(replacements, replacement{
 			offset: start,
 			length: end - start,
@@ -190,15 +190,13 @@ func Deploy(ctx context.Context, root string) error {
 		return err
 	}
 
-	imagePrefix := os.Getenv("IMAGE_PREFIX")
-	if imagePrefix == "" {
-		// Ensure it is set for expansion
-		os.Setenv("IMAGE_PREFIX", "local")
+	imageRepository := os.Getenv("IMAGE_PREFIX")
+	if imageRepository == "" {
+		imageRepository = "local"
 	}
 	tag := os.Getenv("IMAGE_TAG")
 	if tag == "" {
-		// Ensure it is set for expansion
-		os.Setenv("IMAGE_TAG", "latest")
+		tag = "latest"
 	}
 
 	for _, manifest := range manifests {
@@ -211,14 +209,13 @@ func Deploy(ctx context.Context, root string) error {
 			return err
 		}
 
-		replaced, err := replacePlaceholderImages(string(content))
+		replaced, err := replacePlaceholderImages(string(content), imageRepository, tag)
 		if err != nil {
 			return fmt.Errorf("failed to replace placeholders in %s: %w", relPath, err)
 		}
-		expanded := os.ExpandEnv(replaced)
 
 		cmd := exec.CommandContext(ctx, "kubectl", "apply", "-f", "-")
-		cmd.Stdin = bytes.NewBufferString(expanded)
+		cmd.Stdin = bytes.NewBufferString(replaced)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 
