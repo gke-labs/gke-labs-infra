@@ -16,7 +16,7 @@ package unused
 
 import (
 	"go/ast"
-	"go/types"
+	"go/token"
 	"strings"
 
 	"golang.org/x/tools/go/analysis"
@@ -35,9 +35,13 @@ func init() {
 }
 
 func run(pass *analysis.Pass) (interface{}, error) {
-	used := make(map[types.Object]bool)
+	// We use token.Pos as the key because go/types creates different Object instances
+	// for different instantiations of a generic type, even though they refer to the same declaration.
+	used := make(map[token.Pos]bool)
 	for _, obj := range pass.TypesInfo.Uses {
-		used[obj] = true
+		if obj.Pkg() == pass.Pkg {
+			used[obj.Pos()] = true
+		}
 	}
 
 	for _, f := range pass.Files {
@@ -60,7 +64,7 @@ func run(pass *analysis.Pass) (interface{}, error) {
 	return nil, nil
 }
 
-func checkUnusedParams(pass *analysis.Pass, params *ast.FieldList, body *ast.BlockStmt, used map[types.Object]bool) {
+func checkUnusedParams(pass *analysis.Pass, params *ast.FieldList, body *ast.BlockStmt, used map[token.Pos]bool) {
 	if !checkParameters {
 		return
 	}
@@ -73,14 +77,14 @@ func checkUnusedParams(pass *analysis.Pass, params *ast.FieldList, body *ast.Blo
 				continue
 			}
 			obj := pass.TypesInfo.Defs[name]
-			if obj != nil && !used[obj] {
+			if obj != nil && !used[obj.Pos()] {
 				pass.Reportf(name.Pos(), "parameter %s is unused, consider removing or renaming it as _", name.Name)
 			}
 		}
 	}
 }
 
-func checkUnusedFunc(pass *analysis.Pass, fn *ast.FuncDecl, used map[types.Object]bool) {
+func checkUnusedFunc(pass *analysis.Pass, fn *ast.FuncDecl, used map[token.Pos]bool) {
 	name := fn.Name.Name
 	if name == "main" || name == "init" || strings.HasPrefix(name, "Test") || strings.HasPrefix(name, "Benchmark") || strings.HasPrefix(name, "Example") {
 		return
@@ -90,7 +94,7 @@ func checkUnusedFunc(pass *analysis.Pass, fn *ast.FuncDecl, used map[types.Objec
 		return
 	}
 	obj := pass.TypesInfo.Defs[fn.Name]
-	if obj != nil && !used[obj] {
+	if obj != nil && !used[obj.Pos()] {
 		if fn.Recv == nil {
 			pass.Reportf(fn.Name.Pos(), "func %s is unused", name)
 		} else {
@@ -102,7 +106,7 @@ func checkUnusedFunc(pass *analysis.Pass, fn *ast.FuncDecl, used map[types.Objec
 	}
 }
 
-func checkUnusedFields(pass *analysis.Pass, st *ast.StructType, used map[types.Object]bool) {
+func checkUnusedFields(pass *analysis.Pass, st *ast.StructType, used map[token.Pos]bool) {
 	if st.Fields == nil {
 		return
 	}
@@ -112,7 +116,7 @@ func checkUnusedFields(pass *analysis.Pass, st *ast.StructType, used map[types.O
 				continue
 			}
 			obj := pass.TypesInfo.Defs[name]
-			if obj != nil && !used[obj] {
+			if obj != nil && !used[obj.Pos()] {
 				pass.Reportf(name.Pos(), "field %s is unused", name.Name)
 			}
 		}
