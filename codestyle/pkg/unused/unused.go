@@ -35,6 +35,8 @@ func init() {
 }
 
 func run(pass *analysis.Pass) (interface{}, error) {
+	// We use token.Pos as the key because go/types creates different Object instances
+	// for different instantiations of a generic type, even though they refer to the same declaration.
 	used := make(map[token.Pos]bool)
 	for _, obj := range pass.TypesInfo.Uses {
 		if obj.Pkg() == pass.Pkg {
