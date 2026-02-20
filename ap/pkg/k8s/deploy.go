@@ -42,7 +42,7 @@ func replacePlaceholderImages(content string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("failed to decode YAML: %w", err)
 		}
-		placeholders = collectPlaceholders(&node, placeholders)
+		placeholders = collectPlaceholders(&node, placeholders, nil)
 	}
 
 	if len(placeholders) == 0 {
@@ -89,30 +89,50 @@ func replacePlaceholderImages(content string) (string, error) {
 	return content, nil
 }
 
-func collectPlaceholders(node *yaml.Node, placeholders []*yaml.Node) []*yaml.Node {
+func collectPlaceholders(node *yaml.Node, placeholders []*yaml.Node, path []string) []*yaml.Node {
 	switch node.Kind {
 	case yaml.DocumentNode:
 		for _, child := range node.Content {
-			placeholders = collectPlaceholders(child, placeholders)
+			placeholders = collectPlaceholders(child, placeholders, path)
 		}
 	case yaml.MappingNode:
 		for i := 0; i < len(node.Content); i += 2 {
 			keyNode := node.Content[i]
 			valueNode := node.Content[i+1]
+			newPath := append(path, keyNode.Value)
 			if keyNode.Value == "image" && valueNode.Kind == yaml.ScalarNode {
-				unquoted := valueNode.Value
-				if !strings.Contains(unquoted, "/") && !strings.Contains(unquoted, ":") && unquoted != "" {
-					placeholders = append(placeholders, valueNode)
+				if isImageField(newPath) {
+					unquoted := valueNode.Value
+					if !strings.Contains(unquoted, "/") && !strings.Contains(unquoted, ":") && unquoted != "" {
+						placeholders = append(placeholders, valueNode)
+					}
 				}
 			}
-			placeholders = collectPlaceholders(valueNode, placeholders)
+			placeholders = collectPlaceholders(valueNode, placeholders, newPath)
 		}
 	case yaml.SequenceNode:
 		for _, child := range node.Content {
-			placeholders = collectPlaceholders(child, placeholders)
+			placeholders = collectPlaceholders(child, placeholders, append(path, "*"))
 		}
 	}
 	return placeholders
+}
+
+func isImageField(path []string) bool {
+	p := strings.Join(path, ".")
+	switch p {
+	case "image",
+		"spec.containers.*.image",
+		"spec.initContainers.*.image",
+		"spec.template.spec.containers.*.image",
+		"spec.template.spec.initContainers.*.image",
+		"spec.jobTemplate.spec.template.spec.containers.*.image",
+		"spec.jobTemplate.spec.template.spec.initContainers.*.image",
+		"spec.podTemplate.spec.containers.*.image",
+		"spec.podTemplate.spec.initContainers.*.image":
+		return true
+	}
+	return false
 }
 
 func getLineOffsets(content string) []int {

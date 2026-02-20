@@ -164,7 +164,7 @@ metadata:
 			expected: `
 metadata:
   labels:
-    image: ${IMAGE_PREFIX}/label-image:${IMAGE_TAG}
+    image: label-image
 `,
 		},
 	}
