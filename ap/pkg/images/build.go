@@ -33,6 +33,10 @@ func Build(ctx context.Context, root string) error {
 		klog.Warningf("IMAGE_PREFIX is not set, defaulting to 'local'")
 		imagePrefix = "local"
 	}
+	tag := os.Getenv("IMAGE_TAG")
+	if tag == "" {
+		tag = "latest"
+	}
 
 	dockerfiles, err := findDockerfiles(root)
 	if err != nil {
@@ -50,10 +54,10 @@ func Build(ctx context.Context, root string) error {
 			continue
 		}
 
-		tag := fmt.Sprintf("%s/%s:latest", imagePrefix, name)
+		fullImageName := fmt.Sprintf("%s/%s:%s", imagePrefix, name, tag)
 
-		klog.Infof("Building image %s from %s", tag, root)
-		cmd := exec.CommandContext(ctx, "docker", "buildx", "build", "-t", tag, "-f", relPath, ".")
+		klog.Infof("Building image %s from %s", fullImageName, root)
+		cmd := exec.CommandContext(ctx, "docker", "buildx", "build", "-t", fullImageName, "-f", relPath, ".")
 		cmd.Dir = root
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
