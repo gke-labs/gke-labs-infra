@@ -30,8 +30,7 @@ import (
 func Build(ctx context.Context, root string) error {
 	imagePrefix := os.Getenv("IMAGE_PREFIX")
 	if imagePrefix == "" {
-		klog.Warningf("IMAGE_PREFIX is not set, defaulting to 'local'")
-		imagePrefix = "local"
+		return fmt.Errorf("IMAGE_PREFIX is not set; it is required for building images")
 	}
 	tag := os.Getenv("IMAGE_TAG")
 	if tag == "" {
@@ -63,6 +62,46 @@ func Build(ctx context.Context, root string) error {
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("docker build failed for %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// Push pushes docker images found in images/<name>/Dockerfile.
+func Push(ctx context.Context, root string) error {
+	imagePrefix := os.Getenv("IMAGE_PREFIX")
+	if imagePrefix == "" {
+		return fmt.Errorf("IMAGE_PREFIX is not set; it is required for pushing images")
+	}
+	tag := os.Getenv("IMAGE_TAG")
+	if tag == "" {
+		tag = "latest"
+	}
+
+	dockerfiles, err := findDockerfiles(root)
+	if err != nil {
+		return err
+	}
+
+	for _, dockerfile := range dockerfiles {
+		relPath, err := filepath.Rel(root, dockerfile)
+		if err != nil {
+			continue
+		}
+
+		name := getImageName(relPath)
+		if name == "" {
+			continue
+		}
+
+		fullImageName := fmt.Sprintf("%s/%s:%s", imagePrefix, name, tag)
+
+		klog.Infof("Pushing image %s", fullImageName)
+		cmd := exec.CommandContext(ctx, "docker", "push", fullImageName)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("docker push failed for %s: %w", name, err)
 		}
 	}
 	return nil
