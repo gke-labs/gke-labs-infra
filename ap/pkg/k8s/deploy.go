@@ -27,12 +27,9 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// Deploy deploys k8s manifests found in k8s/manifest.yaml.
+// Deploy deploys k8s manifests found in k8s directories.
 func Deploy(ctx context.Context, root string) error {
-	ignoreList := walker.NewIgnoreList([]string{".git", "vendor", "node_modules"})
-	manifests, err := walker.Walk(root, ignoreList, func(_ string, info os.FileInfo) bool {
-		return info.Name() == "manifest.yaml"
-	})
+	manifests, err := findManifests(root)
 	if err != nil {
 		return err
 	}
@@ -45,12 +42,6 @@ func Deploy(ctx context.Context, root string) error {
 
 	for _, manifest := range manifests {
 		relPath, _ := filepath.Rel(root, manifest)
-
-		// Simple check if it is under a k8s directory
-		if !strings.Contains(relPath, "k8s") {
-			klog.V(2).Infof("Skipping manifest not in k8s directory: %s", relPath)
-			continue
-		}
 
 		klog.Infof("Applying manifest %s", relPath)
 
@@ -71,4 +62,33 @@ func Deploy(ctx context.Context, root string) error {
 		}
 	}
 	return nil
+}
+
+func findManifests(root string) ([]string, error) {
+	ignoreList := walker.NewIgnoreList([]string{".git", "vendor", "node_modules"})
+	return walker.Walk(root, ignoreList, func(path string, info os.FileInfo) bool {
+		if info.IsDir() {
+			return false
+		}
+		relPath, err := filepath.Rel(root, path)
+		if err != nil {
+			return false
+		}
+
+		// Check if it is under a k8s directory
+		parts := strings.Split(relPath, string(os.PathSeparator))
+		inK8s := false
+		for _, part := range parts {
+			if part == "k8s" {
+				inK8s = true
+				break
+			}
+		}
+		if !inK8s {
+			return false
+		}
+
+		ext := filepath.Ext(path)
+		return ext == ".yaml" || ext == ".yml"
+	})
 }
