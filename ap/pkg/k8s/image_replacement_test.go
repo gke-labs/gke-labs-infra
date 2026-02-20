@@ -171,7 +171,10 @@ metadata:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := replacePlaceholderImages(tt.input)
+			got, err := replacePlaceholderImages(tt.input)
+			if err != nil {
+				t.Fatalf("replacePlaceholderImages() error = %v", err)
+			}
 			if got != tt.expected {
 				t.Errorf("replacePlaceholderImages() = %v, want %v", got, tt.expected)
 			}

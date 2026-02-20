@@ -30,7 +30,7 @@ import (
 	"k8s.io/klog/v2"
 )
 
-func replacePlaceholderImages(content string) string {
+func replacePlaceholderImages(content string) (string, error) {
 	decoder := yaml.NewDecoder(strings.NewReader(content))
 	var placeholders []*yaml.Node
 	for {
@@ -40,13 +40,13 @@ func replacePlaceholderImages(content string) string {
 			break
 		}
 		if err != nil {
-			return content
+			return "", fmt.Errorf("failed to decode YAML: %w", err)
 		}
-		placeholders = collectPlaceholders(&node, nil)
+		placeholders = collectPlaceholders(&node, placeholders)
 	}
 
 	if len(placeholders) == 0 {
-		return content
+		return content, nil
 	}
 
 	lineOffsets := getLineOffsets(content)
@@ -60,11 +60,11 @@ func replacePlaceholderImages(content string) string {
 
 	for _, p := range placeholders {
 		if p.Line == 0 || p.Line > len(lineOffsets) {
-			continue
+			return "", fmt.Errorf("invalid line number %d for placeholder %q", p.Line, p.Value)
 		}
 		start := lineOffsets[p.Line-1] + p.Column - 1
 		if start >= len(content) {
-			continue
+			return "", fmt.Errorf("invalid column %d on line %d for placeholder %q", p.Column, p.Line, p.Value)
 		}
 
 		end := findEnd(content, start, p.Style)
@@ -86,7 +86,7 @@ func replacePlaceholderImages(content string) string {
 		content = content[:r.offset] + r.newVal + content[r.offset+r.length:]
 	}
 
-	return content
+	return content, nil
 }
 
 func collectPlaceholders(node *yaml.Node, placeholders []*yaml.Node) []*yaml.Node {
@@ -191,7 +191,10 @@ func Deploy(ctx context.Context, root string) error {
 			return err
 		}
 
-		replaced := replacePlaceholderImages(string(content))
+		replaced, err := replacePlaceholderImages(string(content))
+		if err != nil {
+			return fmt.Errorf("failed to replace placeholders in %s: %w", relPath, err)
+		}
 		expanded := os.ExpandEnv(replaced)
 
 		cmd := exec.CommandContext(ctx, "kubectl", "apply", "-f", "-")
