@@ -84,6 +84,89 @@ spec:
         image: gcr.io/other/image:latest
 `,
 		},
+		{
+			name: "multi-document YAML",
+			input: `
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dep
+spec:
+  template:
+    spec:
+      containers:
+      - name: main
+        image: main-image
+`,
+			expected: `
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dep
+spec:
+  template:
+    spec:
+      containers:
+      - name: main
+        image: ${IMAGE_PREFIX}/main-image:${IMAGE_TAG}
+`,
+		},
+		{
+			name: "comments and formatting",
+			input: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example
+spec:
+  template:
+    spec:
+      containers:
+      - name: server
+        image: example-server # This is a placeholder
+        # Some comment
+      - name: sidecar
+        image: "sidecar-image"  # Another placeholder
+`,
+			expected: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example
+spec:
+  template:
+    spec:
+      containers:
+      - name: server
+        image: ${IMAGE_PREFIX}/example-server:${IMAGE_TAG} # This is a placeholder
+        # Some comment
+      - name: sidecar
+        image: ${IMAGE_PREFIX}/sidecar-image:${IMAGE_TAG}  # Another placeholder
+`,
+		},
+		{
+			name: "image in non-container field",
+			input: `
+metadata:
+  labels:
+    image: label-image
+`,
+			expected: `
+metadata:
+  labels:
+    image: ${IMAGE_PREFIX}/label-image:${IMAGE_TAG}
+`,
+		},
 	}
 
 	for _, tt := range tests {
