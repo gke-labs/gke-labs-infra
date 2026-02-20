@@ -69,7 +69,12 @@ func replacePlaceholderImages(content string, imageRepository string, imageTag s
 
 		end := findEnd(content, start, p.Style)
 
-		newVal := fmt.Sprintf("%s/%s:%s", imageRepository, p.Value, imageTag)
+		base, ok := isPlaceholderImage(p.Value)
+		if !ok {
+			return "", fmt.Errorf("invalid placeholder image %q", p.Value)
+		}
+
+		newVal := fmt.Sprintf("%s/%s:%s", imageRepository, base, imageTag)
 		replacements = append(replacements, replacement{
 			offset: start,
 			length: end - start,
@@ -102,8 +107,7 @@ func collectPlaceholders(node *yaml.Node, placeholders []*yaml.Node, path []stri
 			newPath := append(path, keyNode.Value)
 			if keyNode.Value == "image" && valueNode.Kind == yaml.ScalarNode {
 				if isImageField(newPath) {
-					unquoted := valueNode.Value
-					if !strings.Contains(unquoted, "/") && !strings.Contains(unquoted, ":") && unquoted != "" {
+					if _, ok := isPlaceholderImage(valueNode.Value); ok {
 						placeholders = append(placeholders, valueNode)
 					}
 				}
@@ -116,6 +120,42 @@ func collectPlaceholders(node *yaml.Node, placeholders []*yaml.Node, path []stri
 		}
 	}
 	return placeholders
+}
+
+func isPlaceholderImage(image string) (string, bool) {
+	if image == "" {
+		return "", false
+	}
+
+	// Handle digest if any (we probably want to skip these too)
+	if strings.Contains(image, "@") {
+		return "", false
+	}
+
+	base := image
+	tag := ""
+	if i := strings.LastIndex(image, ":"); i != -1 {
+		lastPart := image[i+1:]
+		if !strings.Contains(lastPart, "/") {
+			base = image[:i]
+			tag = lastPart
+		}
+	}
+
+	if tag != "" && tag != "latest" {
+		return "", false
+	}
+
+	// Check for host
+	firstSlash := strings.Index(image, "/")
+	if firstSlash != -1 {
+		host := image[:firstSlash]
+		if strings.Contains(host, ".") || strings.Contains(host, ":") || host == "localhost" {
+			return "", false
+		}
+	}
+
+	return base, true
 }
 
 func isImageField(path []string) bool {
