@@ -17,6 +17,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
@@ -51,9 +52,14 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 	if err := requireRepoRoot(opt.RootOptions); err != nil {
 		return err
 	}
+
+	if os.Getenv("IMAGE_PREFIX") == "" {
+		return fmt.Errorf("IMAGE_PREFIX is not set; it is required for deploy")
+	}
+
 	for _, apRoot := range opt.APRoots {
 		// Deploy typically also builds
-		if err := images.Build(ctx, apRoot); err != nil {
+		if err := images.Build(ctx, apRoot, true); err != nil {
 			return fmt.Errorf("build failed during deploy for %s: %w", apRoot, err)
 		}
 		if err := k8s.Deploy(ctx, apRoot); err != nil {

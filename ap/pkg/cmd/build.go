@@ -52,7 +52,7 @@ func RunBuild(ctx context.Context, opt BuildOptions) error {
 		return err
 	}
 	for _, apRoot := range opt.APRoots {
-		if err := images.Build(ctx, apRoot); err != nil {
+		if err := images.Build(ctx, apRoot, false); err != nil {
 			return err
 		}
 

@@ -232,7 +232,7 @@ func Deploy(ctx context.Context, root string) error {
 
 	imageRepository := os.Getenv("IMAGE_PREFIX")
 	if imageRepository == "" {
-		imageRepository = "local"
+		return fmt.Errorf("IMAGE_PREFIX is not set; it is required for deploy")
 	}
 	tag := os.Getenv("IMAGE_TAG")
 	if tag == "" {
