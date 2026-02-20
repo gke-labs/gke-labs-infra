@@ -24,11 +24,45 @@ type Foo struct {
 	Baz string
 }
 
+func reset() {
+	trackedMutex.Lock()
+	tracked = nil
+	trackedMutex.Unlock()
+}
+
 func TestConst(t *testing.T) {
+	reset()
 	f := &Foo{Bar: 1, Baz: "hello"}
 
 	// Mark as constant
-	Const(f)
+	MarkConst(f)
+
+	// Trigger check, should be no error
+	if err := Check(); err != nil {
+		t.Errorf("Check() failed: %v", err)
+	}
+
+	// Mutate
+	f.Bar = 2
+
+	// Trigger check, should detect change
+	if err := Check(); err == nil {
+		t.Error("Check() should have detected mutation, but it didn't")
+	} else {
+		t.Logf("Detected expected mutation: %v", err)
+	}
+}
+
+func TestWrapConst(t *testing.T) {
+	reset()
+	f := &Foo{Bar: 1, Baz: "hello"}
+
+	// Wrap as constant
+	c := WrapConst(f)
+
+	if c.Read() != f {
+		t.Errorf("Read() returned %p, expected %p", c.Read(), f)
+	}
 
 	// Trigger check, should be no error
 	if err := Check(); err != nil {
@@ -48,13 +82,11 @@ func TestConst(t *testing.T) {
 
 func TestWeakReference(t *testing.T) {
 	// Clear any previous state
-	trackedMutex.Lock()
-	tracked = nil
-	trackedMutex.Unlock()
+	reset()
 
 	{
 		f := &Foo{Bar: 1}
-		Const(f)
+		MarkConst(f)
 		trackedMutex.Lock()
 		if len(tracked) != 1 {
 			t.Errorf("Expected 1 tracked object, got %d", len(tracked))
