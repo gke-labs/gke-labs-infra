@@ -167,6 +167,26 @@ metadata:
     image: label-image
 `,
 		},
+		{
+			name:     "image with latest tag",
+			input:    "image: example-server:latest",
+			expected: "image: my-repo/example-server:v1",
+		},
+		{
+			name:     "image with path and latest tag",
+			input:    "image: bar/foo:latest",
+			expected: "image: my-repo/bar/foo:v1",
+		},
+		{
+			name:     "image with host should be skipped",
+			input:    "image: registry.k8s.io/kube-apiserver:latest",
+			expected: "image: registry.k8s.io/kube-apiserver:latest",
+		},
+		{
+			name:     "image with path no tag",
+			input:    "image: bar/foo",
+			expected: "image: my-repo/bar/foo:v1",
+		},
 	}
 
 	for _, tt := range tests {
