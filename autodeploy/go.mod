@@ -7,7 +7,7 @@ toolchain go1.26.4
 require (
 	github.com/go-git/go-git/v5 v5.19.1
 	k8s.io/api v0.36.1
-	k8s.io/apimachinery v0.36.1
+	k8s.io/apimachinery v0.36.2
 	k8s.io/client-go v0.36.1
 	k8s.io/klog/v2 v2.140.0
 	sigs.k8s.io/controller-runtime v0.24.1
