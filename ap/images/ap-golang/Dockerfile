@@ -12,13 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM golang:1.26.4-trixie AS builder
+FROM golang:1.27rc2-trixie AS builder
 
 WORKDIR /workspace
 COPY . .
 RUN go build -o /usr/local/bin/ap ./ap
 
-FROM golang:1.26.4-trixie
+FROM golang:1.27rc2-trixie
 COPY --from=builder /usr/local/bin/ap /usr/local/bin/ap
 
 RUN apt-get update && apt-get install -y git ca-certificates curl gnupg && \
