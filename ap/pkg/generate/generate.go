@@ -208,6 +208,11 @@ func runGenerateVerifierGenerator(_ context.Context, repoRoot string) error {
 		return fmt.Errorf("failed to generate header: %w", err)
 	}
 
+	skipGuard, err := presubmitSkipGuardFromConfig(repoRoot)
+	if err != nil {
+		return err
+	}
+
 	content := fmt.Sprintf(`#!/bin/bash
 
 %s
@@ -217,7 +222,7 @@ set -o pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}"
-
+%s
 # Run generation
 %s generate //...
 
@@ -228,7 +233,7 @@ if [[ -n $(git status --porcelain) ]]; then
   git status
   exit 1
 fi
-`, headerContent, apCmd, apCmd)
+`, headerContent, skipGuard, apCmd, apCmd)
 	if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
@@ -260,6 +265,11 @@ func runApTestGenerator(_ context.Context, repoRoot string) error {
 		return fmt.Errorf("failed to generate header: %w", err)
 	}
 
+	skipGuard, err := presubmitSkipGuardFromConfig(repoRoot)
+	if err != nil {
+		return err
+	}
+
 	content := fmt.Sprintf(`#!/bin/bash
 
 %s
@@ -269,10 +279,10 @@ set -o pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}"
-
+%s
 # Run tests
 %s test //...
-`, headerContent, apCmd)
+`, headerContent, skipGuard, apCmd)
 	if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
@@ -304,6 +314,11 @@ func runApLintGenerator(_ context.Context, repoRoot string) error {
 		return fmt.Errorf("failed to generate header: %w", err)
 	}
 
+	skipGuard, err := presubmitSkipGuardFromConfig(repoRoot)
+	if err != nil {
+		return err
+	}
+
 	content := fmt.Sprintf(`#!/bin/bash
 
 %s
@@ -313,10 +328,10 @@ set -o pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}"
-
+%s
 # Run linting
 %s lint //...
-`, headerContent, apCmd)
+`, headerContent, skipGuard, apCmd)
 	if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
@@ -376,6 +391,11 @@ func runApBuildGenerator(_ context.Context, repoRoot string, scopes []*tasks.APS
 		return fmt.Errorf("failed to generate header: %w", err)
 	}
 
+	skipGuard, err := presubmitSkipGuardFromConfig(repoRoot)
+	if err != nil {
+		return err
+	}
+
 	content := fmt.Sprintf(`#!/bin/bash
 
 %s
@@ -385,10 +405,10 @@ set -o pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}"
-
+%s
 # Run build
 %s build //...
-`, headerContent, apCmd)
+`, headerContent, skipGuard, apCmd)
 	if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
@@ -449,6 +469,11 @@ func runApE2eGenerator(_ context.Context, repoRoot string, scopes []*tasks.APSco
 			return fmt.Errorf("failed to generate header: %w", err)
 		}
 
+		skipGuard, err := presubmitSkipGuardFromConfig(repoRoot)
+		if err != nil {
+			return err
+		}
+
 		content := fmt.Sprintf(`#!/bin/bash
 
 %s
@@ -458,10 +483,10 @@ set -o pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}"
-
+%s
 # Run e2e tests
 %s e2e %s
-`, headerContent, apCmd, relApRoot)
+`, headerContent, skipGuard, apCmd, relApRoot)
 		if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
 			return fmt.Errorf("failed to write %s: %w", targetFile, err)
 		}
@@ -635,6 +660,117 @@ func GetApCommand(repoRoot, apRoot string) (string, error) {
 	}
 
 	return defaultCmd, nil
+}
+
+// loadPresubmitSkipPatterns returns presubmits.skipIfOnlyChanged from
+// .ap/ap.yaml, or nil when the file or the setting is absent.
+func loadPresubmitSkipPatterns(repoRoot string) ([]string, error) {
+	configPath := filepath.Join(repoRoot, ".ap", "ap.yaml")
+	data, err := os.ReadFile(configPath)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read %s: %w", configPath, err)
+	}
+
+	var config struct {
+		Presubmits struct {
+			SkipIfOnlyChanged []string `json:"skipIfOnlyChanged"`
+		} `json:"presubmits"`
+	}
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("failed to parse %s: %w", configPath, err)
+	}
+
+	patterns := config.Presubmits.SkipIfOnlyChanged
+	for _, p := range patterns {
+		if !presubmitSkipPatternOK(p) {
+			return nil, fmt.Errorf("%s: presubmits.skipIfOnlyChanged pattern %q: only letters, digits, and / . _ - * ? ! [ ] are allowed", configPath, p)
+		}
+	}
+	return patterns, nil
+}
+
+// presubmitSkipPatternOK reports whether a skipIfOnlyChanged pattern
+// is safe to splice into the generated bash `case` statement.
+func presubmitSkipPatternOK(p string) bool {
+	if p == "" {
+		return false
+	}
+	for _, r := range p {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case strings.ContainsRune("/._-*?![]", r):
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// presubmitSkipGuardFromConfig renders the early-exit block spliced
+// into every generated presubmit script, or "" when the repo doesn't
+// configure presubmits.skipIfOnlyChanged (keeping generated output
+// byte-identical for repos that don't opt in).
+func presubmitSkipGuardFromConfig(repoRoot string) (string, error) {
+	patterns, err := loadPresubmitSkipPatterns(repoRoot)
+	if err != nil {
+		return "", err
+	}
+	return presubmitSkipGuard(patterns), nil
+}
+
+// presubmitSkipGuard returns a bash fragment that exits the presubmit
+// early (and successfully) when a pull request only changes files
+// matching the given case globs. Exiting green — instead of a `paths:`
+// filter on the generated workflow — keeps required status checks
+// satisfied; a workflow skipped by `paths:` leaves them pending
+// forever. The guard fails open: shallow history, a non-merge HEAD,
+// or an empty diff all fall through to a full run, and push /
+// merge_group events are never skipped, so the merge queue remains a
+// complete gate.
+func presubmitSkipGuard(patterns []string) string {
+	if len(patterns) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(`
+# Pull requests whose changed files all match the patterns in
+# .ap/ap.yaml (presubmits.skipIfOnlyChanged) don't need this
+# presubmit; exit early but successfully so required status checks
+# stay green. The patterns are bash case globs matched against each
+# repo-relative path (* also matches /). Anything uncertain — shallow
+# history, a non-merge HEAD, an empty diff — falls through to a full
+# run, and push / merge_group events always run everything.
+if [[ "${GITHUB_EVENT_NAME:-}" == "pull_request" && -n "${GITHUB_SHA:-}" ]]; then
+  if ! git rev-parse --verify --quiet "${GITHUB_SHA}^1" >/dev/null; then
+    # actions/checkout does a depth-1 clone of the PR merge commit;
+    # deepen it so the parents are available for diffing.
+    git fetch --quiet --depth=2 origin "${GITHUB_SHA}" >/dev/null 2>&1 || true
+  fi
+  # Diffing the merge commit against its first parent yields exactly
+  # the PR's changes; without a merge commit we can't tell, so run.
+  if git rev-parse --verify --quiet "${GITHUB_SHA}^2" >/dev/null; then
+    ap_changed="$(git diff --name-only "${GITHUB_SHA}^1" "${GITHUB_SHA}")" || ap_changed=""
+    if [[ -n "${ap_changed}" ]]; then
+      ap_skip="true"
+      while IFS= read -r ap_file; do
+        case "${ap_file}" in
+        %s) ;;
+        *)
+          ap_skip="false"
+          break
+          ;;
+        esac
+      done <<<"${ap_changed}"
+      if [[ "${ap_skip}" == "true" ]]; then
+        echo "All changed files match presubmits.skipIfOnlyChanged; skipping $(basename "$0")."
+        exit 0
+      fi
+    fi
+  fi
+fi
+`, strings.Join(patterns, "|"))
 }
 
 func writeFileIfChanged(path string, content []byte, perm os.FileMode) error {

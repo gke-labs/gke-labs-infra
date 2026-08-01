@@ -62,7 +62,22 @@ General configuration for `ap` itself.
 Example `.ap/ap.yaml`:
 ```yaml
 version: "v0.1.0"
+presubmits:
+  skipIfOnlyChanged:
+  - docs/*
+  - README.md
 ```
+
+`presubmits.skipIfOnlyChanged` is an optional list of bash case globs
+matched against each repo-relative changed path (`*` also matches `/`).
+When every file changed by a pull request matches one of the patterns,
+the generated presubmit scripts exit early but successfully, so
+required status checks stay green without paying for a full run (a
+`paths:` filter on the workflow would instead leave required checks
+pending forever). The guard fails open — shallow history or a
+non-merge HEAD falls through to a full run — and push / merge_group
+events always run everything, so a merge queue remains a complete
+gate. Only list paths no presubmit output depends on.
 
 ## Usage
 
