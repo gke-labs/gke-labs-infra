@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"sigs.k8s.io/yaml"
 )
@@ -189,4 +190,50 @@ func LoadHeaders(repoRoot string) (*HeadersConfig, error) {
 		config.SkipGenerated = &t
 	}
 	return &config, nil
+}
+
+// ImagesConfig represents the image build configuration, loaded from .ap/images.yaml.
+type ImagesConfig struct {
+	Platforms []string `json:"platforms"`
+}
+
+// LoadImagesConfig loads the configuration from .ap/images.yaml in the specified root directory.
+func LoadImagesConfig(root string) (*ImagesConfig, error) {
+	configFile := filepath.Join(root, ".ap/images.yaml")
+
+	var config ImagesConfig
+	if _, err := os.Stat(configFile); err == nil {
+		data, err := os.ReadFile(configFile)
+		if err != nil {
+			return nil, fmt.Errorf("error reading %s: %w", configFile, err)
+		}
+
+		if err := yaml.Unmarshal(data, &config); err != nil {
+			return nil, fmt.Errorf("error parsing %s: %w", configFile, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("error checking %s: %w", configFile, err)
+	}
+
+	return &config, nil
+}
+
+// GetPlatforms returns the configured platforms, defaulting to ["linux/amd64", "linux/arm64"] if none are specified,
+// and normalizing short names like "amd64" or "arm64" to "linux/amd64" or "linux/arm64".
+func (c *ImagesConfig) GetPlatforms() []string {
+	if len(c.Platforms) == 0 {
+		return []string{"linux/amd64", "linux/arm64"}
+	}
+	var normalized []string
+	for _, p := range c.Platforms {
+		p = strings.TrimSpace(p)
+		if p == "amd64" {
+			normalized = append(normalized, "linux/amd64")
+		} else if p == "arm64" {
+			normalized = append(normalized, "linux/arm64")
+		} else if p != "" {
+			normalized = append(normalized, p)
+		}
+	}
+	return normalized
 }

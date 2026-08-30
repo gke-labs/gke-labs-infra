@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
@@ -28,6 +29,8 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"k8s.io/klog/v2"
 )
+
+var execCommandContext = exec.CommandContext
 
 // DockerBuildTask represents a task to build a single docker image.
 type DockerBuildTask struct {
@@ -44,6 +47,12 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.APScope) error {
 		return err
 	}
 	imagePrefix := cfg.ImageRepo()
+
+	imagesCfg, err := config.LoadImagesConfig(scope.RepoRoot)
+	if err != nil {
+		return err
+	}
+	platforms := imagesCfg.GetPlatforms()
 
 	tag := os.Getenv("IMAGE_TAG")
 	if tag == "" {
@@ -71,12 +80,43 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	}
 
 	if t.BuildkitHost != "" {
-		return t.runBuildctl(ctx, t.Root, fullImageName, t.Dockerfile, imagePrefix)
+		return t.runBuildctl(ctx, t.Root, fullImageName, t.Dockerfile, imagePrefix, platforms)
 	}
-	return t.runDocker(ctx, t.Root, fullImageName, t.Dockerfile, imagePrefix)
+
+	// For standard docker driver, multi-platform build is not supported.
+	// If multi-platform is not supported, fall back to native platform of the host.
+	if len(platforms) > 1 {
+		if !t.supportsMultiPlatform(ctx) {
+			nativePlatform := "linux/" + runtime.GOARCH
+			klog.Infof("Multi-platform build not supported by the default docker driver. Falling back to native platform: %s", nativePlatform)
+			platforms = []string{nativePlatform}
+		}
+	}
+
+	return t.runDocker(ctx, t.Root, fullImageName, t.Dockerfile, imagePrefix, platforms)
 }
 
-func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, relDockerfilePath, imagePrefix string) error {
+func (t *DockerBuildTask) supportsMultiPlatform(ctx context.Context) bool {
+	cmd := execCommandContext(ctx, "docker", "buildx", "inspect")
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	// Parse the output to check the driver
+	lines := strings.Split(string(out), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(strings.ToLower(line), "driver:") {
+			val := strings.TrimSpace(line[7:])
+			if strings.ToLower(val) == "docker" {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, relDockerfilePath, imagePrefix string, platforms []string) error {
 	klog.Infof("Building image %s from %s using buildctl", fullImageName, root)
 
 	buildctlImageName := fullImageName
@@ -109,6 +149,10 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 		"--output", output,
 	}
 
+	if len(platforms) > 0 {
+		buildctlArgs = append(buildctlArgs, "--opt", "platform="+strings.Join(platforms, ","))
+	}
+
 	if host, ok := strings.CutPrefix(t.BuildkitHost, "k8s://"); ok {
 		// handle port forward
 		parts := strings.Split(host, "/")
@@ -121,7 +165,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 			Child: &tasks.DummyTask{
 				Name: "run-buildctl",
 				RunFn: func(ctx context.Context, scope *tasks.APScope) error {
-					cmd := exec.CommandContext(ctx, "buildctl", buildctlArgs...)
+					cmd := execCommandContext(ctx, "buildctl", buildctlArgs...)
 					cmd.Dir = root
 					cmd.Stdout = os.Stdout
 					cmd.Stderr = os.Stderr
@@ -137,7 +181,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 		return pfTask.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root})
 	}
 
-	cmd := exec.CommandContext(ctx, "buildctl", buildctlArgs...)
+	cmd := execCommandContext(ctx, "buildctl", buildctlArgs...)
 	cmd.Dir = root
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -148,7 +192,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 	return nil
 }
 
-func (t *DockerBuildTask) runDocker(ctx context.Context, root, fullImageName, relDockerfilePath, imagePrefix string) error {
+func (t *DockerBuildTask) runDocker(ctx context.Context, root, fullImageName, relDockerfilePath, imagePrefix string, platforms []string) error {
 	klog.Infof("Building image %s from %s using docker", fullImageName, root)
 
 	tag := os.Getenv("IMAGE_TAG")
@@ -156,16 +200,35 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, root, fullImageName, re
 		tag = "latest"
 	}
 
-	args := []string{
-		"build",
-		"-t", fullImageName,
-		"-f", relDockerfilePath,
-		"--build-arg", "IMAGE_PREFIX=" + imagePrefix,
-		"--build-arg", "IMAGE_TAG=" + tag,
-		".",
+	useBuildxPush := t.Push && t.supportsMultiPlatform(ctx)
+
+	var args []string
+	if useBuildxPush {
+		args = []string{
+			"buildx", "build",
+			"--platform", strings.Join(platforms, ","),
+			"--push",
+			"-t", fullImageName,
+			"-f", relDockerfilePath,
+			"--build-arg", "IMAGE_PREFIX=" + imagePrefix,
+			"--build-arg", "IMAGE_TAG=" + tag,
+			".",
+		}
+	} else {
+		args = []string{
+			"build",
+			"-t", fullImageName,
+			"-f", relDockerfilePath,
+			"--build-arg", "IMAGE_PREFIX=" + imagePrefix,
+			"--build-arg", "IMAGE_TAG=" + tag,
+		}
+		if len(platforms) == 1 {
+			args = append(args, "--platform", platforms[0])
+		}
+		args = append(args, ".")
 	}
 
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd := execCommandContext(ctx, "docker", args...)
 	cmd.Dir = root
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -173,9 +236,9 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, root, fullImageName, re
 		return fmt.Errorf("docker build failed for %s: %w", t.ImageName, err)
 	}
 
-	if t.Push {
+	if t.Push && !useBuildxPush {
 		klog.Infof("Pushing image %s", fullImageName)
-		pushCmd := exec.CommandContext(ctx, "docker", "push", fullImageName)
+		pushCmd := execCommandContext(ctx, "docker", "push", fullImageName)
 		pushCmd.Dir = root
 		pushCmd.Stdout = os.Stdout
 		pushCmd.Stderr = os.Stderr
@@ -183,6 +246,7 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, root, fullImageName, re
 			return fmt.Errorf("docker push failed for %s: %w", t.ImageName, err)
 		}
 	}
+
 	return nil
 }
 

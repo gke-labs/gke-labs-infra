@@ -87,3 +87,54 @@ func TestLoadDefault(t *testing.T) {
 		t.Errorf("expected default govulncheck enabled to be true")
 	}
 }
+
+func TestLoadImagesConfig(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "ap-imagesconfig-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.Mkdir(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Test defaults with empty file
+	if err := os.WriteFile(filepath.Join(apDir, "images.yaml"), []byte(""), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadImagesConfig(tempDir)
+	if err != nil {
+		t.Fatalf("LoadImagesConfig failed: %v", err)
+	}
+	platforms := cfg.GetPlatforms()
+	if len(platforms) != 2 || platforms[0] != "linux/amd64" || platforms[1] != "linux/arm64" {
+		t.Errorf("expected default platforms [linux/amd64, linux/arm64], got %v", platforms)
+	}
+
+	// 2. Test explicit config with short names
+	yamlContent := `
+platforms:
+  - amd64
+  - arm64
+  - linux/s390x
+`
+	if err := os.WriteFile(filepath.Join(apDir, "images.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadImagesConfig(tempDir)
+	if err != nil {
+		t.Fatalf("LoadImagesConfig failed: %v", err)
+	}
+	platforms = cfg.GetPlatforms()
+	expected := []string{"linux/amd64", "linux/arm64", "linux/s390x"}
+	if len(platforms) != len(expected) {
+		t.Fatalf("expected platforms count %d, got %d (platforms: %v)", len(expected), len(platforms), platforms)
+	}
+	for i, p := range platforms {
+		if p != expected[i] {
+			t.Errorf("at index %d: expected %s, got %s", i, expected[i], p)
+		}
+	}
+}

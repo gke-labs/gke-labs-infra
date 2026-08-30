@@ -100,7 +100,7 @@ spec:
 	runCmdWithInput(t, repoRoot, pkgYAML, "kubectl", "apply", "-f", "-")
 
 	// 4. Verify helloworld is deployed
-	waitForDeployment(t, "helloworld", "default", 5*time.Minute)
+	waitForDeployment(t, "helloworld", "default", 15*time.Minute)
 }
 
 func runCmdWithInput(t *testing.T, dir string, input string, name string, args ...string) {

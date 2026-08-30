@@ -12,12 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM golang:1.27.0-trixie AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.0-trixie AS builder
+
+ARG TARGETOS
+ARG TARGETARCH
 
 WORKDIR /workspace
 COPY . .
 
-RUN go build -o /usr/local/bin/in-cluster-image-registry-node-agent ./cmd/in-cluster-image-registry-node-agent
+RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /usr/local/bin/in-cluster-image-registry-node-agent ./cmd/in-cluster-image-registry-node-agent
 
 FROM debian:trixie-slim
 RUN apt-get update && apt-get install -y util-linux && rm -rf /var/lib/apt/lists/*

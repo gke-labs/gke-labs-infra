@@ -12,13 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM golang:1.27.0-trixie AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.0-trixie AS builder
+
+ARG TARGETOS
+ARG TARGETARCH
 
 WORKDIR /workspace
 COPY . .
 
 # Build helloworld
-RUN go build -o /usr/local/bin/helloworld .
+RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /usr/local/bin/helloworld .
 
 FROM golang:1.27.0-trixie
 COPY --from=builder /usr/local/bin/helloworld /usr/local/bin/helloworld
