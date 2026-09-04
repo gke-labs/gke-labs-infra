@@ -20,6 +20,8 @@ updates:
     schedule:
       interval: "daily"
     open-pull-requests-limit: 50
+    cooldown:
+      default-days: 7
     groups:
       go-dependencies:
         patterns:
@@ -30,6 +32,8 @@ updates:
     schedule:
       interval: "daily"
     open-pull-requests-limit: 50
+    cooldown:
+      default-days: 7
     groups:
       go-dependencies:
         patterns:
@@ -40,6 +44,8 @@ updates:
     schedule:
       interval: "daily"
     open-pull-requests-limit: 50
+    cooldown:
+      default-days: 7
     groups:
       go-dependencies:
         patterns:
@@ -50,6 +56,8 @@ updates:
     schedule:
       interval: "daily"
     open-pull-requests-limit: 50
+    cooldown:
+      default-days: 7
     groups:
       go-dependencies:
         patterns:
@@ -60,6 +68,8 @@ updates:
     schedule:
       interval: "daily"
     open-pull-requests-limit: 50
+    cooldown:
+      default-days: 7
     groups:
       go-dependencies:
         patterns:
@@ -67,28 +77,17 @@ updates:
 
   # Docker base images
   - package-ecosystem: "docker"
-    directory: "/ap/images/ap-golang"
+    directories:
+      - "/**"
     schedule:
       interval: "daily"
     open-pull-requests-limit: 50
-
-  - package-ecosystem: "docker"
-    directory: "/autodeploy/images/autodeploy-controller"
-    schedule:
-      interval: "daily"
-    open-pull-requests-limit: 50
-
-  - package-ecosystem: "docker"
-    directory: "/autodeploy/examples/helloworld/images/examples-helloworld"
-    schedule:
-      interval: "daily"
-    open-pull-requests-limit: 50
-
-  - package-ecosystem: "docker"
-    directory: "/in-cluster-image-registry/images/in-cluster-image-registry-node-agent"
-    schedule:
-      interval: "daily"
-    open-pull-requests-limit: 50
+    cooldown:
+      default-days: 7
+    groups:
+      docker-dependencies:
+        patterns:
+          - "*"
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
@@ -96,3 +95,5 @@ updates:
     schedule:
       interval: "daily"
     open-pull-requests-limit: 50
+    cooldown:
+      default-days: 7
