@@ -54,19 +54,12 @@ func MarkConst[T any](val *T) *T {
 }
 
 // Const is a type-safe wrapper for a constant value.
-type Const[T any] struct {
-	val *T
-}
-
-// Read returns the constant value.
-func (c Const[T]) Read() *T {
-	return c.val
-}
+type Const[T any] *T
 
 // WrapConst wraps a value and marks it as constant.
 func WrapConst[T any](val *T) Const[T] {
 	MarkConst(val)
-	return Const[T]{val: val}
+	return Const[T](val)
 }
 
 func computeHash(val any) string {
