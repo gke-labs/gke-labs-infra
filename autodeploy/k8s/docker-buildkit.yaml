@@ -12,6 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: buildkit-cache
+  namespace: autodeploy-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -37,6 +49,13 @@ spec:
         - containerPort: 2375
         securityContext:
           privileged: true
+        volumeMounts:
+        - name: buildkit-cache
+          mountPath: /var/lib/buildkit
+      volumes:
+      - name: buildkit-cache
+        persistentVolumeClaim:
+          claimName: buildkit-cache
 ---
 apiVersion: v1
 kind: Service

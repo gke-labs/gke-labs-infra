@@ -16,7 +16,9 @@ FROM golang:1.27.1-trixie AS builder
 
 WORKDIR /workspace
 COPY . .
-RUN go build -o /usr/local/bin/ap ./ap
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    go build -o /usr/local/bin/ap ./ap
 
 FROM golang:1.27.1-trixie
 COPY --from=builder /usr/local/bin/ap /usr/local/bin/ap

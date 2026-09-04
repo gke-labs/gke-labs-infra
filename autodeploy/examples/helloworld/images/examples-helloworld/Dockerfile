@@ -18,7 +18,9 @@ WORKDIR /workspace
 COPY . .
 
 # Build helloworld
-RUN go build -o /usr/local/bin/helloworld .
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    go build -o /usr/local/bin/helloworld .
 
 FROM golang:1.27.1-trixie
 COPY --from=builder /usr/local/bin/helloworld /usr/local/bin/helloworld
