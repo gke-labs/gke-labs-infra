@@ -101,24 +101,61 @@ func updateContainerdConfig(path string) (bool, error) {
 
 	strContent := string(content)
 	lines := strings.Split(strContent, "\n")
+	version := 3 // default to 3
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "config_path") && !strings.HasPrefix(trimmed, "#") {
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "config_path") {
 			if strings.Contains(trimmed, certsDPath) {
 				return false, nil
 			}
 		}
+		if strings.HasPrefix(trimmed, "version") {
+			parts := strings.SplitN(trimmed, "=", 2)
+			if len(parts) == 2 {
+				vVal := strings.TrimSpace(parts[1])
+				vVal = strings.Trim(vVal, `"'`)
+				if vVal == "2" {
+					version = 2
+				} else if vVal == "3" {
+					version = 3
+				}
+			}
+		}
 	}
 
-	// If we didn't find it, append it.
-	newContent := strContent
-	if !strings.HasSuffix(newContent, "\n") {
-		newContent += "\n"
+	targetHeader := `[plugins."io.containerd.cri.v1.images".registry]`
+	if version == 2 {
+		targetHeader = `[plugins."io.containerd.grpc.v1.cri".registry]`
 	}
-	newContent += "\n[plugins.\"io.containerd.cri.v1.images\".registry]\n"
-	newContent += fmt.Sprintf("  config_path = %q\n", certsDPath)
 
-	klog.Infof("Updating %s to enable certs.d support", path)
+	headerFound := false
+	var newLines []string
+	for _, line := range lines {
+		newLines = append(newLines, line)
+		trimmed := strings.TrimSpace(line)
+		if trimmed == targetHeader {
+			newLines = append(newLines, fmt.Sprintf("  config_path = %q", certsDPath))
+			headerFound = true
+		}
+	}
+
+	var newContent string
+	if headerFound {
+		newContent = strings.Join(newLines, "\n")
+	} else {
+		// If we didn't find the header, append it.
+		newContent = strContent
+		if !strings.HasSuffix(newContent, "\n") {
+			newContent += "\n"
+		}
+		newContent += fmt.Sprintf("\n%s\n", targetHeader)
+		newContent += fmt.Sprintf("  config_path = %q\n", certsDPath)
+	}
+
+	klog.Infof("Updating %s to enable certs.d support (detected containerd config version %d)", path, version)
 	if err := os.WriteFile(path, []byte(newContent), 0644); err != nil {
 		return false, fmt.Errorf("failed to write %s: %w", path, err)
 	}
