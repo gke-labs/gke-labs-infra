@@ -32,6 +32,7 @@ import (
 const (
 	certsDPath           = "/etc/containerd/certs.d"
 	containerdConfigPath = "/etc/containerd/config.toml"
+	etcHostsPath         = "/etc/hosts"
 	registryHost         = "images.local"
 	namespace            = "in-cluster-image-registry-system"
 	serviceName          = "in-cluster-image-registry"
@@ -73,6 +74,10 @@ func reconcile(ctx context.Context, clientset *kubernetes.Clientset) error {
 	hostsPath := filepath.Join(certsDPath, registryHost, "hosts.toml")
 	if err := updateHostsConfig(hostsPath, clusterIP); err != nil {
 		return fmt.Errorf("failed to update hosts config: %w", err)
+	}
+
+	if err := updateHostsFile(etcHostsPath, clusterIP, registryHost); err != nil {
+		return fmt.Errorf("failed to update etc hosts: %w", err)
 	}
 
 	changed, err := updateContainerdConfig(containerdConfigPath)
@@ -168,5 +173,77 @@ func updateHostsConfig(path, ip string) error {
 	if err := os.WriteFile(path, []byte(desiredContent), 0644); err != nil {
 		return fmt.Errorf("failed to write %s: %w", path, err)
 	}
+	return nil
+}
+
+func updateHostsFile(path, ip, registryHost string) error {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			content = []byte{}
+		} else {
+			return fmt.Errorf("failed to read %s: %w", path, err)
+		}
+	}
+
+	// Trim trailing spaces/newlines to standardize and avoid accumulating blank lines
+	strContent := strings.TrimRight(string(content), " \t\r\n")
+	var lines []string
+	if strContent != "" {
+		lines = strings.Split(strContent, "\n")
+	}
+
+	var newLines []string
+	foundCorrect := false
+	changed := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			newLines = append(newLines, line)
+			continue
+		}
+
+		fields := strings.Fields(trimmed)
+		if len(fields) < 2 {
+			newLines = append(newLines, line)
+			continue
+		}
+
+		// Check if registryHost is one of the hostnames
+		isRegistryHostLine := false
+		for _, field := range fields[1:] {
+			if strings.EqualFold(field, registryHost) {
+				isRegistryHostLine = true
+				break
+			}
+		}
+
+		if isRegistryHostLine {
+			if fields[0] == ip && len(fields) == 2 {
+				foundCorrect = true
+				newLines = append(newLines, line)
+			} else {
+				changed = true
+				// Skip this line
+			}
+		} else {
+			newLines = append(newLines, line)
+		}
+	}
+
+	if !foundCorrect {
+		newLines = append(newLines, fmt.Sprintf("%s %s", ip, registryHost))
+		changed = true
+	}
+
+	if changed {
+		newContent := strings.Join(newLines, "\n") + "\n"
+		klog.Infof("Updating %s to point %s to %s", path, registryHost, ip)
+		if err := os.WriteFile(path, []byte(newContent), 0644); err != nil {
+			return fmt.Errorf("failed to write %s: %w", path, err)
+		}
+	}
+
 	return nil
 }
