@@ -17,7 +17,9 @@ FROM golang:1.27.1-trixie AS builder
 WORKDIR /workspace
 COPY . .
 
-RUN go build -o /usr/local/bin/in-cluster-image-registry-node-agent ./cmd/in-cluster-image-registry-node-agent
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    go build -o /usr/local/bin/in-cluster-image-registry-node-agent ./cmd/in-cluster-image-registry-node-agent
 
 FROM debian:trixie-slim
 RUN apt-get update && apt-get install -y util-linux && rm -rf /var/lib/apt/lists/*
