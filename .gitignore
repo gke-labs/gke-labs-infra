@@ -1,3 +1,4 @@
 .build/
 autodeploy/.build/
 in-cluster-image-registry/.build/
+test-runner/.build/
