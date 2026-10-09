@@ -91,7 +91,8 @@ Edit the `--github-repo` argument in `k8s/manifest.yaml` (or switch it to
 runners.
 
 Workflows select the pool with its runner label, which defaults to the pool
-name:
+name. Runners always also carry `self-hosted` (GitHub does not add it for
+JIT runners automatically):
 
 ```yaml
 jobs:
@@ -119,7 +120,7 @@ Useful flags (see `--help` for all):
 | --- | --- | --- |
 | `--replicas` | `1` | idle runners to keep waiting |
 | `--pool` | `test-runner` | pool name; prefixes Sandbox and runner names |
-| `--runner-labels` | pool name | GitHub labels for `runs-on` |
+| `--runner-labels` | pool name | GitHub labels for `runs-on`, plus `self-hosted` |
 | `--runner-image` | `ghcr.io/actions/actions-runner:<version>` | runner image |
 | `--runtime-class` | unset | `runtimeClassName` for runner pods |
 | `--max-runner-lifetime` | `6h` | Sandbox `shutdownTime` |

@@ -74,7 +74,7 @@ func Run(ctx context.Context) error {
 	f.StringVar(&opt.GitHubRepo, "github-repo", opt.GitHubRepo, "Register runners with this repository (owner/repo)")
 	f.StringVar(&opt.GitHubOrg, "github-org", opt.GitHubOrg, "Register runners with this organization (alternative to --github-repo)")
 	f.StringVar(&opt.GitHubTokenFile, "github-token-file", opt.GitHubTokenFile, "File containing the GitHub token; defaults to $GITHUB_TOKEN")
-	f.StringSliceVar(&opt.RunnerLabels, "runner-labels", opt.RunnerLabels, "GitHub runner labels (defaults to the pool name); workflows select them with runs-on")
+	f.StringSliceVar(&opt.RunnerLabels, "runner-labels", opt.RunnerLabels, "GitHub runner labels in addition to self-hosted (defaults to the pool name); workflows select them with runs-on")
 	f.Int64Var(&opt.RunnerGroupID, "runner-group-id", opt.RunnerGroupID, "GitHub runner group ID to register runners into")
 	f.StringVar(&opt.RunnerImage, "runner-image", opt.RunnerImage, "GitHub Actions runner image")
 	f.StringVar(&opt.RuntimeClassName, "runtime-class", opt.RuntimeClassName, "RuntimeClass for runner pods (empty for the cluster default)")
@@ -228,9 +228,15 @@ func buildPoolOptions(opt Options) (runnerpool.Options, error) {
 		return runnerpool.Options{}, err
 	}
 
+	// JIT runners only get the labels we ask for: GitHub does not add the
+	// usual self-hosted/linux/x64 defaults. Always include self-hosted so
+	// the conventional "runs-on: [self-hosted, <pool>]" matches.
 	runnerLabels := opt.RunnerLabels
 	if len(runnerLabels) == 0 {
 		runnerLabels = []string{opt.Pool}
+	}
+	if !slices.Contains(runnerLabels, "self-hosted") {
+		runnerLabels = append([]string{"self-hosted"}, runnerLabels...)
 	}
 
 	var env []corev1.EnvVar
