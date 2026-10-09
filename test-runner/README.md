@@ -78,10 +78,12 @@ kubectl create namespace test-runner
 kubectl -n test-runner create secret generic github-token --from-literal=token="$GITHUB_TOKEN"
 ```
 
-Then, from the repository root, build and deploy with `ap`:
+Then, from the repository root, build and deploy with `ap`. Without a local
+Docker daemon, point `ap` at an in-cluster buildkit (the one from
+`autodeploy/k8s/docker-buildkit.yaml` works):
 
 ```bash
-ap deploy //test-runner --buildkit-host k8s://autodeploy-system/buildkit
+BUILDKIT_HOST=k8s://autodeploy-system/buildkit ap deploy //test-runner
 ```
 
 Edit the `--github-repo` argument in `k8s/manifest.yaml` (or switch it to
