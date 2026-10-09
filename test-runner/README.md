@@ -81,7 +81,7 @@ kubectl -n test-runner create secret generic github-token --from-literal=token="
 Then, from the repository root, build and deploy with `ap`:
 
 ```bash
-ap deploy //test-runner
+ap deploy //test-runner --buildkit-host k8s://autodeploy-system/buildkit
 ```
 
 Edit the `--github-repo` argument in `k8s/manifest.yaml` (or switch it to

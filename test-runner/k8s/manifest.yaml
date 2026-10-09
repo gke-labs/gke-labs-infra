@@ -135,11 +135,15 @@ spec:
         - name: controller
           image: test-runner-controller
           args:
-            - --github-repo=gke-labs/gke-labs-infra
+            - --github-repo=gke-labs/gateway-api-reference-implementation
             - --namespace=test-runner-sandboxes
             - --pool=test-runner
-            - --replicas=1
+            - --replicas=2
             - --github-token-file=/var/run/secrets/github/token
+            # Go builds and govulncheck want a few cores and GBs.
+            - --runner-cpu-request=2
+            - --runner-memory-request=4Gi
+            - --runner-memory-limit=8Gi
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
