@@ -323,3 +323,50 @@ func TestPresubmitScriptsWithLicenseNone(t *testing.T) {
 		t.Errorf("expected script with license: none to start directly with shebang and set -o errexit, got:\n%s", script)
 	}
 }
+
+func TestGithubActionsWorkflowRunsOn(t *testing.T) {
+	root := t.TempDir()
+	writeTestHeadersConfig(t, root)
+
+	ciYAML := `presubmits:
+  ap-lint:
+    runsOn: [self-hosted, test-runner]
+  ap-test:
+    runsOn: self-hosted
+`
+	if err := os.WriteFile(filepath.Join(root, ".ap", "ci.yaml"), []byte(ciYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	presubmitsDir := filepath.Join(root, "dev", "ci", "presubmits")
+	if err := os.MkdirAll(presubmitsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, script := range []string{"ap-build", "ap-lint", "ap-test"} {
+		if err := os.WriteFile(filepath.Join(presubmitsDir, script), []byte("#!/bin/bash\nexit 0\n"), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	scopes := []*tasks.APScope{{Dir: root, RepoRoot: root}}
+	if err := runGithubActionsGenerator(t.Context(), root, scopes); err != nil {
+		t.Fatalf("runGithubActionsGenerator: %v", err)
+	}
+
+	b, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "ci-presubmits.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(b)
+
+	for job, want := range map[string]string{
+		"ap-build": "ubuntu-latest",
+		"ap-lint":  "[self-hosted, test-runner]",
+		"ap-test":  "self-hosted",
+	} {
+		expected := fmt.Sprintf("  %s:\n    runs-on: %s\n", job, want)
+		if !strings.Contains(content, expected) {
+			t.Errorf("job %s: expected %q in workflow:\n%s", job, expected, content)
+		}
+	}
+}

@@ -20,6 +20,15 @@
     *   `.ap/ap.yaml` configured with `version: latest`.
     *   `.ap/go.yaml` configuring Go formatting (`gofmt`) and `govet`.
     *   `.ap/headers.yaml` configuring file headers (defaults to `license: apache-2.0`, or pass `--license none` to disable).
+    *   `.ap/ci.yaml` (optional, not created by `ap init`) overriding the `runs-on` of generated presubmit jobs, for example to send `ap-lint` and `ap-test` to self-hosted runners:
+
+        ```yaml
+        presubmits:
+          ap-lint:
+            runsOn: [self-hosted, test-runner]
+          ap-test:
+            runsOn: [self-hosted, test-runner]
+        ```
 
     You can optionally pass `--generate` to scaffold and run generation in a single step:
     ```bash
