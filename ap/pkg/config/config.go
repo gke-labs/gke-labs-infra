@@ -283,3 +283,70 @@ func (c *ImagesConfig) GetPlatforms() []string {
 	}
 	return normalized
 }
+
+// CIConfig represents the CI generation configuration, loaded from .ap/ci.yaml.
+type CIConfig struct {
+	// Presubmits holds per-job overrides, keyed by presubmit job name
+	// (e.g. "ap-lint", or "ap-e2e-autodeploy" for a nested AP root).
+	Presubmits map[string]*PresubmitJobConfig `json:"presubmits"`
+}
+
+// PresubmitJobConfig holds overrides for a single generated presubmit job.
+type PresubmitJobConfig struct {
+	// RunsOn overrides the GitHub Actions runs-on for the job. It may be a
+	// single label ("ubuntu-latest") or a list (["self-hosted", "test-runner"]).
+	RunsOn StringOrSlice `json:"runsOn"`
+}
+
+// StringOrSlice is a []string that also accepts a single string in YAML/JSON.
+type StringOrSlice []string
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (s *StringOrSlice) UnmarshalJSON(b []byte) error {
+	var single string
+	if err := json.Unmarshal(b, &single); err == nil {
+		*s = StringOrSlice{single}
+		return nil
+	}
+	var list []string
+	if err := json.Unmarshal(b, &list); err != nil {
+		return fmt.Errorf("expected a string or a list of strings, got %s", string(b))
+	}
+	*s = StringOrSlice(list)
+	return nil
+}
+
+// LoadCIConfig loads the configuration from .ap/ci.yaml in the specified root directory.
+func LoadCIConfig(root string) (*CIConfig, error) {
+	configFile := filepath.Join(root, ".ap/ci.yaml")
+
+	var config CIConfig
+	if _, err := os.Stat(configFile); err == nil {
+		data, err := os.ReadFile(configFile)
+		if err != nil {
+			return nil, fmt.Errorf("error reading %s: %w", configFile, err)
+		}
+
+		if err := yaml.Unmarshal(data, &config); err != nil {
+			return nil, fmt.Errorf("error parsing %s: %w", configFile, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("error checking %s: %w", configFile, err)
+	}
+
+	return &config, nil
+}
+
+// RunsOn returns the runs-on value for a presubmit job, looking up the job
+// name and then the bare script name, and falling back to defaultRunsOn.
+func (c *CIConfig) RunsOn(jobName, scriptName string, defaultRunsOn []string) []string {
+	if c == nil {
+		return defaultRunsOn
+	}
+	for _, key := range []string{jobName, scriptName} {
+		if job, ok := c.Presubmits[key]; ok && job != nil && len(job.RunsOn) > 0 {
+			return []string(job.RunsOn)
+		}
+	}
+	return defaultRunsOn
+}

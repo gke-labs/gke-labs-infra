@@ -567,6 +567,11 @@ jobs:
 			goModExists = true
 		}
 
+		ciConfig, err := config.LoadCIConfig(apRoot)
+		if err != nil {
+			return fmt.Errorf("failed to load CI config: %w", err)
+		}
+
 		relPresubmitsDir, err := filepath.Rel(repoRoot, presubmitsDir)
 		if err != nil {
 			return err
@@ -583,8 +588,10 @@ jobs:
 				jobName = jobName + suffix
 			}
 
+			runsOn := formatRunsOn(ciConfig.RunsOn(jobName, scriptName, defaultRunsOn))
+
 			sb.WriteString(fmt.Sprintf(`  %s:
-    runs-on: ubuntu-latest
+    runs-on: %s
     env:
       ARTIFACTS: /tmp/artifacts
     steps:
@@ -594,7 +601,7 @@ jobs:
           # Presubmit scripts never push; don't leave the token in
           # .git/config (zizmor: artipacked).
           persist-credentials: false
-`, jobName, actionCheckout))
+`, jobName, runsOn, actionCheckout))
 
 			if goModExists {
 				relGoMod, _ := filepath.Rel(repoRoot, filepath.Join(apRoot, "go.mod"))
@@ -641,6 +648,19 @@ jobs:
 	}
 
 	return nil
+}
+
+// defaultRunsOn is the runs-on used for presubmit jobs unless .ap/ci.yaml
+// overrides it.
+var defaultRunsOn = []string{"ubuntu-latest"}
+
+// formatRunsOn renders a runs-on value: a single label as a scalar, several
+// labels as a flow sequence (runs-on: [self-hosted, test-runner]).
+func formatRunsOn(labels []string) string {
+	if len(labels) == 1 {
+		return labels[0]
+	}
+	return "[" + strings.Join(labels, ", ") + "]"
 }
 
 func GetApCommand(repoRoot, apRoot string) (string, error) {
