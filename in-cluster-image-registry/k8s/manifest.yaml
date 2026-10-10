@@ -115,7 +115,12 @@ spec:
           volumeMounts:
             - name: etc-containerd
               mountPath: /etc/containerd
+            - name: etc-hosts
+              mountPath: /etc/hosts
       volumes:
         - name: etc-containerd
           hostPath:
             path: /etc/containerd
+        - name: etc-hosts
+          hostPath:
+            path: /etc/hosts
