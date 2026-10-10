@@ -138,13 +138,19 @@ func DiscoverScopes(repoRoot string, apRoots []string) ([]*tasks.APScope, error)
 
 		// Go Test tasks
 		goTestTasks, err := golang.TestTasks(apRoot)
-		if err == nil && goTestTasks != nil {
+		if err != nil {
+			return nil, fmt.Errorf("failed to discover test tasks in %s: %w", apRoot, err)
+		}
+		if goTestTasks != nil {
 			scope.TestTasks = append(scope.TestTasks, goTestTasks)
 		}
 
 		// Go lint tasks
 		goLintTasks, err := golang.LintTasks(apRoot)
-		if err == nil && goLintTasks != nil {
+		if err != nil {
+			return nil, fmt.Errorf("failed to discover lint tasks in %s: %w", apRoot, err)
+		}
+		if goLintTasks != nil {
 			scope.LintTasks = append(scope.LintTasks, goLintTasks)
 		}
 

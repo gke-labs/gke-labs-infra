@@ -301,8 +301,8 @@ func LintTasks(root string) (tasks.Task, error) {
 				Dir:             dir,
 				RepoRoot:        root,
 				CheckParameters: cfg.IsUnusedParametersEnabled(),
-				SkipGenerated:   cfg.ResolveSkipGenerated(nil, true),
-				SkipTests:       cfg.ResolveSkipTests(nil, false),
+				SkipGenerated:   cfg.ResolveSkipGenerated(cfg.UnusedSkipGenerated(), true),
+				SkipTests:       cfg.ResolveSkipTests(cfg.UnusedSkipTests(), false),
 				SkipGlobs:       cfg.Skip,
 			})
 		}
@@ -311,8 +311,8 @@ func LintTasks(root string) (tasks.Task, error) {
 				Dir:           dir,
 				RepoRoot:      root,
 				IsError:       cfg.IsTestContextError(),
-				SkipGenerated: cfg.ResolveSkipGenerated(nil, false),
-				SkipTests:     cfg.ResolveSkipTests(nil, false),
+				SkipGenerated: cfg.ResolveSkipGenerated(cfg.TestContextSkipGenerated(), false),
+				SkipTests:     cfg.ResolveSkipTests(cfg.TestContextSkipTests(), false),
 				SkipGlobs:     cfg.Skip,
 			})
 		}
@@ -320,8 +320,8 @@ func LintTasks(root string) (tasks.Task, error) {
 			modGroup.Tasks = append(modGroup.Tasks, &ReplaceEmptyInterfaceWithAnyTask{
 				Dir:           dir,
 				RepoRoot:      root,
-				SkipGenerated: cfg.ResolveSkipGenerated(nil, true),
-				SkipTests:     cfg.ResolveSkipTests(nil, false),
+				SkipGenerated: cfg.ResolveSkipGenerated(cfg.ReplaceEmptyInterfaceWithAnySkipGenerated(), true),
+				SkipTests:     cfg.ResolveSkipTests(cfg.ReplaceEmptyInterfaceWithAnySkipTests(), false),
 				SkipGlobs:     cfg.Skip,
 			})
 		}
