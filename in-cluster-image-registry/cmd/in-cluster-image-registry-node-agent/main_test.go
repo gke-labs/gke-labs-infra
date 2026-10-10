@@ -68,43 +68,178 @@ func TestUpdateHostsConfig(t *testing.T) {
 }
 
 func TestUpdateContainerdConfig(t *testing.T) {
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config.toml")
+	t.Run("DefaultVersion3", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
 
-	initialContent := `[plugins]
+		initialContent := `[plugins]
   [plugins."io.containerd.grpc.v1.cri"]
     sandbox_image = "registry.k8s.io/pause:3.9"
 `
-	if err := os.WriteFile(configPath, []byte(initialContent), 0644); err != nil {
-		t.Fatalf("failed to write initial config: %v", err)
-	}
+		if err := os.WriteFile(configPath, []byte(initialContent), 0644); err != nil {
+			t.Fatalf("failed to write initial config: %v", err)
+		}
 
-	changed, err := updateContainerdConfig(configPath)
-	if err != nil {
-		t.Fatalf("updateContainerdConfig failed: %v", err)
-	}
-	if !changed {
-		t.Errorf("expected changed=true, got false")
-	}
+		changed, err := updateContainerdConfig(configPath)
+		if err != nil {
+			t.Fatalf("updateContainerdConfig failed: %v", err)
+		}
+		if !changed {
+			t.Errorf("expected changed=true, got false")
+		}
 
-	content, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatalf("failed to read config.toml: %v", err)
-	}
+		content, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatalf("failed to read config.toml: %v", err)
+		}
 
-	if !strings.Contains(string(content), `config_path = "/etc/containerd/certs.d"`) {
-		t.Errorf("expected config_path in content: %s", string(content))
-	}
-	if !strings.Contains(string(content), `[plugins."io.containerd.cri.v1.images".registry]`) {
-		t.Errorf("expected plugin section in content: %s", string(content))
-	}
+		if !strings.Contains(string(content), `config_path = "/etc/containerd/certs.d"`) {
+			t.Errorf("expected config_path in content: %s", string(content))
+		}
+		if !strings.Contains(string(content), `[plugins."io.containerd.cri.v1.images".registry]`) {
+			t.Errorf("expected plugin section in content: %s", string(content))
+		}
 
-	// Run again, should not change
-	changed, err = updateContainerdConfig(configPath)
-	if err != nil {
-		t.Fatalf("second updateContainerdConfig failed: %v", err)
-	}
-	if changed {
-		t.Errorf("expected changed=false on second run, got true")
-	}
+		// Run again, should not change
+		changed, err = updateContainerdConfig(configPath)
+		if err != nil {
+			t.Fatalf("second updateContainerdConfig failed: %v", err)
+		}
+		if changed {
+			t.Errorf("expected changed=false on second run, got true")
+		}
+	})
+
+	t.Run("Version2", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+
+		initialContent := `version = 2
+[plugins]
+  [plugins."io.containerd.grpc.v1.cri"]
+    sandbox_image = "registry.k8s.io/pause:3.9"
+`
+		if err := os.WriteFile(configPath, []byte(initialContent), 0644); err != nil {
+			t.Fatalf("failed to write initial config: %v", err)
+		}
+
+		changed, err := updateContainerdConfig(configPath)
+		if err != nil {
+			t.Fatalf("updateContainerdConfig failed: %v", err)
+		}
+		if !changed {
+			t.Errorf("expected changed=true, got false")
+		}
+
+		content, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatalf("failed to read config.toml: %v", err)
+		}
+
+		if !strings.Contains(string(content), `config_path = "/etc/containerd/certs.d"`) {
+			t.Errorf("expected config_path in content: %s", string(content))
+		}
+		if !strings.Contains(string(content), `[plugins."io.containerd.grpc.v1.cri".registry]`) {
+			t.Errorf("expected v2 plugin section in content: %s", string(content))
+		}
+
+		// Run again, should not change
+		changed, err = updateContainerdConfig(configPath)
+		if err != nil {
+			t.Fatalf("second updateContainerdConfig failed: %v", err)
+		}
+		if changed {
+			t.Errorf("expected changed=false on second run, got true")
+		}
+	})
+
+	t.Run("Version3", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+
+		initialContent := `version = 3
+[plugins]
+  [plugins."io.containerd.cri.v1.images".registry]
+`
+		if err := os.WriteFile(configPath, []byte(initialContent), 0644); err != nil {
+			t.Fatalf("failed to write initial config: %v", err)
+		}
+
+		changed, err := updateContainerdConfig(configPath)
+		if err != nil {
+			t.Fatalf("updateContainerdConfig failed: %v", err)
+		}
+		if !changed {
+			t.Errorf("expected changed=true, got false")
+		}
+
+		content, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatalf("failed to read config.toml: %v", err)
+		}
+
+		if !strings.Contains(string(content), `config_path = "/etc/containerd/certs.d"`) {
+			t.Errorf("expected config_path in content: %s", string(content))
+		}
+		if !strings.Contains(string(content), `[plugins."io.containerd.cri.v1.images".registry]`) {
+			t.Errorf("expected plugin section in content: %s", string(content))
+		}
+
+		// Run again, should not change
+		changed, err = updateContainerdConfig(configPath)
+		if err != nil {
+			t.Fatalf("second updateContainerdConfig failed: %v", err)
+		}
+		if changed {
+			t.Errorf("expected changed=false on second run, got true")
+		}
+	})
+
+	t.Run("Version2WithExistingHeader", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+
+		initialContent := `version = 2
+[plugins]
+  [plugins."io.containerd.grpc.v1.cri"]
+    sandbox_image = "registry.k8s.io/pause:3.9"
+  [plugins."io.containerd.grpc.v1.cri".registry]
+`
+		if err := os.WriteFile(configPath, []byte(initialContent), 0644); err != nil {
+			t.Fatalf("failed to write initial config: %v", err)
+		}
+
+		changed, err := updateContainerdConfig(configPath)
+		if err != nil {
+			t.Fatalf("updateContainerdConfig failed: %v", err)
+		}
+		if !changed {
+			t.Errorf("expected changed=true, got false")
+		}
+
+		content, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatalf("failed to read config.toml: %v", err)
+		}
+
+		// Ensure we inserted config_path and didn't duplicate the table header
+		if !strings.Contains(string(content), `config_path = "/etc/containerd/certs.d"`) {
+			t.Errorf("expected config_path in content: %s", string(content))
+		}
+
+		// The header should appear exactly once
+		count := strings.Count(string(content), `[plugins."io.containerd.grpc.v1.cri".registry]`)
+		if count != 1 {
+			t.Errorf("expected registry header to appear exactly once, got %d times in: %s", count, string(content))
+		}
+
+		// Run again, should not change
+		changed, err = updateContainerdConfig(configPath)
+		if err != nil {
+			t.Fatalf("second updateContainerdConfig failed: %v", err)
+		}
+		if changed {
+			t.Errorf("expected changed=false on second run, got true")
+		}
+	})
 }
