@@ -20,8 +20,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-
-	"sigs.k8s.io/yaml"
 )
 
 type Config struct {
@@ -55,15 +53,21 @@ type LintConfig struct {
 }
 
 type UnusedConfig struct {
-	Enabled *bool `json:"enabled"`
+	Enabled       *bool `json:"enabled"`
+	SkipGenerated *bool `json:"skipGenerated"`
+	SkipTests     *bool `json:"skipTests"`
 }
 
 type ReplaceEmptyInterfaceWithAnyConfig struct {
-	Enabled *bool `json:"enabled"`
+	Enabled       *bool `json:"enabled"`
+	SkipGenerated *bool `json:"skipGenerated"`
+	SkipTests     *bool `json:"skipTests"`
 }
 
 type TestContextConfig struct {
-	Mode string `json:"mode"`
+	Mode          string `json:"mode"`
+	SkipGenerated *bool  `json:"skipGenerated"`
+	SkipTests     *bool  `json:"skipTests"`
 }
 
 type UnusedParametersConfig struct {
@@ -91,7 +95,7 @@ func Load(repoRoot string) (*Config, error) {
 			return nil, fmt.Errorf("error reading %s: %w", configFile, err)
 		}
 
-		if err := yaml.Unmarshal(data, &config); err != nil {
+		if err := UnmarshalStrict(data, &config); err != nil {
 			return nil, fmt.Errorf("error parsing %s: %w", configFile, err)
 		}
 	} else if !os.IsNotExist(err) {
@@ -267,6 +271,54 @@ func resolve(override *bool, shared *bool, analyzerDefault bool) bool {
 	return analyzerDefault
 }
 
+// UnusedSkipGenerated returns the per-check override for unused skipGenerated, or nil.
+func (c *Config) UnusedSkipGenerated() *bool {
+	if c.Lint != nil && c.Lint.Unused != nil {
+		return c.Lint.Unused.SkipGenerated
+	}
+	return nil
+}
+
+// UnusedSkipTests returns the per-check override for unused skipTests, or nil.
+func (c *Config) UnusedSkipTests() *bool {
+	if c.Lint != nil && c.Lint.Unused != nil {
+		return c.Lint.Unused.SkipTests
+	}
+	return nil
+}
+
+// TestContextSkipGenerated returns the per-check override for testcontext skipGenerated, or nil.
+func (c *Config) TestContextSkipGenerated() *bool {
+	if c.Lint != nil && c.Lint.TestContext != nil {
+		return c.Lint.TestContext.SkipGenerated
+	}
+	return nil
+}
+
+// TestContextSkipTests returns the per-check override for testcontext skipTests, or nil.
+func (c *Config) TestContextSkipTests() *bool {
+	if c.Lint != nil && c.Lint.TestContext != nil {
+		return c.Lint.TestContext.SkipTests
+	}
+	return nil
+}
+
+// ReplaceEmptyInterfaceWithAnySkipGenerated returns the per-check override for replaceEmptyInterfaceWithAny skipGenerated, or nil.
+func (c *Config) ReplaceEmptyInterfaceWithAnySkipGenerated() *bool {
+	if c.Lint != nil && c.Lint.ReplaceEmptyInterfaceWithAny != nil {
+		return c.Lint.ReplaceEmptyInterfaceWithAny.SkipGenerated
+	}
+	return nil
+}
+
+// ReplaceEmptyInterfaceWithAnySkipTests returns the per-check override for replaceEmptyInterfaceWithAny skipTests, or nil.
+func (c *Config) ReplaceEmptyInterfaceWithAnySkipTests() *bool {
+	if c.Lint != nil && c.Lint.ReplaceEmptyInterfaceWithAny != nil {
+		return c.Lint.ReplaceEmptyInterfaceWithAny.SkipTests
+	}
+	return nil
+}
+
 // DroppedErrorsSkipTests returns true if test files should be skipped (default true).
 func (c *Config) DroppedErrorsSkipTests() bool {
 	var override *bool
@@ -333,7 +385,7 @@ func LoadHeaders(repoRoot string) (*HeadersConfig, error) {
 			return nil, fmt.Errorf("error reading %s: %w", configFile, err)
 		}
 
-		if err := yaml.Unmarshal(data, &config); err != nil {
+		if err := UnmarshalStrict(data, &config); err != nil {
 			return nil, fmt.Errorf("error parsing %s: %w", configFile, err)
 		}
 	} else if !os.IsNotExist(err) {
@@ -363,7 +415,7 @@ func LoadImagesConfig(root string) (*ImagesConfig, error) {
 			return nil, fmt.Errorf("error reading %s: %w", configFile, err)
 		}
 
-		if err := yaml.Unmarshal(data, &config); err != nil {
+		if err := UnmarshalStrict(data, &config); err != nil {
 			return nil, fmt.Errorf("error parsing %s: %w", configFile, err)
 		}
 	} else if !os.IsNotExist(err) {

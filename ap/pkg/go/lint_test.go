@@ -296,3 +296,110 @@ func TestLintTasks_SkipGenerated(t *testing.T) {
 		}
 	})
 }
+
+func TestLintTasks_PerCheckOverrides(t *testing.T) {
+	setupModule := func(t *testing.T, apYAML string) string {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n\ngo 1.27\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if apYAML != "" {
+			apDir := filepath.Join(dir, ".ap")
+			if err := os.MkdirAll(apDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(apYAML), 0644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return dir
+	}
+
+	findAllTasks := func(taskGroup tasks.Task) (*UnusedCheckTask, *TestContextCheckTask, *ReplaceEmptyInterfaceWithAnyTask, *DroppedErrorsCheckTask) {
+		group, ok := taskGroup.(*tasks.Group)
+		if !ok {
+			return nil, nil, nil, nil
+		}
+		var u *UnusedCheckTask
+		var tc *TestContextCheckTask
+		var a *ReplaceEmptyInterfaceWithAnyTask
+		var d *DroppedErrorsCheckTask
+		for _, t := range group.Tasks {
+			if modGroup, ok := t.(*tasks.Group); ok {
+				for _, sub := range modGroup.Tasks {
+					if ut, ok := sub.(*UnusedCheckTask); ok {
+						u = ut
+					}
+					if tct, ok := sub.(*TestContextCheckTask); ok {
+						tc = tct
+					}
+					if at, ok := sub.(*ReplaceEmptyInterfaceWithAnyTask); ok {
+						a = at
+					}
+					if dt, ok := sub.(*DroppedErrorsCheckTask); ok {
+						d = dt
+					}
+				}
+			}
+		}
+		return u, tc, a, d
+	}
+
+	t.Run("unused_skipGenerated_false_takes_effect", func(t *testing.T) {
+		dir := setupModule(t, `
+lint:
+  unused:
+    skipGenerated: false
+    skipTests: true
+`)
+		taskGroup, err := LintTasks(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		u, _, _, _ := findAllTasks(taskGroup)
+		if u == nil {
+			t.Fatalf("expected UnusedCheckTask to be found")
+		}
+		if u.SkipGenerated {
+			t.Errorf("expected UnusedCheckTask.SkipGenerated to be false when configured")
+		}
+		if !u.SkipTests {
+			t.Errorf("expected UnusedCheckTask.SkipTests to be true when configured")
+		}
+	})
+
+	t.Run("testcontext_and_any_overrides_take_effect", func(t *testing.T) {
+		dir := setupModule(t, `
+lint:
+  testcontext:
+    skipGenerated: true
+    skipTests: true
+  replaceEmptyInterfaceWithAny:
+    skipGenerated: false
+    skipTests: true
+`)
+		taskGroup, err := LintTasks(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, tc, a, _ := findAllTasks(taskGroup)
+		if tc == nil || a == nil {
+			t.Fatalf("expected TestContext and ReplaceEmptyInterface tasks to be found")
+		}
+		if !tc.SkipGenerated {
+			t.Errorf("expected TestContextCheckTask.SkipGenerated to be true")
+		}
+		if !tc.SkipTests {
+			t.Errorf("expected TestContextCheckTask.SkipTests to be true")
+		}
+		if a.SkipGenerated {
+			t.Errorf("expected ReplaceEmptyInterfaceWithAnyTask.SkipGenerated to be false")
+		}
+		if !a.SkipTests {
+			t.Errorf("expected ReplaceEmptyInterfaceWithAnyTask.SkipTests to be true")
+		}
+	})
+}
