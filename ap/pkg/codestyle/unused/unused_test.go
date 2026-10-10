@@ -31,3 +31,16 @@ func TestUnusedParameters(t *testing.T) {
 	defer Analyzer.Flags.Set("check-parameters", "false")
 	analysistest.Run(t, testdata, Analyzer, "unused_params")
 }
+
+func TestUnused_GeneratedDefault(t *testing.T) {
+	testdata := analysistest.TestData()
+	// unused defaults to skipping generated files
+	analysistest.Run(t, testdata, Analyzer, "generated_skip")
+}
+
+func TestUnused_GeneratedCheckWhenNotSkipped(t *testing.T) {
+	testdata := analysistest.TestData()
+	Analyzer.Flags.Set("skip-generated", "false")
+	defer Analyzer.Flags.Set("skip-generated", "true")
+	analysistest.Run(t, testdata, Analyzer, "generated_check")
+}

@@ -201,6 +201,11 @@ func RunDroppedErrors(ctx context.Context, cmd *cobra.Command, opt DroppedErrors
 		packages = []string{"./..."}
 	}
 
+	var skipGlobs []string
+	if cfg != nil {
+		skipGlobs = cfg.Skip
+	}
+
 	checkOpts := droppederrors.Options{
 		RepoRoot:           repoRoot,
 		APRoot:             apRoot,
@@ -212,6 +217,7 @@ func RunDroppedErrors(ctx context.Context, cmd *cobra.Command, opt DroppedErrors
 		Exclude:            exclude,
 		SkipTests:          skipTests,
 		SkipGenerated:      skipGenerated,
+		SkipGlobs:          skipGlobs,
 		UseDefaultExcludes: &useDefaultExcludes,
 		GOOS:               goosList,
 	}

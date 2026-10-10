@@ -216,3 +216,83 @@ func TestLintTasks_DroppedErrors(t *testing.T) {
 		}
 	})
 }
+
+func TestLintTasks_SkipGenerated(t *testing.T) {
+	setupModule := func(t *testing.T, apYAML string) string {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n\ngo 1.27\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if apYAML != "" {
+			apDir := filepath.Join(dir, ".ap")
+			if err := os.MkdirAll(apDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(apYAML), 0644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return dir
+	}
+
+	findTasks := func(taskGroup tasks.Task) (*DroppedErrorsCheckTask, *TestContextCheckTask) {
+		group, ok := taskGroup.(*tasks.Group)
+		if !ok {
+			return nil, nil
+		}
+		var dt *DroppedErrorsCheckTask
+		var tc *TestContextCheckTask
+		for _, t := range group.Tasks {
+			if modGroup, ok := t.(*tasks.Group); ok {
+				for _, sub := range modGroup.Tasks {
+					if d, ok := sub.(*DroppedErrorsCheckTask); ok {
+						dt = d
+					}
+					if c, ok := sub.(*TestContextCheckTask); ok {
+						tc = c
+					}
+				}
+			}
+		}
+		return dt, tc
+	}
+
+	t.Run("skipGenerated_true", func(t *testing.T) {
+		dir := setupModule(t, "lint:\n  skipGenerated: true\n")
+		taskGroup, err := LintTasks(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dt, tc := findTasks(taskGroup)
+		if dt == nil || tc == nil {
+			t.Fatalf("expected tasks to be found")
+		}
+		if !dt.SkipGenerated {
+			t.Errorf("expected DroppedErrorsCheckTask.SkipGenerated to be true")
+		}
+		if !tc.SkipGenerated {
+			t.Errorf("expected TestContextCheckTask.SkipGenerated to be true")
+		}
+	})
+
+	t.Run("default_skipGenerated", func(t *testing.T) {
+		dir := setupModule(t, "")
+		taskGroup, err := LintTasks(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dt, tc := findTasks(taskGroup)
+		if dt == nil || tc == nil {
+			t.Fatalf("expected tasks to be found")
+		}
+		if dt.SkipGenerated {
+			t.Errorf("expected DroppedErrorsCheckTask.SkipGenerated to be false by default")
+		}
+		if tc.SkipGenerated {
+			t.Errorf("expected TestContextCheckTask.SkipGenerated to be false by default")
+		}
+	})
+}

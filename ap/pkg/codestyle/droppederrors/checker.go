@@ -22,26 +22,12 @@ import (
 	"go/types"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"sort"
-	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
 	"golang.org/x/tools/go/packages"
 )
-
-var generatedFileRegex = regexp.MustCompile(`(?m)^// Code generated .* DO NOT EDIT\.$`)
-
-func isGeneratedFile(file *ast.File) bool {
-	for _, cg := range file.Comments {
-		for _, comment := range cg.List {
-			if generatedFileRegex.MatchString(comment.Text) {
-				return true
-			}
-		}
-	}
-	return false
-}
 
 // Options holds configuration for running the dropped errors checker.
 type Options struct {
@@ -55,6 +41,7 @@ type Options struct {
 	Exclude            []string
 	SkipTests          bool
 	SkipGenerated      bool
+	SkipGlobs          []string
 	UseDefaultExcludes *bool
 	GOOS               []string
 }
@@ -549,7 +536,7 @@ func Run(_ context.Context, opts Options) (*Result, error) {
 	matcher := NewExclusionMatcher(opts.Exclude, useDefaultExcludes)
 
 	for _, targetGOOS := range goosList {
-		findings, checkedFiles, err := checkPackagesForGOOS(opts.Dir, opts.Packages, targetGOOS, opts.SkipTests, opts.SkipGenerated, matcher, opts.APRoot, opts.RepoRoot)
+		findings, checkedFiles, err := checkPackagesForGOOS(opts.Dir, opts.Packages, targetGOOS, opts.SkipTests, opts.SkipGenerated, opts.SkipGlobs, matcher, opts.APRoot, opts.RepoRoot)
 		if err != nil {
 			return nil, err
 		}
@@ -648,7 +635,7 @@ func Run(_ context.Context, opts Options) (*Result, error) {
 	return res, nil
 }
 
-func checkPackagesForGOOS(dir string, patterns []string, targetGOOS string, skipTests bool, skipGenerated bool, matcher *ExclusionMatcher, apRoot, repoRoot string) ([]Finding, map[string]bool, error) {
+func checkPackagesForGOOS(dir string, patterns []string, targetGOOS string, skipTests bool, skipGenerated bool, skipGlobs []string, matcher *ExclusionMatcher, apRoot, repoRoot string) ([]Finding, map[string]bool, error) {
 	cfg := &packages.Config{
 		Mode:  packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedImports | packages.NeedTypes | packages.NeedTypesSizes | packages.NeedSyntax | packages.NeedTypesInfo,
 		Tests: !skipTests,
@@ -663,6 +650,8 @@ func checkPackagesForGOOS(dir string, patterns []string, targetGOOS string, skip
 		return nil, nil, fmt.Errorf("failed to load packages in %s (GOOS=%s): %w", dir, targetGOOS, err)
 	}
 
+	policy := fileset.NewPolicy(skipGenerated, skipTests, skipGlobs, repoRoot)
+
 	checkedFiles := make(map[string]bool)
 	var findings []Finding
 
@@ -671,19 +660,9 @@ func checkPackagesForGOOS(dir string, patterns []string, targetGOOS string, skip
 			return nil, nil, fmt.Errorf("package load/type error in %s: %s", pkg.PkgPath, pkg.Errors[0].Msg)
 		}
 
-		for _, f := range pkg.GoFiles {
-			if skipTests && strings.HasSuffix(f, "_test.go") {
-				continue
-			}
-			recordCheckedFile(f, apRoot, repoRoot, dir, checkedFiles)
-		}
-
 		for _, file := range pkg.Syntax {
 			pos := pkg.Fset.Position(file.Pos())
-			if skipTests && strings.HasSuffix(pos.Filename, "_test.go") {
-				continue
-			}
-			if skipGenerated && isGeneratedFile(file) {
+			if policy.ShouldSkip(pos.Filename, file) {
 				continue
 			}
 			recordCheckedFile(pos.Filename, apRoot, repoRoot, dir, checkedFiles)

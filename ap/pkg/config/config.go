@@ -45,6 +45,8 @@ type GovulncheckConfig struct {
 }
 
 type LintConfig struct {
+	SkipGenerated                *bool                               `json:"skipGenerated"`
+	SkipTests                    *bool                               `json:"skipTests"`
 	Unused                       *UnusedConfig                       `json:"unused"`
 	TestContext                  *TestContextConfig                  `json:"testcontext"`
 	UnusedParameters             *UnusedParametersConfig             `json:"unusedparameters"`
@@ -219,24 +221,68 @@ func (c *Config) DroppedErrorsExclude() []string {
 	return nil
 }
 
+// IsLintSkipGenerated returns true if generated files should be skipped across lint checks (default false).
+func (c *Config) IsLintSkipGenerated() bool {
+	if c.Lint != nil && c.Lint.SkipGenerated != nil {
+		return *c.Lint.SkipGenerated
+	}
+	return false
+}
+
+// IsLintSkipTests returns true if test files should be skipped across lint checks (default false).
+func (c *Config) IsLintSkipTests() bool {
+	if c.Lint != nil && c.Lint.SkipTests != nil {
+		return *c.Lint.SkipTests
+	}
+	return false
+}
+
+// ResolveSkipGenerated resolves whether generated files should be skipped,
+// checking a per-check override first, then lint.skipGenerated, then analyzerDefault.
+func (c *Config) ResolveSkipGenerated(override *bool, analyzerDefault bool) bool {
+	var shared *bool
+	if c != nil && c.Lint != nil {
+		shared = c.Lint.SkipGenerated
+	}
+	return resolve(override, shared, analyzerDefault)
+}
+
+// ResolveSkipTests resolves whether test files should be skipped,
+// checking a per-check override first, then lint.skipTests, then analyzerDefault.
+func (c *Config) ResolveSkipTests(override *bool, analyzerDefault bool) bool {
+	var shared *bool
+	if c != nil && c.Lint != nil {
+		shared = c.Lint.SkipTests
+	}
+	return resolve(override, shared, analyzerDefault)
+}
+
+func resolve(override *bool, shared *bool, analyzerDefault bool) bool {
+	if override != nil {
+		return *override
+	}
+	if shared != nil {
+		return *shared
+	}
+	return analyzerDefault
+}
+
 // DroppedErrorsSkipTests returns true if test files should be skipped (default true).
 func (c *Config) DroppedErrorsSkipTests() bool {
-	if c.Lint != nil && c.Lint.DroppedErrors != nil {
-		if c.Lint.DroppedErrors.SkipTests != nil {
-			return *c.Lint.DroppedErrors.SkipTests
-		}
+	var override *bool
+	if c != nil && c.Lint != nil && c.Lint.DroppedErrors != nil {
+		override = c.Lint.DroppedErrors.SkipTests
 	}
-	return true
+	return c.ResolveSkipTests(override, true)
 }
 
 // DroppedErrorsSkipGenerated returns true if generated files should be skipped (default false).
 func (c *Config) DroppedErrorsSkipGenerated() bool {
-	if c.Lint != nil && c.Lint.DroppedErrors != nil {
-		if c.Lint.DroppedErrors.SkipGenerated != nil {
-			return *c.Lint.DroppedErrors.SkipGenerated
-		}
+	var override *bool
+	if c != nil && c.Lint != nil && c.Lint.DroppedErrors != nil {
+		override = c.Lint.DroppedErrors.SkipGenerated
 	}
-	return false
+	return c.ResolveSkipGenerated(override, false)
 }
 
 // DroppedErrorsUseDefaultExcludes returns true if default exclusions should be used (default true).

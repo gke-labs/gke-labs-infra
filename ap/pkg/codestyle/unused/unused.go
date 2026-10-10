@@ -19,10 +19,14 @@ import (
 	"go/token"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
 	"golang.org/x/tools/go/analysis"
 )
 
-var checkParameters bool
+var (
+	checkParameters bool
+	policyFlags     *fileset.PolicyFlags
+)
 
 var Analyzer = &analysis.Analyzer{
 	Name: "unused",
@@ -32,6 +36,7 @@ var Analyzer = &analysis.Analyzer{
 
 func init() {
 	Analyzer.Flags.BoolVar(&checkParameters, "check-parameters", false, "report unused parameters")
+	policyFlags = fileset.RegisterFlags(Analyzer, true, false)
 }
 
 func run(pass *analysis.Pass) (any, error) {
@@ -44,8 +49,10 @@ func run(pass *analysis.Pass) (any, error) {
 		}
 	}
 
+	policy := policyFlags.NewPolicy()
+
 	for _, f := range pass.Files {
-		if isGenerated(f) {
+		if policy.ShouldSkipAST(pass.Fset, f) {
 			continue
 		}
 		ast.Inspect(f, func(n ast.Node) bool {
@@ -121,15 +128,4 @@ func checkUnusedFields(pass *analysis.Pass, st *ast.StructType, used map[token.P
 			}
 		}
 	}
-}
-
-func isGenerated(f *ast.File) bool {
-	for _, comment := range f.Comments {
-		for _, c := range comment.List {
-			if strings.Contains(c.Text, "Code generated") || strings.Contains(c.Text, "DO NOT EDIT") {
-				return true
-			}
-		}
-	}
-	return false
 }

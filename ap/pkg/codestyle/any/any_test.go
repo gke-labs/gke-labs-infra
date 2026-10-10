@@ -24,3 +24,16 @@ func TestAny(t *testing.T) {
 	testdata := analysistest.TestData()
 	analysistest.Run(t, testdata, Analyzer, "any_test")
 }
+
+func TestAny_GeneratedDefault(t *testing.T) {
+	testdata := analysistest.TestData()
+	// any defaults to skipping generated files
+	analysistest.Run(t, testdata, Analyzer, "generated_skip")
+}
+
+func TestAny_GeneratedCheckWhenNotSkipped(t *testing.T) {
+	testdata := analysistest.TestData()
+	Analyzer.Flags.Set("skip-generated", "false")
+	defer Analyzer.Flags.Set("skip-generated", "true")
+	analysistest.Run(t, testdata, Analyzer, "generated_check")
+}

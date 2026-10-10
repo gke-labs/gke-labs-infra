@@ -16,8 +16,8 @@ package testcontext
 
 import (
 	"go/ast"
-	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
 	"golang.org/x/tools/go/analysis"
 )
 
@@ -27,9 +27,21 @@ var Analyzer = &analysis.Analyzer{
 	Run:  run,
 }
 
+var policyFlags *fileset.PolicyFlags
+
+func init() {
+	policyFlags = fileset.RegisterFlags(Analyzer, false, false)
+}
+
 func run(pass *analysis.Pass) (any, error) {
+	policy := policyFlags.NewPolicy()
+
 	for _, f := range pass.Files {
-		isTestFile := strings.HasSuffix(pass.Fset.File(f.Pos()).Name(), "_test.go")
+		if policy.ShouldSkipAST(pass.Fset, f) {
+			continue
+		}
+		filename := pass.Fset.Position(f.Pos()).Filename
+		isTestFile := fileset.IsTest(filename)
 
 		v := &visitor{
 			pass:       pass,

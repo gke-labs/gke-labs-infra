@@ -24,3 +24,15 @@ func TestAnalyzer(t *testing.T) {
 	testdata := analysistest.TestData()
 	analysistest.Run(t, testdata, Analyzer, "a")
 }
+
+func TestAnalyzer_GeneratedDefault(t *testing.T) {
+	testdata := analysistest.TestData()
+	analysistest.Run(t, testdata, Analyzer, "generated_check")
+}
+
+func TestAnalyzer_GeneratedSkip(t *testing.T) {
+	testdata := analysistest.TestData()
+	Analyzer.Flags.Set("skip-generated", "true")
+	defer Analyzer.Flags.Set("skip-generated", "false")
+	analysistest.Run(t, testdata, Analyzer, "generated_skip")
+}

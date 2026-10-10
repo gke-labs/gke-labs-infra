@@ -16,13 +16,9 @@ package droppederrors
 
 import (
 	"fmt"
-	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
 	"golang.org/x/tools/go/analysis"
-)
-
-var (
-	analyzerSkipTests = true
 )
 
 // Analyzer checks for unchecked/dropped errors with blank checking enabled.
@@ -32,16 +28,18 @@ var Analyzer = &analysis.Analyzer{
 	Run:  runAnalyzer,
 }
 
+var policyFlags *fileset.PolicyFlags
+
 func init() {
-	Analyzer.Flags.BoolVar(&analyzerSkipTests, "skip-tests", true, "skip _test.go files")
+	policyFlags = fileset.RegisterFlags(Analyzer, false, true)
 }
 
 func runAnalyzer(pass *analysis.Pass) (any, error) {
 	matcher := NewExclusionMatcher(nil, true)
+	policy := policyFlags.NewPolicy()
 
 	for _, file := range pass.Files {
-		filename := pass.Fset.Position(file.Pos()).Filename
-		if analyzerSkipTests && strings.HasSuffix(filename, "_test.go") {
+		if policy.ShouldSkipAST(pass.Fset, file) {
 			continue
 		}
 

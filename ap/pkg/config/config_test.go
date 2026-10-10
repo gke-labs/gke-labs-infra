@@ -191,6 +191,89 @@ lint:
 	}
 }
 
+func TestLintConfig_SkipGenerated(t *testing.T) {
+	tempDir := t.TempDir()
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.Mkdir(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Cross-linter skipGenerated: true with per-check override on droppedErrors
+	yamlContent := `
+lint:
+  skipGenerated: true
+  droppedErrors:
+    skipGenerated: false
+`
+	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(tempDir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if !cfg.IsLintSkipGenerated() {
+		t.Errorf("expected IsLintSkipGenerated to be true")
+	}
+	if cfg.DroppedErrorsSkipGenerated() {
+		t.Errorf("expected droppedErrors to override skipGenerated to false")
+	}
+	// For linters without overrides, ResolveSkipGenerated inherits lint.skipGenerated
+	if !cfg.ResolveSkipGenerated(nil, false) {
+		t.Errorf("expected ResolveSkipGenerated to inherit skipGenerated: true")
+	}
+}
+
+func TestLintConfig_SkipTests(t *testing.T) {
+	tempDir := t.TempDir()
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.Mkdir(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Default (no skipTests specified)
+	cfgDefault, err := Load(tempDir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if cfgDefault.IsLintSkipTests() {
+		t.Errorf("expected default IsLintSkipTests to be false")
+	}
+	if cfgDefault.ResolveSkipTests(nil, false) {
+		t.Errorf("expected default ResolveSkipTests to be false when default is false")
+	}
+	if !cfgDefault.DroppedErrorsSkipTests() {
+		t.Errorf("expected default DroppedErrorsSkipTests to be true")
+	}
+
+	// 2. lint.skipTests: true with droppedErrors override to false
+	yamlContent := `
+lint:
+  skipTests: true
+  droppedErrors:
+    skipTests: false
+`
+	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(tempDir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if !cfg.IsLintSkipTests() {
+		t.Errorf("expected IsLintSkipTests to be true")
+	}
+	if !cfg.ResolveSkipTests(nil, false) {
+		t.Errorf("expected ResolveSkipTests to inherit skipTests: true")
+	}
+	if cfg.DroppedErrorsSkipTests() {
+		t.Errorf("expected droppedErrors to override skipTests to false")
+	}
+}
+
 func TestLoadImagesConfig(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "ap-imagesconfig-test")
 	if err != nil {

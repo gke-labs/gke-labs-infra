@@ -16,8 +16,8 @@ package any
 
 import (
 	"go/ast"
-	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
 	"golang.org/x/tools/go/analysis"
 )
 
@@ -27,9 +27,17 @@ var Analyzer = &analysis.Analyzer{
 	Run:  run,
 }
 
+var policyFlags *fileset.PolicyFlags
+
+func init() {
+	policyFlags = fileset.RegisterFlags(Analyzer, true, false)
+}
+
 func run(pass *analysis.Pass) (any, error) {
+	policy := policyFlags.NewPolicy()
+
 	for _, f := range pass.Files {
-		if isGenerated(f) {
+		if policy.ShouldSkipAST(pass.Fset, f) {
 			continue
 		}
 		ast.Inspect(f, func(n ast.Node) bool {
@@ -42,15 +50,4 @@ func run(pass *analysis.Pass) (any, error) {
 		})
 	}
 	return nil, nil
-}
-
-func isGenerated(f *ast.File) bool {
-	for _, comment := range f.Comments {
-		for _, c := range comment.List {
-			if strings.Contains(c.Text, "Code generated") || strings.Contains(c.Text, "DO NOT EDIT") {
-				return true
-			}
-		}
-	}
-	return false
 }
