@@ -22,16 +22,13 @@ COPY . .
 RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /usr/local/bin/ap ./ap
 
 FROM golang:1.27.2-trixie
-COPY --from=builder /usr/local/bin/ap /usr/local/bin/ap
 
-RUN apt-get update && apt-get install -y git ca-certificates curl gnupg && \
-    curl -LO --retry 5 "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/$(dpkg --print-architecture)/kubectl" && \
-    install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
-    rm kubectl && \
-    curl -L --retry 5 "https://github.com/moby/buildkit/releases/download/v0.28.0/buildkit-v0.28.0.linux-$(dpkg --print-architecture).tar.gz" -o buildkit.tar.gz && \
-    tar -xz -C /usr/local/bin --strip-components=1 bin/buildctl -f buildkit.tar.gz && \
-    rm buildkit.tar.gz && \
+RUN apt-get update && apt-get install -y git ca-certificates && \
     rm -rf /var/lib/apt/lists/*
+
+COPY --from=registry.k8s.io/kubectl:v1.34.1 /bin/kubectl /usr/local/bin/kubectl
+COPY --from=moby/buildkit:v0.28.0 /usr/bin/buildctl /usr/local/bin/buildctl
+COPY --from=builder /usr/local/bin/ap /usr/local/bin/ap
 
 WORKDIR /workspace
 ENTRYPOINT ["ap"]
