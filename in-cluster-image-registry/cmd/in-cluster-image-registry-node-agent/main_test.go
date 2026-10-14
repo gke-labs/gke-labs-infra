@@ -108,3 +108,88 @@ func TestUpdateContainerdConfig(t *testing.T) {
 		t.Errorf("expected changed=false on second run, got true")
 	}
 }
+
+func TestUpdateHostsFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	hostsPath := filepath.Join(tmpDir, "hosts")
+	registryHost := "images.local"
+
+	// 1. File does not exist: should create file
+	ip1 := "10.96.0.10"
+	err := updateHostsFile(hostsPath, ip1, registryHost)
+	if err != nil {
+		t.Fatalf("updateHostsFile failed for non-existent file: %v", err)
+	}
+
+	content, err := os.ReadFile(hostsPath)
+	if err != nil {
+		t.Fatalf("failed to read hosts file: %v", err)
+	}
+	expected1 := "10.96.0.10 images.local\n"
+	if string(content) != expected1 {
+		t.Errorf("expected:\n%q\ngot:\n%q", expected1, string(content))
+	}
+
+	// 2. Already correct: should not touch file / modify content
+	// We check modtime/stat or just verify it does not error or alter the content
+	err = updateHostsFile(hostsPath, ip1, registryHost)
+	if err != nil {
+		t.Fatalf("updateHostsFile failed when already correct: %v", err)
+	}
+	content, err = os.ReadFile(hostsPath)
+	if err != nil {
+		t.Fatalf("failed to read hosts file: %v", err)
+	}
+	if string(content) != expected1 {
+		t.Errorf("content changed when already correct: got %q", string(content))
+	}
+
+	// 3. Different IP: should replace the existing line
+	ip2 := "10.96.0.20"
+	err = updateHostsFile(hostsPath, ip2, registryHost)
+	if err != nil {
+		t.Fatalf("updateHostsFile failed for updated IP: %v", err)
+	}
+	content, err = os.ReadFile(hostsPath)
+	if err != nil {
+		t.Fatalf("failed to read hosts file: %v", err)
+	}
+	expected2 := "10.96.0.20 images.local\n"
+	if string(content) != expected2 {
+		t.Errorf("expected updated IP:\n%q\ngot:\n%q", expected2, string(content))
+	}
+
+	// 4. File with unrelated entries and comments: should preserve them and replace images.local
+	initialWithUnrelated := `127.0.0.1 localhost
+::1 localhost
+
+# Some custom comment
+10.96.0.20 images.local
+1.2.3.4 other.local
+`
+	if err := os.WriteFile(hostsPath, []byte(initialWithUnrelated), 0644); err != nil {
+		t.Fatalf("failed to write initial with unrelated: %v", err)
+	}
+
+	ip3 := "10.96.0.30"
+	err = updateHostsFile(hostsPath, ip3, registryHost)
+	if err != nil {
+		t.Fatalf("updateHostsFile failed: %v", err)
+	}
+
+	content, err = os.ReadFile(hostsPath)
+	if err != nil {
+		t.Fatalf("failed to read hosts file: %v", err)
+	}
+
+	expected3 := `127.0.0.1 localhost
+::1 localhost
+
+# Some custom comment
+1.2.3.4 other.local
+10.96.0.30 images.local
+`
+	if string(content) != expected3 {
+		t.Errorf("expected:\n%q\ngot:\n%q", expected3, string(content))
+	}
+}
