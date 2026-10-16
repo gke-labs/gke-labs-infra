@@ -121,6 +121,27 @@ lint:
 			wantKey:    `"lint.droppedErrors.basline"`,
 			wantDidYou: `"baseline"`,
 		},
+		{
+			name: "typo in lint.testOnlyImports key",
+			yaml: `
+lint:
+  testOnlyImprts:
+    mode: error
+`,
+			wantKey:    `"lint.testOnlyImprts"`,
+			wantDidYou: `"testOnlyImports"`,
+		},
+		{
+			name: "typo in lint.testOnlyImports packages",
+			yaml: `
+lint:
+  testOnlyImports:
+    pakcages:
+      - github.com/google/go-cmp
+`,
+			wantKey:    `"lint.testOnlyImports.pakcages"`,
+			wantDidYou: `"packages"`,
+		},
 	}
 
 	for _, tc := range tests {
@@ -191,6 +212,12 @@ lint:
     useDefaultExcludes: true
     goos:
       - linux
+  testOnlyImports:
+    mode: error
+    packages:
+      - github.com/google/go-cmp
+    skipGenerated: true
+    skipTests: true
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 		t.Fatal(err)
@@ -247,6 +274,21 @@ lint:
 	}
 	if cfg.DroppedErrorsBaseline() != ".ap/droppederrors-baseline.txt" {
 		t.Errorf("expected baseline .ap/droppederrors-baseline.txt, got %q", cfg.DroppedErrorsBaseline())
+	}
+	if !cfg.IsTestOnlyImportsEnabled() {
+		t.Errorf("expected IsTestOnlyImportsEnabled to be true")
+	}
+	if !cfg.IsTestOnlyImportsError() {
+		t.Errorf("expected IsTestOnlyImportsError to be true")
+	}
+	if len(cfg.TestOnlyImportsPackages()) != 1 || cfg.TestOnlyImportsPackages()[0] != "github.com/google/go-cmp" {
+		t.Errorf("expected TestOnlyImportsPackages [github.com/google/go-cmp], got %v", cfg.TestOnlyImportsPackages())
+	}
+	if cfg.TestOnlyImportsSkipGenerated() == nil || *cfg.TestOnlyImportsSkipGenerated() != true {
+		t.Errorf("expected TestOnlyImportsSkipGenerated to be true")
+	}
+	if cfg.TestOnlyImportsSkipTests() == nil || *cfg.TestOnlyImportsSkipTests() != true {
+		t.Errorf("expected TestOnlyImportsSkipTests to be true")
 	}
 }
 

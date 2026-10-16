@@ -257,6 +257,57 @@ func (t *DroppedErrorsCheckTask) GetChildren() []tasks.Task {
 	return nil
 }
 
+// TestOnlyImportsCheckTask represents a task to run testonlyimports check.
+type TestOnlyImportsCheckTask struct {
+	Dir           string
+	RepoRoot      string
+	IsError       bool
+	Packages      []string
+	SkipGenerated bool
+	SkipTests     bool
+	SkipGlobs     []string
+}
+
+func (t *TestOnlyImportsCheckTask) Run(ctx context.Context, scope *tasks.APScope) error {
+	klog.Infof("Running testonlyimports check in %s", t.Dir)
+	apPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("could not find ap executable: %w", err)
+	}
+	args := []string{"lint", "testonlyimports"}
+	args = append(args, fmt.Sprintf("-testonlyimports.skip-generated=%t", t.SkipGenerated))
+	args = append(args, fmt.Sprintf("-testonlyimports.skip-tests=%t", t.SkipTests))
+	if t.RepoRoot != "" {
+		args = append(args, "-testonlyimports.repo-root="+t.RepoRoot)
+	}
+	for _, g := range t.SkipGlobs {
+		args = append(args, "-testonlyimports.skip-glob="+g)
+	}
+	for _, p := range t.Packages {
+		args = append(args, "-testonlyimports.package="+p)
+	}
+	args = append(args, "./...")
+	cmd := exec.CommandContext(ctx, apPath, args...)
+	cmd.Dir = t.Dir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		if t.IsError {
+			return fmt.Errorf("testonlyimports check failed in %s: %w", t.Dir, err)
+		}
+		klog.Warningf("testonlyimports check failed in %s: %v", t.Dir, err)
+	}
+	return nil
+}
+
+func (t *TestOnlyImportsCheckTask) GetName() string {
+	return "testonlyimports-check"
+}
+
+func (t *TestOnlyImportsCheckTask) GetChildren() []tasks.Task {
+	return nil
+}
+
 // LintTasks returns a task group for running go linting in discovered modules.
 func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 	cfg, err := config.Load(root)
@@ -323,6 +374,17 @@ func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 				IsError:       cfg.IsDroppedErrorsError(),
 				SkipGenerated: cfg.DroppedErrorsSkipGenerated(),
 				SkipTests:     cfg.DroppedErrorsSkipTests(),
+				SkipGlobs:     cfg.Skip,
+			})
+		}
+		if cfg.IsTestOnlyImportsEnabled() {
+			modGroup.Tasks = append(modGroup.Tasks, &TestOnlyImportsCheckTask{
+				Dir:           dir,
+				RepoRoot:      root,
+				IsError:       cfg.IsTestOnlyImportsError(),
+				Packages:      cfg.TestOnlyImportsPackages(),
+				SkipGenerated: cfg.ResolveSkipGenerated(cfg.TestOnlyImportsSkipGenerated(), false),
+				SkipTests:     cfg.ResolveSkipTests(cfg.TestOnlyImportsSkipTests(), false),
 				SkipGlobs:     cfg.Skip,
 			})
 		}

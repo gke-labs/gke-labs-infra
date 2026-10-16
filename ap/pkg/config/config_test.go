@@ -17,6 +17,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -103,6 +104,100 @@ func TestLoadDefault(t *testing.T) {
 	}
 	if cfg.DroppedErrorsUseDefaultExcludes() != true {
 		t.Errorf("expected default droppederrors useDefaultExcludes to be true")
+	}
+	if cfg.IsTestOnlyImportsEnabled() != true {
+		t.Errorf("expected default testOnlyImports enabled to be true")
+	}
+	if cfg.IsTestOnlyImportsError() != true {
+		t.Errorf("expected default testOnlyImports error to be true (error mode)")
+	}
+	if cfg.TestOnlyImportsMode() != "error" {
+		t.Errorf("expected default testOnlyImports mode to be error, got %q", cfg.TestOnlyImportsMode())
+	}
+	if len(cfg.TestOnlyImportsPackages()) != 4 {
+		t.Errorf("expected 4 default testOnlyImports packages, got %d", len(cfg.TestOnlyImportsPackages()))
+	}
+}
+
+func TestTestOnlyImportsConfig(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "ap-testonlyimports-config-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.Mkdir(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	yamlContent := `
+lint:
+  testOnlyImports:
+    mode: warn
+    packages:
+      - github.com/google/go-cmp
+      - example.com/custom
+    skipGenerated: true
+    skipTests: true
+`
+	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(tempDir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if !cfg.IsTestOnlyImportsEnabled() {
+		t.Errorf("expected testOnlyImports to be enabled")
+	}
+	if cfg.IsTestOnlyImportsError() {
+		t.Errorf("expected testOnlyImports not to be error mode (warn)")
+	}
+	if cfg.TestOnlyImportsMode() != "warn" {
+		t.Errorf("expected mode warn, got %q", cfg.TestOnlyImportsMode())
+	}
+	pkgs := cfg.TestOnlyImportsPackages()
+	if len(pkgs) != 2 || pkgs[0] != "github.com/google/go-cmp" || pkgs[1] != "example.com/custom" {
+		t.Errorf("unexpected packages list: %v", pkgs)
+	}
+	if cfg.TestOnlyImportsSkipGenerated() == nil || *cfg.TestOnlyImportsSkipGenerated() != true {
+		t.Errorf("expected skipGenerated to be true")
+	}
+	if cfg.TestOnlyImportsSkipTests() == nil || *cfg.TestOnlyImportsSkipTests() != true {
+		t.Errorf("expected skipTests to be true")
+	}
+}
+
+func TestConfig_InvalidTestOnlyImportsMode(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "ap-invalid-mode-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.Mkdir(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	yamlContent := `
+lint:
+  testOnlyImports:
+    mode: invalid
+`
+	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = Load(tempDir)
+	if err == nil {
+		t.Fatalf("expected Load to fail on invalid testOnlyImports mode")
+	}
+	if !strings.Contains(err.Error(), "invalid testOnlyImports mode") {
+		t.Errorf("expected error to mention 'invalid testOnlyImports mode', got: %v", err)
 	}
 }
 

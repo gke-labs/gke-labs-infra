@@ -442,6 +442,127 @@ lint:
 	})
 }
 
+func TestLintTasks_TestOnlyImports(t *testing.T) {
+	setupModule := func(t *testing.T, apYAML string) (string, *repo.Repo) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n\ngo 1.27\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		var skips []string
+		if apYAML != "" {
+			apDir := filepath.Join(dir, ".ap")
+			if err := os.MkdirAll(apDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(apYAML), 0644); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := config.Load(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			skips = cfg.Skip
+		}
+		r, err := repo.Open(dir, repo.WithSkip(skips...))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return dir, r
+	}
+
+	findTestOnlyImportsTask := func(taskGroup tasks.Task) *TestOnlyImportsCheckTask {
+		group, ok := taskGroup.(*tasks.Group)
+		if !ok {
+			return nil
+		}
+		for _, t := range group.Tasks {
+			if modGroup, ok := t.(*tasks.Group); ok {
+				for _, sub := range modGroup.Tasks {
+					if toi, ok := sub.(*TestOnlyImportsCheckTask); ok {
+						return toi
+					}
+				}
+			}
+		}
+		return nil
+	}
+
+	t.Run("default_enabled_with_error_mode", func(t *testing.T) {
+		dir, r := setupModule(t, "")
+		taskGroup, err := LintTasks(r, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		task := findTestOnlyImportsTask(taskGroup)
+		if task == nil {
+			t.Fatalf("expected TestOnlyImportsCheckTask to be created by default")
+		}
+		if !task.IsError {
+			t.Errorf("expected IsError to be true by default")
+		}
+		if len(task.Packages) != 4 {
+			t.Errorf("expected 4 default packages, got %d", len(task.Packages))
+		}
+		if task.SkipGenerated {
+			t.Errorf("expected SkipGenerated to be false by default")
+		}
+		if task.SkipTests {
+			t.Errorf("expected SkipTests to be false by default")
+		}
+	})
+
+	t.Run("configured_warn_mode_and_custom_packages", func(t *testing.T) {
+		dir, r := setupModule(t, `
+lint:
+  testOnlyImports:
+    mode: warn
+    packages:
+      - github.com/google/go-cmp
+    skipGenerated: true
+    skipTests: true
+`)
+		taskGroup, err := LintTasks(r, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		task := findTestOnlyImportsTask(taskGroup)
+		if task == nil {
+			t.Fatalf("expected TestOnlyImportsCheckTask to be created")
+		}
+		if task.IsError {
+			t.Errorf("expected IsError to be false in warn mode")
+		}
+		if len(task.Packages) != 1 || task.Packages[0] != "github.com/google/go-cmp" {
+			t.Errorf("unexpected packages: %v", task.Packages)
+		}
+		if !task.SkipGenerated {
+			t.Errorf("expected SkipGenerated to be true")
+		}
+		if !task.SkipTests {
+			t.Errorf("expected SkipTests to be true")
+		}
+	})
+
+	t.Run("mode_ignore_disables_task", func(t *testing.T) {
+		dir, r := setupModule(t, `
+lint:
+  testOnlyImports:
+    mode: ignore
+`)
+		taskGroup, err := LintTasks(r, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		task := findTestOnlyImportsTask(taskGroup)
+		if task != nil {
+			t.Fatalf("expected TestOnlyImportsCheckTask to not be created when mode is ignore")
+		}
+	})
+}
+
 func TestLintTasks_ContinueOnError(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n\ngo 1.27\n"), 0644); err != nil {
