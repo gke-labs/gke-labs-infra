@@ -324,3 +324,85 @@ platforms:
 		}
 	}
 }
+
+func TestResolveE2EConfig(t *testing.T) {
+	tempDir := t.TempDir()
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.Mkdir(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Default when no config exists
+	if shards := ResolveE2EShards(tempDir, tempDir); shards != 3 {
+		t.Errorf("expected default shards 3, got %d", shards)
+	}
+	if timeout := ResolveE2ETimeout(tempDir, tempDir); timeout != "" {
+		t.Errorf("expected default timeout empty, got %q", timeout)
+	}
+
+	// 2. Configure via .ap/ap.yaml (e2e block)
+	apYaml := `
+e2e:
+  shards: 5
+  timeout: 10m
+`
+	if err := os.WriteFile(filepath.Join(apDir, "ap.yaml"), []byte(apYaml), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if shards := ResolveE2EShards(tempDir, tempDir); shards != 5 {
+		t.Errorf("expected shards 5 from ap.yaml, got %d", shards)
+	}
+	if timeout := ResolveE2ETimeout(tempDir, tempDir); timeout != "10m" {
+		t.Errorf("expected timeout 10m from ap.yaml, got %q", timeout)
+	}
+
+	// 3. Configure via presubmits.e2e in .ap/ap.yaml
+	apYamlPresubmits := `
+presubmits:
+  e2e:
+    shards: 4
+    timeout: 15m
+`
+	if err := os.WriteFile(filepath.Join(apDir, "ap.yaml"), []byte(apYamlPresubmits), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if shards := ResolveE2EShards(tempDir, tempDir); shards != 4 {
+		t.Errorf("expected shards 4 from presubmits.e2e, got %d", shards)
+	}
+	if timeout := ResolveE2ETimeout(tempDir, tempDir); timeout != "15m" {
+		t.Errorf("expected timeout 15m from presubmits.e2e, got %q", timeout)
+	}
+
+	// 4. Override with .ap/e2e.yaml
+	e2eYaml := `
+shards: 2
+timeout: 5m
+`
+	if err := os.WriteFile(filepath.Join(apDir, "e2e.yaml"), []byte(e2eYaml), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Note: ap.yaml was checked first in getShards, let's verify e2e.yaml standalone
+	os.Remove(filepath.Join(apDir, "ap.yaml"))
+	if shards := ResolveE2EShards(tempDir, tempDir); shards != 2 {
+		t.Errorf("expected shards 2 from e2e.yaml, got %d", shards)
+	}
+	if timeout := ResolveE2ETimeout(tempDir, tempDir); timeout != "5m" {
+		t.Errorf("expected timeout 5m from e2e.yaml, got %q", timeout)
+	}
+
+	// 5. Configured shards: 1 (single shard / disable matrix)
+	if err := os.WriteFile(filepath.Join(apDir, "e2e.yaml"), []byte("shards: 1\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if shards := ResolveE2EShards(tempDir, tempDir); shards != 1 {
+		t.Errorf("expected shards 1, got %d", shards)
+	}
+
+	// 6. Configured shards: 0 or negative falls back to default 3
+	if err := os.WriteFile(filepath.Join(apDir, "e2e.yaml"), []byte("shards: 0\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if shards := ResolveE2EShards(tempDir, tempDir); shards != 3 {
+		t.Errorf("expected shards 3 for shards: 0, got %d", shards)
+	}
+}

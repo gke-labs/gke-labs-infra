@@ -15,6 +15,8 @@
 package golang
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -22,9 +24,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"k8s.io/klog/v2"
@@ -69,13 +75,152 @@ type GoE2eTask struct {
 	Dir        string
 	Name       string
 	ResultFile string
+	Timeout    string
+	RunPattern string
+	Shard      string
+}
+
+// ParseShardSelector parses a shard selector string in the form "i/n".
+// Returns (i, n, error). i must be between 1 and n inclusive, and n > 0.
+func ParseShardSelector(s string) (int, int, error) {
+	parts := strings.Split(s, "/")
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("invalid shard selector %q: expected i/n format (e.g. 1/3)", s)
+	}
+	i, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid shard index in %q: %w", s, err)
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid shard total in %q: %w", s, err)
+	}
+	if n <= 0 {
+		return 0, 0, fmt.Errorf("invalid shard total in %q: must be > 0", s)
+	}
+	if i < 1 || i > n {
+		return 0, 0, fmt.Errorf("invalid shard selector %q: index %d must be between 1 and %d", s, i, n)
+	}
+	return i, n, nil
+}
+
+// SelectShardTests selects every n-th test starting at index i-1 from the deduplicated, sorted list of tests.
+func SelectShardTests(tests []string, i, n int) []string {
+	seen := make(map[string]bool)
+	var unique []string
+	for _, t := range tests {
+		if !seen[t] {
+			seen[t] = true
+			unique = append(unique, t)
+		}
+	}
+	sort.Strings(unique)
+
+	var selected []string
+	for idx := i - 1; idx < len(unique); idx += n {
+		selected = append(selected, unique[idx])
+	}
+	return selected
+}
+
+// BuildRunRegex returns a regexp pattern that matches exactly the given tests.
+// If tests is empty, it returns "^$" so no tests are run.
+func BuildRunRegex(tests []string) string {
+	if len(tests) == 0 {
+		return "^$"
+	}
+	escaped := make([]string, len(tests))
+	for idx, t := range tests {
+		escaped[idx] = regexp.QuoteMeta(t)
+	}
+	return fmt.Sprintf("^(%s)$", strings.Join(escaped, "|"))
+}
+
+// ListE2ETests lists the Test* functions in ./tests/e2e/... under dir using `go test -list`.
+func ListE2ETests(ctx context.Context, dir string, pattern string) ([]string, error) {
+	listPattern := ".*"
+	if pattern != "" {
+		listPattern = pattern
+	}
+	cmd := exec.CommandContext(ctx, "go", "test", "-list", listPattern, "./tests/e2e/...")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "RUN_E2E=1")
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("failed to list e2e tests in %s: %w\n%s", dir, err, stderr.String())
+	}
+
+	var tests []string
+	scanner := bufio.NewScanner(&stdout)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "Test") {
+			tests = append(tests, line)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read test list: %w", err)
+	}
+
+	return tests, nil
 }
 
 func (t *GoE2eTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	klog.Infof("Running go e2e test in %s", t.Dir)
+
+	timeout := t.Timeout
+	if timeout == "" {
+		timeout = os.Getenv("AP_E2E_TIMEOUT")
+	}
+	if timeout == "" && scope != nil {
+		timeout = config.ResolveE2ETimeout(t.Dir, scope.RepoRoot)
+	}
+	if timeout == "" {
+		timeout = "30m"
+	}
+
+	shard := t.Shard
+	if shard == "" {
+		shard = os.Getenv("AP_E2E_SHARD")
+	}
+
+	runPattern := t.RunPattern
+	if runPattern == "" {
+		runPattern = os.Getenv("AP_E2E_RUN")
+	}
+
+	var runArg string
+	if shard != "" {
+		i, n, err := ParseShardSelector(shard)
+		if err != nil {
+			return err
+		}
+
+		tests, err := ListE2ETests(ctx, t.Dir, runPattern)
+		if err != nil {
+			return err
+		}
+
+		selected := SelectShardTests(tests, i, n)
+		klog.Infof("Shard %d/%d selected %d of %d tests in %s", i, n, len(selected), len(tests), t.Dir)
+		runArg = BuildRunRegex(selected)
+	} else if runPattern != "" {
+		runArg = runPattern
+	}
+
+	args := []string{"-v", "-count=1", "-timeout", timeout}
+	if runArg != "" {
+		args = append(args, "-run", runArg)
+	}
+	args = append(args, "./tests/e2e/...")
+
 	opts := RunGoTestOptions{
 		Env:  []string{"RUN_E2E=1"},
-		Args: []string{"-v", "-count=1", "-timeout", "30m", "./tests/e2e/..."},
+		Args: args,
 	}
 	if err := RunGoTest(ctx, t.Dir, t.ResultFile, opts); err != nil {
 		return fmt.Errorf("go e2e test failed in %s: %w", t.Dir, err)

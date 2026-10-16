@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileheaders"
@@ -609,18 +610,59 @@ jobs:
 				jobName = jobName + suffix
 			}
 
-			sb.WriteString(fmt.Sprintf(`  %s:
+			isE2E := strings.HasPrefix(scriptName, "ap-e2e")
+			shards := 1
+			if isE2E {
+				shards = config.ResolveE2EShards(apRoot, repoRoot)
+			}
+
+			if isE2E && shards > 1 {
+				shardList := make([]string, shards)
+				for i := 1; i <= shards; i++ {
+					shardList[i-1] = strconv.Itoa(i)
+				}
+				shardArray := "[" + strings.Join(shardList, ", ") + "]"
+
+				sb.WriteString(fmt.Sprintf(`  %s:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        shard: %s
     env:
       ARTIFACTS: /tmp/artifacts
-    steps:
+      AP_E2E_SHARD: ${{ matrix.shard }}/%d
+`, jobName, shardArray, shards))
+				if timeout := config.ResolveE2ETimeout(apRoot, repoRoot); timeout != "" {
+					sb.WriteString(fmt.Sprintf("      AP_E2E_TIMEOUT: %s\n", timeout))
+				}
+				sb.WriteString(fmt.Sprintf(`    steps:
       - name: Checkout code
         uses: %s
         with:
           # Presubmit scripts never push; don't leave the token in
           # .git/config (zizmor: artipacked).
           persist-credentials: false
-`, jobName, actionCheckout))
+`, actionCheckout))
+			} else {
+				sb.WriteString(fmt.Sprintf(`  %s:
+    runs-on: ubuntu-latest
+    env:
+      ARTIFACTS: /tmp/artifacts
+`, jobName))
+				if isE2E {
+					if timeout := config.ResolveE2ETimeout(apRoot, repoRoot); timeout != "" {
+						sb.WriteString(fmt.Sprintf("      AP_E2E_TIMEOUT: %s\n", timeout))
+					}
+				}
+				sb.WriteString(fmt.Sprintf(`    steps:
+      - name: Checkout code
+        uses: %s
+        with:
+          # Presubmit scripts never push; don't leave the token in
+          # .git/config (zizmor: artipacked).
+          persist-credentials: false
+`, actionCheckout))
+			}
 
 			if goModExists {
 				relGoMod, err := filepath.Rel(repoRoot, filepath.Join(apRoot, "go.mod"))
@@ -656,15 +698,22 @@ jobs:
 			sb.WriteString(fmt.Sprintf(`
       - name: Run %s
         run: ./%s/%s
+`, jobName, relPresubmitsDir, scriptName))
 
+			artifactName := fmt.Sprintf("artifacts-%s", jobName)
+			if isE2E && shards > 1 {
+				artifactName = fmt.Sprintf("artifacts-%s-${{ matrix.shard }}", jobName)
+			}
+
+			sb.WriteString(fmt.Sprintf(`
       - name: Upload artifacts
         if: always()
         uses: %s
         with:
-          name: artifacts-%s
+          name: %s
           path: /tmp/artifacts
           if-no-files-found: ignore
-`, jobName, relPresubmitsDir, scriptName, actionUploadArtifact, jobName))
+`, actionUploadArtifact, artifactName))
 		}
 	}
 

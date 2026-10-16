@@ -293,6 +293,162 @@ func TestGithubActionsWorkflowArtifactUpload(t *testing.T) {
 	}
 }
 
+func TestGithubActionsWorkflowE2ESharding(t *testing.T) {
+	// Case 1: Default shards (3)
+	t.Run("default_shards_3", func(t *testing.T) {
+		root := t.TempDir()
+		writeTestHeadersConfig(t, root)
+
+		presubmitsDir := filepath.Join(root, "dev", "ci", "presubmits")
+		if err := os.MkdirAll(presubmitsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(presubmitsDir, "ap-e2e"), []byte("#!/bin/bash\nexit 0\n"), 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		r, err := repo.Open(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scopes := []*tasks.APScope{{Dir: root, RepoRoot: root, Repo: r}}
+		if err := runGithubActionsGenerator(t.Context(), root, scopes); err != nil {
+			t.Fatalf("runGithubActionsGenerator: %v", err)
+		}
+
+		workflowPath := filepath.Join(root, ".github", "workflows", "ci-presubmits.yaml")
+		b, err := os.ReadFile(workflowPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		content := string(b)
+
+		expectedMatrix := `    strategy:
+      matrix:
+        shard: [1, 2, 3]
+    env:
+      ARTIFACTS: /tmp/artifacts
+      AP_E2E_SHARD: ${{ matrix.shard }}/3`
+		if !strings.Contains(content, expectedMatrix) {
+			t.Errorf("workflow missing expected matrix/env:\n%s\nContent:\n%s", expectedMatrix, content)
+		}
+
+		expectedArtifact := fmt.Sprintf(`      - name: Upload artifacts
+        if: always()
+        uses: %s
+        with:
+          name: artifacts-ap-e2e-${{ matrix.shard }}
+          path: /tmp/artifacts
+          if-no-files-found: ignore`, actionUploadArtifact)
+		if !strings.Contains(content, expectedArtifact) {
+			t.Errorf("workflow missing expected artifact upload step:\n%s\nContent:\n%s", expectedArtifact, content)
+		}
+	})
+
+	// Case 2: Configured shards and timeout in .ap/ap.yaml
+	t.Run("configured_shards_and_timeout", func(t *testing.T) {
+		root := t.TempDir()
+		writeTestHeadersConfig(t, root)
+
+		apDir := filepath.Join(root, ".ap")
+		if err := os.MkdirAll(apDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		apYaml := `
+e2e:
+  shards: 4
+  timeout: 12m
+`
+		if err := os.WriteFile(filepath.Join(apDir, "ap.yaml"), []byte(apYaml), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		presubmitsDir := filepath.Join(root, "dev", "ci", "presubmits")
+		if err := os.MkdirAll(presubmitsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(presubmitsDir, "ap-e2e"), []byte("#!/bin/bash\nexit 0\n"), 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		r, err := repo.Open(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scopes := []*tasks.APScope{{Dir: root, RepoRoot: root, Repo: r}}
+		if err := runGithubActionsGenerator(t.Context(), root, scopes); err != nil {
+			t.Fatalf("runGithubActionsGenerator: %v", err)
+		}
+
+		workflowPath := filepath.Join(root, ".github", "workflows", "ci-presubmits.yaml")
+		b, err := os.ReadFile(workflowPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		content := string(b)
+
+		expectedMatrix := `    strategy:
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      ARTIFACTS: /tmp/artifacts
+      AP_E2E_SHARD: ${{ matrix.shard }}/4
+      AP_E2E_TIMEOUT: 12m`
+		if !strings.Contains(content, expectedMatrix) {
+			t.Errorf("workflow missing expected matrix/env:\n%s\nContent:\n%s", expectedMatrix, content)
+		}
+	})
+
+	// Case 3: Configured shards: 1 disables matrix
+	t.Run("single_shard_disables_matrix", func(t *testing.T) {
+		root := t.TempDir()
+		writeTestHeadersConfig(t, root)
+
+		apDir := filepath.Join(root, ".ap")
+		if err := os.MkdirAll(apDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		apYaml := `
+e2e:
+  shards: 1
+`
+		if err := os.WriteFile(filepath.Join(apDir, "ap.yaml"), []byte(apYaml), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		presubmitsDir := filepath.Join(root, "dev", "ci", "presubmits")
+		if err := os.MkdirAll(presubmitsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(presubmitsDir, "ap-e2e"), []byte("#!/bin/bash\nexit 0\n"), 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		r, err := repo.Open(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scopes := []*tasks.APScope{{Dir: root, RepoRoot: root, Repo: r}}
+		if err := runGithubActionsGenerator(t.Context(), root, scopes); err != nil {
+			t.Fatalf("runGithubActionsGenerator: %v", err)
+		}
+
+		workflowPath := filepath.Join(root, ".github", "workflows", "ci-presubmits.yaml")
+		b, err := os.ReadFile(workflowPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		content := string(b)
+
+		if strings.Contains(content, "matrix:") {
+			t.Errorf("workflow should not contain matrix when shards: 1:\n%s", content)
+		}
+		if !strings.Contains(content, "name: artifacts-ap-e2e\n") {
+			t.Errorf("workflow should upload artifacts-ap-e2e when shards: 1:\n%s", content)
+		}
+	})
+}
+
 func TestPresubmitScriptsWithoutHeadersConfig(t *testing.T) {
 	root := t.TempDir()
 	if err := runApTestGenerator(t.Context(), root); err != nil {

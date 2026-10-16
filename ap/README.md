@@ -22,13 +22,16 @@ The `ap generate` command is aware of all ap roots in the repository. It will:
 
 ### Presubmit Artifacts
 
-Presubmit scripts may write anything to `$ARTIFACTS` (set to `/tmp/artifacts` in generated GitHub Actions jobs), and it is uploaded as `artifacts-<job>` upon job completion (even on failure). If no files are written, the upload step completes without producing warnings or errors.
+Presubmit scripts may write anything to `$ARTIFACTS` (set to `/tmp/artifacts` in generated GitHub Actions jobs), and it is uploaded as `artifacts-<job>` (or `artifacts-<job>-${{ matrix.shard }}` for sharded e2e jobs) upon job completion (even on failure). If no files are written, the upload step completes without producing warnings or errors.
 
 ### Environment Variables
 
-You can override the root discovery by setting the following environment variables:
+You can override the root discovery or control test execution by setting the following environment variables:
 - `AP_ROOT`: Explicitly sets the path to the ap root.
 - `REPO_ROOT`: Explicitly sets the path to the git repository root.
+- `AP_E2E_SHARD`: Shard selector in `i/n` format (e.g. `1/3`), selecting every n-th test starting at i from sorted `Test*` functions.
+- `AP_E2E_RUN`: Passed through to `go test -run` regular expression for e2e tests.
+- `AP_E2E_TIMEOUT`: Configurable timeout for e2e tests (defaults to `30m`).
 
 ## Configuration Files
 
@@ -71,6 +74,9 @@ presubmits:
   skipIfOnlyChanged:
   - docs/*
   - README.md
+e2e:
+  shards: 3
+  timeout: "15m"
 ```
 
 `presubmits.skipIfOnlyChanged` is an optional list of bash case globs
@@ -84,6 +90,12 @@ non-merge HEAD falls through to a full run — and push / merge_group
 events always run everything, so a merge queue remains a complete
 gate. Only list paths no presubmit output depends on.
 
+`e2e.shards` configures the number of parallel matrix shards generated
+in `.github/workflows/ci-presubmits.yaml` for `ap-e2e` jobs (default is 3).
+Setting `e2e.shards: 1` disables matrix generation.
+
+`e2e.timeout` configures the timeout for e2e tests (defaults to 30m).
+
 ## Usage
 
 Run `go run ap/main.go` or build the binary.
@@ -95,6 +107,7 @@ ap <command>
 Commands:
 - `init`: Initialize `.ap/` configuration for a repository
 - `test`: Run tests
+- `e2e`: Run e2e tests (supports `--shard`, `--run`, `--timeout`)
 - `lint`: Run linting tasks (vet, govulncheck)
 - `build`: Build artifacts
 - `deploy`: Deploy artifacts

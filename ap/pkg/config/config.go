@@ -20,6 +20,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"sigs.k8s.io/yaml"
 )
 
 type Config struct {
@@ -443,4 +445,127 @@ func (c *ImagesConfig) GetPlatforms() []string {
 		}
 	}
 	return normalized
+}
+
+// ApConfig represents the configuration in .ap/ap.yaml.
+type ApConfig struct {
+	Version     string            `json:"version"`
+	ImagePrefix string            `json:"imagePrefix"`
+	Presubmits  *PresubmitsConfig `json:"presubmits"`
+	E2E         *E2EConfig        `json:"e2e"`
+}
+
+// PresubmitsConfig represents presubmits configuration in .ap/ap.yaml.
+type PresubmitsConfig struct {
+	SkipIfOnlyChanged []string   `json:"skipIfOnlyChanged"`
+	E2E               *E2EConfig `json:"e2e"`
+}
+
+// E2EConfig represents e2e test configuration.
+type E2EConfig struct {
+	Shards  int    `json:"shards"`
+	Timeout string `json:"timeout"`
+}
+
+// LoadApConfig loads the configuration from .ap/ap.yaml in the specified root directory.
+func LoadApConfig(root string) (*ApConfig, error) {
+	configFile := filepath.Join(root, ".ap/ap.yaml")
+
+	var config ApConfig
+	if _, err := os.Stat(configFile); err == nil {
+		data, err := os.ReadFile(configFile)
+		if err != nil {
+			return nil, fmt.Errorf("error reading %s: %w", configFile, err)
+		}
+
+		if err := yaml.Unmarshal(data, &config); err != nil {
+			return nil, fmt.Errorf("error parsing %s: %w", configFile, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("error checking %s: %w", configFile, err)
+	}
+
+	return &config, nil
+}
+
+// LoadE2EConfig loads the configuration from .ap/e2e.yaml in the specified root directory.
+func LoadE2EConfig(root string) (*E2EConfig, error) {
+	configFile := filepath.Join(root, ".ap/e2e.yaml")
+
+	var config E2EConfig
+	if _, err := os.Stat(configFile); err == nil {
+		data, err := os.ReadFile(configFile)
+		if err != nil {
+			return nil, fmt.Errorf("error reading %s: %w", configFile, err)
+		}
+
+		if err := yaml.Unmarshal(data, &config); err != nil {
+			return nil, fmt.Errorf("error parsing %s: %w", configFile, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("error checking %s: %w", configFile, err)
+	}
+
+	return &config, nil
+}
+
+// ResolveE2EShards returns the number of e2e shards configured for the given apRoot / repoRoot.
+// It checks apRoot first, then repoRoot, and defaults to 3 if not configured or <= 0.
+func ResolveE2EShards(apRoot, repoRoot string) int {
+	if shards := getShards(apRoot); shards > 0 {
+		return shards
+	}
+	if repoRoot != "" && apRoot != repoRoot {
+		if shards := getShards(repoRoot); shards > 0 {
+			return shards
+		}
+	}
+	return 3
+}
+
+func getShards(dir string) int {
+	if apCfg, err := LoadApConfig(dir); err == nil && apCfg != nil {
+		if apCfg.E2E != nil && apCfg.E2E.Shards > 0 {
+			return apCfg.E2E.Shards
+		}
+		if apCfg.Presubmits != nil && apCfg.Presubmits.E2E != nil && apCfg.Presubmits.E2E.Shards > 0 {
+			return apCfg.Presubmits.E2E.Shards
+		}
+	}
+	if e2eCfg, err := LoadE2EConfig(dir); err == nil && e2eCfg != nil {
+		if e2eCfg.Shards > 0 {
+			return e2eCfg.Shards
+		}
+	}
+	return 0
+}
+
+// ResolveE2ETimeout returns the e2e timeout string configured for the given apRoot / repoRoot, or empty string.
+func ResolveE2ETimeout(apRoot, repoRoot string) string {
+	if timeout := getTimeout(apRoot); timeout != "" {
+		return timeout
+	}
+	if repoRoot != "" && apRoot != repoRoot {
+		if timeout := getTimeout(repoRoot); timeout != "" {
+			return timeout
+		}
+	}
+	return ""
+}
+
+func getTimeout(dir string) string {
+	if apCfg, err := LoadApConfig(dir); err == nil && apCfg != nil {
+		if apCfg.E2E != nil && apCfg.E2E.Timeout != "" {
+			return apCfg.E2E.Timeout
+		}
+		if apCfg.Presubmits != nil && apCfg.Presubmits.E2E != nil && apCfg.Presubmits.E2E.Timeout != "" {
+			return apCfg.Presubmits.E2E.Timeout
+		}
+	}
+	if e2eCfg, err := LoadE2EConfig(dir); err == nil && e2eCfg != nil {
+		if e2eCfg.Timeout != "" {
+			return e2eCfg.Timeout
+		}
+	}
+	return ""
 }

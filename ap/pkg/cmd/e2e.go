@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
 )
@@ -26,6 +27,9 @@ import (
 // E2eOptions holds the configuration for the "e2e" command.
 type E2eOptions struct {
 	*RootOptions
+	Shard   string
+	Run     string
+	Timeout string
 }
 
 // BuildE2eCommand constructs the cobra command for "e2e".
@@ -45,6 +49,10 @@ func BuildE2eCommand(rootOpt *RootOptions) *cobra.Command {
 			return RunE2e(cmd.Context(), opt)
 		},
 	}
+
+	cmd.Flags().StringVar(&opt.Shard, "shard", "", "Shard selector in format i/n (e.g. 1/3) (env: AP_E2E_SHARD)")
+	cmd.Flags().StringVar(&opt.Run, "run", "", "Run tests matching regular expression (env: AP_E2E_RUN)")
+	cmd.Flags().StringVar(&opt.Timeout, "timeout", "", "Timeout for tests (env: AP_E2E_TIMEOUT)")
 
 	return cmd
 }
@@ -68,6 +76,19 @@ func RunE2e(ctx context.Context, opt E2eOptions) error {
 	var allTasks []tasks.Task
 	for _, scope := range scopes {
 		if len(scope.E2ETasks) > 0 {
+			for _, task := range scope.E2ETasks {
+				if goE2e, ok := task.(*golang.GoE2eTask); ok {
+					if opt.Shard != "" {
+						goE2e.Shard = opt.Shard
+					}
+					if opt.Run != "" {
+						goE2e.RunPattern = opt.Run
+					}
+					if opt.Timeout != "" {
+						goE2e.Timeout = opt.Timeout
+					}
+				}
+			}
 			group := &tasks.Group{
 				Name:  fmt.Sprintf("e2e-%s", filepath.Base(scope.Dir)),
 				Tasks: scope.E2ETasks,
