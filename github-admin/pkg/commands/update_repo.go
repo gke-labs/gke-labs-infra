@@ -115,5 +115,70 @@ func RunUpdateRepo(ctx context.Context, opt UpdateRepoOptions) error {
 	}
 	fmt.Println("Branch protection updated for 'main'.")
 
+	// 3. Create or update ruleset to enable Merge Queue
+	rulesetName := "submit-queue"
+	targetBranch := github.RulesetTarget("branch")
+	rulesetReq := &github.RepositoryRuleset{
+		Name:        rulesetName,
+		Target:      &targetBranch,
+		Enforcement: github.RulesetEnforcement("active"),
+		Conditions: &github.RepositoryRulesetConditions{
+			RefName: &github.RepositoryRulesetRefConditionParameters{
+				Include: []string{"refs/heads/main"},
+				Exclude: []string{},
+			},
+		},
+		Rules: &github.RepositoryRulesetRules{
+			MergeQueue: &github.MergeQueueRuleParameters{
+				CheckResponseTimeoutMinutes:  60,
+				GroupingStrategy:             github.MergeGroupingStrategyAllGreen,
+				MaxEntriesToBuild:            5,
+				MaxEntriesToMerge:            5,
+				MergeMethod:                  github.MergeQueueMergeMethodMerge,
+				MinEntriesToMerge:            1,
+				MinEntriesToMergeWaitMinutes: 5,
+			},
+		},
+	}
+
+	existingRulesets, _, err := client.Repositories.GetAllRulesets(ctx, opt.Owner, opt.Repo, nil)
+	if err != nil {
+		if errResp, ok := err.(*github.ErrorResponse); ok && (errResp.Response.StatusCode == 404 || errResp.Response.StatusCode == 403) {
+			fmt.Printf("Warning: Failed to list existing rulesets (rulesets may not be supported on this repository): %v\n", err)
+			return nil
+		}
+		return fmt.Errorf("failed to list existing rulesets: %w", err)
+	}
+
+	var existingID *int64
+	for _, rs := range existingRulesets {
+		if rs.Name == rulesetName {
+			existingID = rs.ID
+			break
+		}
+	}
+
+	if existingID != nil {
+		_, _, err = client.Repositories.UpdateRuleset(ctx, opt.Owner, opt.Repo, *existingID, *rulesetReq)
+		if err != nil {
+			if errResp, ok := err.(*github.ErrorResponse); ok && errResp.Response.StatusCode == 422 {
+				fmt.Printf("Warning: Failed to update merge queue ruleset (this is expected on personal forks which do not support merge queues): %v\n", err)
+				return nil
+			}
+			return fmt.Errorf("failed to update ruleset %q: %w", rulesetName, err)
+		}
+		fmt.Printf("Ruleset %q updated (Merge Queue enabled).\n", rulesetName)
+	} else {
+		_, _, err = client.Repositories.CreateRuleset(ctx, opt.Owner, opt.Repo, *rulesetReq)
+		if err != nil {
+			if errResp, ok := err.(*github.ErrorResponse); ok && errResp.Response.StatusCode == 422 {
+				fmt.Printf("Warning: Failed to create merge queue ruleset (this is expected on personal forks which do not support merge queues): %v\n", err)
+				return nil
+			}
+			return fmt.Errorf("failed to create ruleset %q: %w", rulesetName, err)
+		}
+		fmt.Printf("Ruleset %q created (Merge Queue enabled).\n", rulesetName)
+	}
+
 	return nil
 }
