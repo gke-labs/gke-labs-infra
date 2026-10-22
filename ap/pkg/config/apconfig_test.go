@@ -30,6 +30,7 @@ func TestLoadAPConfig(t *testing.T) {
 
 	content := `
 version: "!self"
+generatedHeader: "v2"
 generate:
   ignoreOrphans:
     - "pkg/sandbox/*.pb.go"
@@ -48,6 +49,10 @@ generate:
 
 	if cfg.Version != "!self" {
 		t.Errorf("expected version '!self', got %q", cfg.Version)
+	}
+
+	if cfg.GeneratedHeader != "v2" {
+		t.Errorf("expected generatedHeader 'v2', got %q", cfg.GeneratedHeader)
 	}
 
 	if cfg.Generate == nil {

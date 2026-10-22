@@ -32,10 +32,11 @@ type PresubmitConfig struct {
 
 // APConfig represents the configuration loaded from .ap/ap.yaml.
 type APConfig struct {
-	Version     string           `json:"version"`
-	ImagePrefix string           `json:"imagePrefix"`
-	Presubmits  *PresubmitConfig `json:"presubmits"`
-	Generate    *GenerateConfig  `json:"generate"`
+	Version         string           `json:"version"`
+	ImagePrefix     string           `json:"imagePrefix"`
+	GeneratedHeader string           `json:"generatedHeader"`
+	Presubmits      *PresubmitConfig `json:"presubmits"`
+	Generate        *GenerateConfig  `json:"generate"`
 }
 
 // LoadAPConfig loads the configuration from .ap/ap.yaml using strict unmarshaling.

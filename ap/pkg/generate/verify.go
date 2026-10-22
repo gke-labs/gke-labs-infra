@@ -196,6 +196,11 @@ func Undo(data []byte, marker string, isBinary bool, wasEmpty bool) ([]byte, boo
 // RunVerify executes generator verification by perturbing all detected generated files,
 // running generation tasks, and asserting that all perturbed files are restored byte-identically.
 func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.APScope, allTasks []tasks.Task, dryRun bool) error {
+	if _, err := ResolveGeneratedHeaderVersion(repoRoot); err != nil {
+		return err
+	}
+	emitHeaderFormatNote(repoRoot)
+
 	generatedFiles, err := FindGeneratedFiles(repoRoot, scopes)
 	if err != nil {
 		return fmt.Errorf("failed to scan for generated files: %w", err)
