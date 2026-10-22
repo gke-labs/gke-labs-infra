@@ -15,6 +15,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Make verify script immune to self-rewrite if modified during generation
+if [[ -z "${AP_VERIFY_SELF_COPIED:-}" ]]; then
+  if TMP_SCRIPT="$(mktemp 2>/dev/null)"; then
+    export AP_VERIFY_SELF_COPIED="${TMP_SCRIPT}"
+    export AP_VERIFY_ORIGINAL="$0"
+    cp "$0" "${AP_VERIFY_SELF_COPIED}"
+    exec bash "${AP_VERIFY_SELF_COPIED}" "$@"
+  fi
+fi
+if [[ -n "${AP_VERIFY_SELF_COPIED:-}" ]]; then
+  trap 'rm -f "${AP_VERIFY_SELF_COPIED}"' EXIT INT TERM
+fi
+
 set -o errexit
 set -o nounset
 set -o pipefail
