@@ -180,7 +180,11 @@ func writeTestHeadersConfig(t *testing.T, root string) {
 func TestPresubmitScriptsWithoutSkipConfig(t *testing.T) {
 	root := t.TempDir()
 	writeTestHeadersConfig(t, root)
-	if err := runApTestGenerator(t.Context(), root); err != nil {
+	r, err := repo.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runApTestGenerator(t.Context(), r, root); err != nil {
 		t.Fatalf("runApTestGenerator: %v", err)
 	}
 	b, err := os.ReadFile(filepath.Join(root, "dev", "ci", "presubmits", "ap-test"))
@@ -206,7 +210,11 @@ func TestPresubmitScriptsWithSkipConfig(t *testing.T) {
 	if err := fileutils.WriteFileAtomic(filepath.Join(root, ".ap", "ap.yaml"), []byte(apYAML), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := runApTestGenerator(t.Context(), root); err != nil {
+	r, err := repo.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runApTestGenerator(t.Context(), r, root); err != nil {
 		t.Fatalf("runApTestGenerator: %v", err)
 	}
 	b, err := os.ReadFile(filepath.Join(root, "dev", "ci", "presubmits", "ap-test"))
@@ -269,7 +277,7 @@ func TestGithubActionsWorkflowArtifactUpload(t *testing.T) {
 		t.Fatal(err)
 	}
 	scopes := []*tasks.APScope{{Dir: root, RepoRoot: root, Repo: r}}
-	if err := runGithubActionsGenerator(t.Context(), root, scopes); err != nil {
+	if err := runGithubActionsGenerator(t.Context(), r, root, scopes); err != nil {
 		t.Fatalf("runGithubActionsGenerator: %v", err)
 	}
 
@@ -296,7 +304,11 @@ func TestGithubActionsWorkflowArtifactUpload(t *testing.T) {
 
 func TestPresubmitScriptsWithoutHeadersConfig(t *testing.T) {
 	root := t.TempDir()
-	if err := runApTestGenerator(t.Context(), root); err != nil {
+	r, err := repo.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runApTestGenerator(t.Context(), r, root); err != nil {
 		t.Fatalf("runApTestGenerator should succeed without headers.yaml: %v", err)
 	}
 	b, err := os.ReadFile(filepath.Join(root, "dev", "ci", "presubmits", "ap-test"))
@@ -317,7 +329,11 @@ func TestPresubmitScriptsWithLicenseNone(t *testing.T) {
 	if err := fileutils.WriteFileAtomic(filepath.Join(root, ".ap", "headers.yaml"), []byte("license: none\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := runApTestGenerator(t.Context(), root); err != nil {
+	r, err := repo.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runApTestGenerator(t.Context(), r, root); err != nil {
 		t.Fatalf("runApTestGenerator should succeed with license: none: %v", err)
 	}
 	b, err := os.ReadFile(filepath.Join(root, "dev", "ci", "presubmits", "ap-test"))
@@ -489,9 +505,13 @@ func TestAuditGeneratedGeneratorOptIn(t *testing.T) {
 	writeTestHeadersConfig(t, root)
 
 	scriptPath := filepath.Join(root, "dev", "ci", "presubmits", "ap-audit-generated")
+	r, err := repo.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// 1. Without auditGenerated configured: script should not exist
-	if err := runAuditGeneratedGenerator(t.Context(), root); err != nil {
+	if err := runAuditGeneratedGenerator(t.Context(), r, root); err != nil {
 		t.Fatalf("runAuditGeneratedGenerator failed: %v", err)
 	}
 	if _, err := os.Stat(scriptPath); err == nil {
@@ -507,7 +527,7 @@ generate:
 		t.Fatal(err)
 	}
 
-	if err := runAuditGeneratedGenerator(t.Context(), root); err != nil {
+	if err := runAuditGeneratedGenerator(t.Context(), r, root); err != nil {
 		t.Fatalf("runAuditGeneratedGenerator with auditGenerated=true failed: %v", err)
 	}
 
@@ -528,7 +548,7 @@ generate:
 	if err := os.WriteFile(filepath.Join(root, ".ap", "ap.yaml"), []byte(apYAMLDisabled), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := runAuditGeneratedGenerator(t.Context(), root); err != nil {
+	if err := runAuditGeneratedGenerator(t.Context(), r, root); err != nil {
 		t.Fatalf("runAuditGeneratedGenerator with auditGenerated=false failed: %v", err)
 	}
 	if _, err := os.Stat(scriptPath); err == nil {

@@ -31,7 +31,6 @@ import (
 	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"k8s.io/klog/v2"
@@ -214,6 +213,22 @@ func Undo(data []byte, marker string, isBinary bool, wasEmpty bool) ([]byte, boo
 // RunVerify executes generator verification by perturbing all detected generated files,
 // running generation tasks, and asserting that all perturbed files are restored byte-identically.
 func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.APScope, allTasks []tasks.Task, dryRun bool) error {
+	var r *repo.Repo
+	if len(scopes) > 0 {
+		var scopeRepoErr error
+		r, scopeRepoErr = scopes[0].GetRepo()
+		if scopeRepoErr != nil {
+			return fmt.Errorf("failed to get repo from scope: %w", scopeRepoErr)
+		}
+	}
+	if r == nil {
+		var repoOpenErr error
+		r, repoOpenErr = repo.Open(repoRoot)
+		if repoOpenErr != nil {
+			return fmt.Errorf("failed to open repo at %s: %w", repoRoot, repoOpenErr)
+		}
+	}
+
 	generatedFiles, err := FindGeneratedFiles(repoRoot, scopes)
 	if err != nil {
 		return fmt.Errorf("failed to scan for generated files: %w", err)
@@ -259,21 +274,6 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.APScope, al
 			}
 			fmt.Printf("  - %s\n", filepath.ToSlash(rel))
 		}
-		var r *repo.Repo
-		if len(scopes) > 0 {
-			var scopeRepoErr error
-			r, scopeRepoErr = scopes[0].GetRepo()
-			if scopeRepoErr != nil {
-				return fmt.Errorf("failed to get repo from scope: %w", scopeRepoErr)
-			}
-		}
-		if r == nil {
-			var repoOpenErr error
-			r, repoOpenErr = repo.Open(repoRoot)
-			if repoOpenErr != nil {
-				return fmt.Errorf("failed to open repo at %s: %w", repoRoot, repoOpenErr)
-			}
-		}
 		return tasks.Run(ctx, &tasks.APScope{RepoRoot: repoRoot, Dir: repoRoot, Repo: r}, allTasks, tasks.RunOptions{DryRun: true})
 	}
 
@@ -318,7 +318,7 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.APScope, al
 		}
 		perturbedFiles = append(perturbedFiles, pf)
 
-		if err := fileutils.WriteFileAtomic(f.Path, perturbed, info.Mode()); err != nil {
+		if err := r.WriteFile(f.Path, perturbed, info.Mode()); err != nil {
 			return fmt.Errorf("failed to write perturbed file %s: %w", f.Path, err)
 		}
 	}
@@ -333,7 +333,7 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.APScope, al
 			}
 			undone, ok := Undo(currentData, pf.marker, pf.isBinary, pf.wasEmpty)
 			if ok {
-				if err := fileutils.WriteFileAtomic(pf.path, undone, pf.mode); err != nil {
+				if err := r.WriteFile(pf.path, undone, pf.mode); err != nil {
 					klog.Errorf("failed to restore file %s: %v", pf.path, err)
 				}
 			}
@@ -361,21 +361,6 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.APScope, al
 	}()
 
 	// Run generation tasks
-	var r *repo.Repo
-	if len(scopes) > 0 {
-		var scopeRepoErr error
-		r, scopeRepoErr = scopes[0].GetRepo()
-		if scopeRepoErr != nil {
-			return fmt.Errorf("failed to get repo from scope: %w", scopeRepoErr)
-		}
-	}
-	if r == nil {
-		var repoOpenErr error
-		r, repoOpenErr = repo.Open(repoRoot)
-		if repoOpenErr != nil {
-			return fmt.Errorf("failed to open repo at %s: %w", repoRoot, repoOpenErr)
-		}
-	}
 	runErr := tasks.Run(ctx, &tasks.APScope{RepoRoot: repoRoot, Dir: repoRoot, Repo: r}, allTasks, tasks.RunOptions{DryRun: false})
 	if runErr != nil {
 		findings = append(findings, fmt.Sprintf("generation tasks failed: %v", runErr))
@@ -383,7 +368,6 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.APScope, al
 
 	// Verify all perturbed files were restored byte-identical using content hashes
 	for _, pf := range perturbedFiles {
-		pf.file.Refresh()
 		currentHash, err := pf.file.Hash()
 		if err != nil {
 			findings = append(findings, fmt.Sprintf("file %q missing after generation: %v", pf.relPath, err))

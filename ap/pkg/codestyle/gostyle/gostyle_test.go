@@ -205,9 +205,9 @@ func TestRun_GoModTidy_ChangeCache(t *testing.T) {
 	origTidyRunner := tidyRunner
 	defer func() { tidyRunner = origTidyRunner }()
 
-	tidyRunner = func(ctx context.Context, dir string) error {
+	tidyRunner = func(ctx context.Context, r *repo.Repo, dir string) error {
 		runCount++
-		return origTidyRunner(ctx, dir)
+		return origTidyRunner(ctx, r, dir)
 	}
 
 	cacheDir := t.TempDir()

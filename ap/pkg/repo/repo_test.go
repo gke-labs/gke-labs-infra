@@ -355,3 +355,268 @@ func TestRepo_TrackFile(t *testing.T) {
 		t.Errorf("expected valid hash from tracked file, got err=%v", err)
 	}
 }
+
+func TestRepo_WriteFileAtomic(t *testing.T) {
+	dir := setupTestRepo(t)
+	r, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Overwriting an existing file automatically invalidates memoized hash
+	existingPath := filepath.Join(dir, "main.go")
+	f := r.File(existingPath)
+	if f == nil {
+		t.Fatal("expected main.go to exist in repo")
+	}
+	initialHash, err := f.Hash()
+	if err != nil {
+		t.Fatalf("f.Hash() failed: %v", err)
+	}
+
+	newContent := []byte("package main\n\nfunc UpdatedMain() {}\n")
+	if err := r.WriteFileAtomic(existingPath, newContent, 0644); err != nil {
+		t.Fatalf("r.WriteFileAtomic failed: %v", err)
+	}
+
+	updatedHash, err := f.Hash()
+	if err != nil {
+		t.Fatalf("f.Hash() after WriteFileAtomic failed: %v", err)
+	}
+	if updatedHash == initialHash {
+		t.Fatalf("expected Hash() to reflect new content without manual refresh, got %q == %q", updatedHash, initialHash)
+	}
+
+	// 2. Writing a brand new file automatically tracks it in the tree
+	newFilePath := filepath.Join(dir, "brand_new.txt")
+	if r.File(newFilePath) != nil {
+		t.Fatal("expected brand_new.txt to not exist yet")
+	}
+	if err := r.WriteFileAtomic(newFilePath, []byte("brand new content"), 0644); err != nil {
+		t.Fatalf("r.WriteFileAtomic new file failed: %v", err)
+	}
+	newF := r.File(newFilePath)
+	if newF == nil {
+		t.Fatal("expected brand_new.txt to be tracked in repo tree")
+	}
+	newHash, err := newF.Hash()
+	if err != nil || newHash == "" {
+		t.Fatalf("expected valid hash for newly written file, got hash=%q, err=%v", newHash, err)
+	}
+}
+
+func TestRepo_CopyFile(t *testing.T) {
+	dir := setupTestRepo(t)
+	r, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srcPath := filepath.Join(dir, "main.go")
+	dstPath := filepath.Join(dir, "main_copy.go")
+
+	if err := r.CopyFile(srcPath, dstPath, 0644); err != nil {
+		t.Fatalf("r.CopyFile failed: %v", err)
+	}
+
+	dstF := r.File(dstPath)
+	if dstF == nil {
+		t.Fatal("expected main_copy.go to be tracked in repo tree")
+	}
+
+	srcF := r.File(srcPath)
+	srcHash, err := srcF.Hash()
+	if err != nil {
+		t.Fatalf("srcF.Hash failed: %v", err)
+	}
+	dstHash, err := dstF.Hash()
+	if err != nil {
+		t.Fatalf("dstF.Hash failed: %v", err)
+	}
+	if dstHash != srcHash {
+		t.Fatalf("expected copied file hash %q to match source %q", dstHash, srcHash)
+	}
+}
+
+func TestRepo_Remove(t *testing.T) {
+	dir := setupTestRepo(t)
+	r, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	filePath := filepath.Join(dir, "main.go")
+	if r.File(filePath) == nil {
+		t.Fatal("expected main.go to exist")
+	}
+
+	if err := r.Remove(filePath); err != nil {
+		t.Fatalf("r.Remove failed: %v", err)
+	}
+
+	if r.File(filePath) != nil {
+		t.Fatal("expected main.go to be untracked after r.Remove")
+	}
+	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
+		t.Fatalf("expected main.go to be removed from disk, got err=%v", err)
+	}
+}
+
+func TestRepo_Invalidate(t *testing.T) {
+	dir := setupTestRepo(t)
+	r, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	subDir := filepath.Join(dir, "sub")
+	existingFile := filepath.Join(subDir, "sub.go")
+	f := r.File(existingFile)
+	if f == nil {
+		t.Fatal("expected sub.go to exist in repo")
+	}
+	origHash, err := f.Hash()
+	if err != nil {
+		t.Fatalf("f.Hash failed: %v", err)
+	}
+
+	// 1. External modification of existing file
+	if err := os.WriteFile(existingFile, []byte("package sub\n\n// externally modified\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. External creation of a new file
+	newFilePath := filepath.Join(subDir, "new_sub.go")
+	if err := os.WriteFile(newFilePath, []byte("package sub\n\nfunc NewSub() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. External deletion of a file
+	deletedFile := filepath.Join(subDir, "temp.go")
+	if err := os.WriteFile(deletedFile, []byte("package sub\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	r.TrackFile(deletedFile)
+	if r.File(deletedFile) == nil {
+		t.Fatal("expected temp.go to be tracked")
+	}
+	if err := os.Remove(deletedFile); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run InvalidateTree on subDir
+	if err := r.InvalidateTree(subDir); err != nil {
+		t.Fatalf("r.InvalidateTree failed: %v", err)
+	}
+
+	// Check new file was picked up
+	if r.File(newFilePath) == nil {
+		t.Errorf("expected new_sub.go to be discovered by InvalidateTree")
+	}
+
+	// Check deleted file was removed
+	if r.File(deletedFile) != nil {
+		t.Errorf("expected deleted file temp.go to be untracked by InvalidateTree")
+	}
+
+	// Check modified file hash updated
+	newHash, err := f.Hash()
+	if err != nil {
+		t.Fatalf("f.Hash() after InvalidateTree failed: %v", err)
+	}
+	if newHash == origHash {
+		t.Errorf("expected InvalidateTree to refresh hash, got %q == %q", newHash, origHash)
+	}
+
+	// Verify InvalidateAll also works across the entire repo
+	if err := r.InvalidateAll(); err != nil {
+		t.Fatalf("r.InvalidateAll failed: %v", err)
+	}
+}
+
+func TestRepo_WriteFile(t *testing.T) {
+	dir := setupTestRepo(t)
+	r, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	existingPath := filepath.Join(dir, "main.go")
+	f := r.File(existingPath)
+	if f == nil {
+		t.Fatal("expected main.go to exist in repo")
+	}
+	initialHash, err := f.Hash()
+	if err != nil {
+		t.Fatalf("f.Hash() failed: %v", err)
+	}
+
+	// 1. Calling WriteFile with identical content is a no-op
+	sameContent := []byte("package main\n\nfunc main() {}\n")
+	fiBefore, err := os.Stat(existingPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.WriteFile(existingPath, sameContent, 0644); err != nil {
+		t.Fatalf("r.WriteFile failed: %v", err)
+	}
+	fiAfter, err := os.Stat(existingPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fiAfter.ModTime() != fiBefore.ModTime() {
+		t.Errorf("expected WriteFile with identical content to not modify mtime")
+	}
+
+	// 2. Calling WriteFile with new content updates file and hash
+	newContent := []byte("package main\n\nfunc UpdatedWriteFile() {}\n")
+	if err := r.WriteFile(existingPath, newContent, 0644); err != nil {
+		t.Fatalf("r.WriteFile failed: %v", err)
+	}
+	updatedHash, err := f.Hash()
+	if err != nil {
+		t.Fatalf("f.Hash() after WriteFile failed: %v", err)
+	}
+	if updatedHash == initialHash {
+		t.Fatalf("expected Hash() to update without manual refresh, got %q == %q", updatedHash, initialHash)
+	}
+}
+
+func TestRepo_Track(t *testing.T) {
+	dir := setupTestRepo(t)
+	r, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	modDir := filepath.Join(dir, "sub")
+	goModPath := filepath.Join(modDir, "go.mod")
+	goSumPath := filepath.Join(modDir, "go.sum")
+
+	// go.sum does not exist yet
+	if r.File(goSumPath) != nil {
+		t.Fatal("expected go.sum to not exist initially")
+	}
+
+	// Simulate external tool modifying go.mod and creating go.sum
+	if err := os.WriteFile(goModPath, []byte("module example.com/root/sub\n\ngo 1.26\n// tidied\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(goSumPath, []byte("example.com/dep v1.0.0 h1:abc=\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r.Track(goModPath, goSumPath)
+
+	if r.File(goSumPath) == nil {
+		t.Errorf("expected Track to track new go.sum")
+	}
+	modF := r.File(goModPath)
+	if modF == nil {
+		t.Fatal("expected go.mod to be tracked")
+	}
+	hash, err := modF.Hash()
+	if err != nil || hash == "" {
+		t.Errorf("expected valid hash for tidied go.mod, got err=%v", err)
+	}
+}

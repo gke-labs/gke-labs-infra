@@ -31,13 +31,16 @@ import (
 	"k8s.io/klog/v2"
 )
 
-var tidyRunner = func(ctx context.Context, dir string) error {
+var tidyRunner = func(ctx context.Context, r *repo.Repo, dir string) error {
 	cmd := exec.CommandContext(ctx, "go", "mod", "tidy")
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GOWORK=off")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("go mod tidy failed in %s: %w\n%s", dir, err, strings.TrimSpace(string(out)))
+	}
+	if r != nil {
+		r.Track(filepath.Join(dir, "go.mod"), filepath.Join(dir, "go.sum"))
 	}
 	return nil
 }
@@ -144,10 +147,10 @@ func runGofmt(ctx context.Context, r *repo.Repo, repoRoot string, files []string
 	}
 
 	// Update cache for processed files
+	if r != nil {
+		r.Track(dirtyFiles...)
+	}
 	for _, f := range dirtyFiles {
-		if file := r.File(f); file != nil {
-			file.Refresh()
-		}
 		if cm != nil {
 			// Re-check metadata. gofmt might have changed it.
 			meta, err := cm.GetOrUpdateMetadata(f)
@@ -215,19 +218,8 @@ func runGoModTidy(ctx context.Context, r *repo.Repo, repoRoot string, files []st
 		// across workspace siblings or lead to discrepancies between local workspace
 		// builds and external/isolated builds. Disabling workspace mode with GOWORK=off
 		// ensures that each module is tidied strictly on its own terms as an independent module.
-		if err := tidyRunner(ctx, modDir); err != nil {
+		if err := tidyRunner(ctx, r, modDir); err != nil {
 			return err
-		}
-
-		goModPath := filepath.Join(modDir, "go.mod")
-		goSumPath := filepath.Join(modDir, "go.sum")
-		if f := r.File(goModPath); f != nil {
-			f.Refresh()
-		}
-		if f := r.File(goSumPath); f != nil {
-			f.Refresh()
-		} else {
-			r.TrackFile(goSumPath)
 		}
 
 		if cm != nil {
