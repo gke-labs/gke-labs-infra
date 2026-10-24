@@ -60,8 +60,8 @@ func TestWrapConst(t *testing.T) {
 	// Wrap as constant
 	c := WrapConst(f)
 
-	if c.Read() != f {
-		t.Errorf("Read() returned %p, expected %p", c.Read(), f)
+	if c != f {
+		t.Errorf("WrapConst returned %p, expected %p", c, f)
 	}
 
 	// Trigger check, should be no error
