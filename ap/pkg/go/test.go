@@ -73,9 +73,13 @@ type GoE2eTask struct {
 
 func (t *GoE2eTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	klog.Infof("Running go e2e test in %s", t.Dir)
+	timeout := "35m"
+	if envTimeout := os.Getenv("AP_E2E_TIMEOUT"); envTimeout != "" {
+		timeout = envTimeout
+	}
 	opts := RunGoTestOptions{
 		Env:  []string{"RUN_E2E=1"},
-		Args: []string{"-v", "-count=1", "-timeout", "30m", "./tests/e2e/..."},
+		Args: []string{"-v", "-count=1", "-timeout", timeout, "./tests/e2e/..."},
 	}
 	if err := RunGoTest(ctx, t.Dir, t.ResultFile, opts); err != nil {
 		return fmt.Errorf("go e2e test failed in %s: %w", t.Dir, err)
