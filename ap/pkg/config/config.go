@@ -29,6 +29,7 @@ type Config struct {
 	Tidy        *TidyConfig        `json:"tidy"`
 	Skip        []string           `json:"skip"`
 	Lint        *LintConfig        `json:"lint"`
+	Toolchain   string             `json:"toolchain"`
 }
 
 type GofmtConfig struct {

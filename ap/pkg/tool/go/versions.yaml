@@ -1,0 +1,36 @@
+go:
+    - version: go1.27.3
+      assets:
+        darwin-amd64: sha256:b6f8e931e4ab497fcde6da8ae4499a58f9d258e55c8a80824a516eae5950a750
+        darwin-arm64: sha256:dd3908cf20959d798c1e06ebe5b72213f0505ce01373b40ce3110975a6cd99c2
+        linux-amd64: sha256:65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40
+        linux-arm64: sha256:a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49
+        windows-amd64: sha256:f26081f438319757f8a1b46d7d0b2c5ec7583d4038e485e0aa725cfde7885fff
+    - version: go1.27.2
+      assets:
+        darwin-amd64: sha256:587b59182488b23aa6e5fc25110405a3e0e5b38ed2f5b2f46ed13c32aee356fe
+        darwin-arm64: sha256:76812b213b1b2302c978d28fa52fa92d541704b9e7d9d5db8002c50e4018c4c5
+        linux-amd64: sha256:ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5
+        linux-arm64: sha256:94f3e30b8e374bc285e7dadc11e0865726b9bc6e85b841ccceaabc0214c6b7c8
+        windows-amd64: sha256:1314008898bd40df77af4b014f777f08873dbdfbcd3d92308728ee03304fe04f
+    - version: go1.27.1
+      assets:
+        darwin-amd64: sha256:8f8f52c6649542cf027bbc9b9c68d1ec042f9f34808a40413f0b8b3f66f3caa4
+        darwin-arm64: sha256:ee215d57e0ec269c60cc9ceca68e6bda321ba9ee5afe24f4b0988703c2d87d12
+        linux-amd64: sha256:63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445
+        linux-arm64: sha256:3450b45a3f9ee8568792736a5c5e70a1f2e9b36c35a8f74958c03e51d7d92bec
+        windows-amd64: sha256:a3911b5e0e1b1053f25ed0675f4c1c6aad1e2bfcf253df2b9be4caabd2edd95d
+    - version: go1.27.0
+      assets:
+        darwin-amd64: sha256:d3314e25496e4381d71a5c51d2907e7af655d199f6780b549f015bd85fef4986
+        darwin-arm64: sha256:90493b3bbd5e10f91d12153198bf1994fd756399b4fec93b49b0c6e2acdeeb3e
+        linux-amd64: sha256:675c26c449cbb18fc24b74650de1eabbae6e16f64326fd85a283fb3b58280685
+        linux-arm64: sha256:51798d2c42d0e1c6ed7fd9f48728b4193abac9e8aad6dbac2fe96a81f5909bda
+        windows-amd64: sha256:f0c0a0d33ba94f4d2c5dbc887334ce678b21813504ddb3aafcb06e60a5a667c4
+    - version: go1.26.10
+      assets:
+        darwin-amd64: sha256:e820ab780c273ae4a340b79d0f3c4313b74ee029aa3874792145d44b9f4f91da
+        darwin-arm64: sha256:0b5183492292ada170f9b561a834863808dd02edba599e4ad0e89899330020b3
+        linux-amd64: sha256:ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5
+        linux-arm64: sha256:3f4227ce7b206a513e794f1393adb473a07b46e94d18bd15d1c684bbb7319797
+        windows-amd64: sha256:7ecd2d7260e82c59bcbd7f1077a07cee2dea607295b858df67195a1e4e09629b

@@ -128,6 +128,11 @@ lint:
 ```
 
 `go.yaml` options:
+- `toolchain`: Pinned Go toolchain version (e.g. `toolchain: go1.27.3`). When running `ap tool go`, the version is resolved in the following order:
+  1. The `toolchain` line of the nearest `go.mod` when run inside a module.
+  2. The `go` line of the nearest `go.mod` when run inside a module.
+  3. The `toolchain` setting in `.ap/go.yaml` if configured.
+  4. The newest stable release in `ap/pkg/tool/go/versions.yaml`.
 - `skip`: An optional list of glob patterns to ignore during repository scanning and linting (e.g. `vendor/**`).
 - `tidy.enabled`: Boolean flag (default: `true`). When enabled, `ap generate` and `ap format` run `go mod tidy` alongside `gofmt` for each Go module in scope.
 - `lint.goos`: An optional list of target `GOOS` platforms to check (e.g. `[linux, darwin]`), which overrides automatic detection; omit it for auto (automatically detects non-host GOOS targets referenced by in-scope Go files via filename suffixes and `//go:build` constraints).
@@ -189,7 +194,11 @@ kind: "v0.33.0"
 
 ### Updating Tool Versions
 
-Run `ap tool update-versions` to refresh baked-in release tables (`ap/pkg/tool/protoc/versions.yaml`, `ap/pkg/tool/docker/versions.yaml`, and `ap/pkg/tool/kind/versions.yaml`) with verified checksums. Flags allow skipping individual tools (all default to `true`): `--protoc`, `--docker`, `--buildx`, and `--kind` (e.g. `ap tool update-versions --docker=false` skips the slower Docker tarball downloads).
+Run `ap tool update-versions` to refresh baked-in release tables (`ap/pkg/tool/protoc/versions.yaml`, `ap/pkg/tool/docker/versions.yaml`, `ap/pkg/tool/kind/versions.yaml`, and `ap/pkg/tool/go/versions.yaml`) with verified checksums. Flags allow skipping individual tools (all default to `true`): `--protoc`, `--docker`, `--buildx`, `--kind`, and `--go` (e.g. `ap tool update-versions --docker=false` skips the slower Docker tarball downloads).
+
+### Tool Linking and Busybox Dispatch
+
+`ap` can be invoked under the name of any tool it manages (`kind`, `docker`, `docker-buildx`, `protoc`, `go`) to behave as `ap tool <name> -- <args...>`. On Unix, `ap` uses `syscall.Exec` of the pinned binary so signals, stdio, and exit codes pass straight through without an intermediate wrapper process. Running `ap tool link [dir]` creates or refreshes symlinks pointing to `ap` for all registered tools in `AP_CACHE_DIR/bin` (the directory `ScriptEnv` already places on `PATH` for task scripts) or in a specified directory on `PATH`, giving developers and CI jobs every pinned tool automatically.
 
 ### ap.yaml
 
@@ -257,6 +266,10 @@ Commands:
 - `serve`: Start the sandbox server
 - `alpha`: Experimental commands (e.g. `alpha sandbox`)
 - `version`: Print version information
-- `tool protoc`: Run protoc with pinned binary and language plugins
+- `tool docker`: Run docker with pinned binary and buildx plugin
+- `tool docker-buildx`: Run docker-buildx with pinned binary
 - `tool kind`: Run kind with pinned binary
-- `tool update-versions`: Update baked-in tool release versions and checksums in versions.yaml (supports `--protoc`, `--docker`, `--buildx`, `--kind`)
+- `tool protoc`: Run protoc with pinned binary and language plugins
+- `tool go`: Run go with pinned toolchain (GOROOT set to install directory, GOTOOLCHAIN=local)
+- `tool link`: Create symlinks for managed tools pointing to `ap` (default: `AP_CACHE_DIR/bin`)
+- `tool update-versions`: Update baked-in tool release versions and checksums in versions.yaml (supports `--protoc`, `--docker`, `--buildx`, `--kind`, `--go`)

@@ -23,8 +23,8 @@ import (
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool"
 	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
 )
@@ -174,58 +174,8 @@ func BuildRootCommand() *cobra.Command {
 
 // findRoots attempts to find the root of the git repository and the closest ap root
 func findRoots() (string, string, error) {
-	repoRoot := os.Getenv("REPO_ROOT")
-	apRoot := os.Getenv("AP_ROOT")
-
-	if repoRoot != "" && apRoot != "" {
-		return repoRoot, apRoot, nil
-	}
-
-	startDir, err := os.Getwd()
-	if err != nil {
-		return "", "", err
-	}
-
-	dir := startDir
-	for {
-		if apRoot == "" {
-			hasAP, err := fileutils.FileExists(filepath.Join(dir, ".ap"))
-			if err != nil {
-				return "", "", err
-			}
-			if hasAP {
-				apRoot = dir
-			}
-		}
-		hasGit, err := fileutils.FileExists(filepath.Join(dir, ".git"))
-		if err != nil {
-			return "", "", err
-		}
-		if hasGit {
-			if repoRoot == "" {
-				repoRoot = dir
-			}
-			if apRoot == "" {
-				apRoot = dir
-			}
-			return repoRoot, apRoot, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-
-	if repoRoot == "" {
-		repoRoot = os.Getenv("AP_ROOT")
-	}
-
-	if repoRoot != "" {
-		return repoRoot, apRoot, nil
-	}
-
-	return "", "", fmt.Errorf("could not find git repository root (starting at %s)", startDir)
+	repoRoot, apRoot := tool.FindRoots()
+	return repoRoot, apRoot, nil
 }
 
 func requireRepoRoot(opt *RootOptions) error {

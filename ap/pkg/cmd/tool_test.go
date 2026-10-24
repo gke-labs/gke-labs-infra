@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -170,8 +171,8 @@ func TestToolUpdateVersions_Command(t *testing.T) {
 	if !strings.Contains(out, "update-versions") {
 		t.Errorf("expected help output to mention update-versions, got: %s", out)
 	}
-	if !strings.Contains(out, "--protoc") || !strings.Contains(out, "--docker") || !strings.Contains(out, "--buildx") || !strings.Contains(out, "--kind") {
-		t.Errorf("expected help output to mention --protoc, --docker, --buildx, and --kind flags, got: %s", out)
+	if !strings.Contains(out, "--protoc") || !strings.Contains(out, "--docker") || !strings.Contains(out, "--buildx") || !strings.Contains(out, "--kind") || !strings.Contains(out, "--go") {
+		t.Errorf("expected help output to mention --protoc, --docker, --buildx, --kind, and --go flags, got: %s", out)
 	}
 }
 
@@ -400,5 +401,125 @@ func TestToolDocker_BuildxRewrite(t *testing.T) {
 	// Verify "buildx" was rewritten and stripped from the subcommand args
 	if strings.Contains(output, "docker-buildx buildx version") {
 		t.Errorf("expected buildx to be rewritten, but found duplicate: %s", output)
+	}
+}
+
+func TestToolLink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinking is not supported on Windows")
+	}
+
+	tempDir := t.TempDir()
+	fakeAp := filepath.Join(t.TempDir(), "ap")
+	if err := os.WriteFile(fakeAp, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AP_EXECUTABLE", fakeAp)
+
+	rootCmd := BuildRootCommand()
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"tool", "link", tempDir})
+
+	err := rootCmd.ExecuteContext(t.Context())
+	if err != nil {
+		t.Fatalf("unexpected error running ap tool link: %v\nOutput: %s", err, buf.String())
+	}
+
+	output := buf.String()
+	expectedTools := []string{"kind", "docker", "docker-buildx", "protoc", "go"}
+	for _, toolName := range expectedTools {
+		linkPath := filepath.Join(tempDir, toolName)
+		fi, err := os.Lstat(linkPath)
+		if err != nil {
+			t.Fatalf("expected symlink for %s at %s: %v", toolName, linkPath, err)
+		}
+		if fi.Mode()&os.ModeSymlink == 0 {
+			t.Fatalf("expected %s to be a symlink, got mode %v", linkPath, fi.Mode())
+		}
+		dest, err := os.Readlink(linkPath)
+		if err != nil {
+			t.Fatalf("failed to readlink for %s: %v", linkPath, err)
+		}
+		if dest != fakeAp {
+			t.Fatalf("expected symlink %s to point to %s, got %s", linkPath, fakeAp, dest)
+		}
+		if !strings.Contains(output, linkPath) {
+			t.Errorf("expected output to mention %s, got: %s", linkPath, output)
+		}
+	}
+
+	// Test refreshing existing links
+	buf.Reset()
+	rootCmd.SetArgs([]string{"tool", "link", tempDir})
+	if err := rootCmd.ExecuteContext(t.Context()); err != nil {
+		t.Fatalf("unexpected error refreshing ap tool link: %v\nOutput: %s", err, buf.String())
+	}
+
+	// Test default dir (AP_CACHE_DIR/bin)
+	cacheDir := t.TempDir()
+	t.Setenv("AP_CACHE_DIR", cacheDir)
+	buf.Reset()
+	rootCmd.SetArgs([]string{"tool", "link"})
+	if err := rootCmd.ExecuteContext(t.Context()); err != nil {
+		t.Fatalf("unexpected error running ap tool link with default dir: %v\nOutput: %s", err, buf.String())
+	}
+	defaultBinDir := filepath.Join(cacheDir, "bin")
+	for _, toolName := range expectedTools {
+		linkPath := filepath.Join(defaultBinDir, toolName)
+		dest, err := os.Readlink(linkPath)
+		if err != nil {
+			t.Fatalf("failed to readlink in default dir for %s: %v", toolName, err)
+		}
+		if dest != fakeAp {
+			t.Fatalf("expected default symlink %s to point to %s, got %s", linkPath, fakeAp, dest)
+		}
+	}
+}
+
+func TestToolGo_DryRun(t *testing.T) {
+	tempCache := t.TempDir()
+	t.Setenv("AP_CACHE_DIR", tempCache)
+
+	tempDir := t.TempDir()
+	goMod := "module example.com/test\n\ntoolchain go1.27.3\n"
+	if err := os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goMod), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	binName := "go"
+	if runtime.GOOS == "windows" {
+		binName = "go.exe"
+	}
+	goBinDir := filepath.Join(tempCache, "tools", "go", "go1.27.3", "bin")
+	if err := os.MkdirAll(goBinDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(goBinDir, binName), []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("AP_ROOT", tempDir)
+
+	rootCmd := BuildRootCommand()
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"tool", "go", "--dry-run", "--", "version"})
+
+	err := rootCmd.ExecuteContext(t.Context())
+	output := buf.String()
+
+	if err != nil {
+		t.Fatalf("unexpected error running ap tool go --dry-run: %v\nOutput: %s", err, output)
+	}
+
+	expectedPrefix := fmt.Sprintf("[dry-run] %s", filepath.Join(tempCache, "tools", "go", "go1.27.3", "bin", binName))
+	if !strings.HasPrefix(output, expectedPrefix) {
+		t.Errorf("expected dry-run output to start with %q, got: %s", expectedPrefix, output)
+	}
+	if !strings.Contains(output, "version") {
+		t.Errorf("expected output to contain 'version', got: %s", output)
 	}
 }

@@ -65,11 +65,12 @@ func Latest(releases []Release) *Release {
 	return &releases[0]
 }
 
-// Lookup finds a release by version string (with or without 'v' prefix).
+// Lookup finds a release by version string (with or without 'v' or 'go' prefix).
 func Lookup(releases []Release, version string) (*Release, bool) {
-	norm := strings.TrimPrefix(strings.TrimSpace(version), "v")
+	norm := strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(version), "go"), "v")
 	for i := range releases {
-		if strings.TrimPrefix(releases[i].Version, "v") == norm {
+		relNorm := strings.TrimPrefix(strings.TrimPrefix(releases[i].Version, "go"), "v")
+		if relNorm == norm {
 			return &releases[i], true
 		}
 	}
@@ -106,6 +107,7 @@ func Compare(a, b string) int {
 }
 
 func parseVersionParts(v string) []int {
+	v = strings.TrimPrefix(v, "go")
 	v = strings.TrimPrefix(v, "v")
 	if idx := strings.IndexAny(v, "-+"); idx != -1 {
 		v = v[:idx]

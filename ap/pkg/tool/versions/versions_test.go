@@ -52,6 +52,11 @@ tools:
 		t.Errorf("expected to find v1.0.0, got %v", foundV)
 	}
 
+	foundGo, okGo := Lookup(rels, "go1.0.0")
+	if !okGo || foundGo.Version != "1.0.0" {
+		t.Errorf("expected to find go1.0.0, got %v", foundGo)
+	}
+
 	_, okNone := Lookup(rels, "9.9.9")
 	if okNone {
 		t.Error("expected Lookup to return false for nonexistent version")
@@ -104,6 +109,10 @@ func TestCompare(t *testing.T) {
 		{"36.2", "36.1", 1},
 		{"1.0.0", "1.0", 0},
 		{"1.2.3-rc1", "1.2.3", 0},
+		{"go1.27.3", "go1.27.2", 1},
+		{"go1.27.2", "go1.27.3", -1},
+		{"go1.27.3", "1.27.3", 0},
+		{"go1.26.10", "go1.27.0", -1},
 	}
 	for _, tc := range tests {
 		got := Compare(tc.a, tc.b)

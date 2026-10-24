@@ -16,13 +16,25 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/cmd"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool"
 )
 
 func main() {
 	ctx := context.Background()
+	if len(os.Args) > 0 {
+		if t, ok := tool.Resolve(os.Args[0]); ok {
+			repoRoot := tool.FindRepoRoot()
+			if err := t.Exec(ctx, repoRoot, os.Args[1:]); err != nil {
+				fmt.Fprintf(os.Stderr, "ap: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		}
+	}
 	if err := cmd.Execute(ctx); err != nil {
 		os.Exit(1)
 	}

@@ -18,10 +18,8 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
-	"strings"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kind"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool"
 	"github.com/spf13/cobra"
 )
 
@@ -36,86 +34,31 @@ type ToolKindOptions struct {
 
 // BuildToolKindCommand constructs the cobra command for "tool kind".
 func BuildToolKindCommand(rootOpt *RootOptions) *cobra.Command {
-	opt := ToolKindOptions{
-		RootOptions: rootOpt,
+	t, ok := tool.Lookup("kind")
+	if !ok {
+		panic("tool kind not found in registry")
 	}
-
-	cmd := &cobra.Command{
-		Use:                "kind [--] [args...]",
-		Short:              "Run kind with pinned binary",
-		DisableFlagParsing: true,
-		RunE: func(cmd *cobra.Command, rawArgs []string) error {
-			raw := rawArgs
-			dryRun := opt.DryRun
-			if len(raw) > 0 && raw[0] == "--dry-run" {
-				dryRun = true
-				raw = raw[1:]
-			}
-			if len(raw) > 0 && raw[0] == "--" {
-				raw = raw[1:]
-			}
-
-			opt.DryRun = dryRun
-			opt.Args = raw
-			opt.Stdout = cmd.OutOrStdout()
-			opt.Stderr = cmd.ErrOrStderr()
-			opt.Stdin = cmd.InOrStdin()
-			return RunToolKind(cmd.Context(), opt)
-		},
-	}
-
-	return cmd
+	return buildToolSubcommand(rootOpt, t)
 }
 
 // RunToolKind executes the kind tool with pinned version and settings.
 func RunToolKind(ctx context.Context, opt ToolKindOptions) error {
-	workDir := opt.APRoot
-	if workDir == "" {
-		workDir = opt.RepoRoot
-	}
-	if workDir == "" {
-		var err error
-		workDir, err = os.Getwd()
-		if err != nil {
-			return fmt.Errorf("failed to get current working directory: %w", err)
-		}
+	t, ok := tool.Lookup("kind")
+	if !ok {
+		return fmt.Errorf("tool kind not registered")
 	}
 
-	cfg, err := kind.LoadConfig(workDir)
-	if err != nil {
-		return err
-	}
-	if cfg == nil && opt.RepoRoot != "" && opt.RepoRoot != workDir {
-		cfg, err = kind.LoadConfig(opt.RepoRoot)
-		if err != nil {
-			return err
-		}
-	}
-	if cfg == nil {
-		cfg = kind.DefaultConfig()
+	repoRoot := opt.APRoot
+	if repoRoot == "" {
+		repoRoot = opt.RepoRoot
 	}
 
-	stdout := opt.Stdout
-	if stdout == nil {
-		stdout = os.Stdout
-	}
-	stderr := opt.Stderr
-	if stderr == nil {
-		stderr = os.Stderr
-	}
-	stdin := opt.Stdin
-	if stdin == nil {
-		stdin = os.Stdin
-	}
-
-	if opt.DryRun {
-		kindBin, err := kind.EnsureKind(ctx, cfg.Kind)
-		if err != nil {
-			return err
-		}
-		_, err = fmt.Fprintf(stdout, "[dry-run] %s %s\n", kindBin, strings.Join(opt.Args, " "))
-		return err
-	}
-
-	return kind.RunKind(ctx, cfg.Kind, opt.Args, stdout, stderr, stdin)
+	return t.Run(ctx, tool.RunOptions{
+		RepoRoot: repoRoot,
+		Args:     opt.Args,
+		DryRun:   opt.DryRun,
+		Stdout:   opt.Stdout,
+		Stderr:   opt.Stderr,
+		Stdin:    opt.Stdin,
+	})
 }
