@@ -391,6 +391,7 @@ type DeployTaskOptions struct {
 	OriginalNamespace string
 	ScopeResolver     ScopeResolver
 	CheckNamespace    func(ctx context.Context, namespace string) error
+	KubeContext       string
 }
 
 // KubectlApplyTask represents a task to apply a single k8s manifest.
@@ -400,6 +401,7 @@ type KubectlApplyTask struct {
 	OriginalNamespace string
 	ScopeResolver     ScopeResolver
 	CheckNamespace    func(ctx context.Context, namespace string) error
+	KubeContext       string
 }
 
 func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error {
@@ -435,7 +437,9 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error 
 	if t.Namespace != "" {
 		checkFn := t.CheckNamespace
 		if checkFn == nil {
-			checkFn = DefaultCheckNamespaceCached
+			checkFn = func(ctx context.Context, ns string) error {
+				return DefaultCheckNamespaceCached(ctx, ns, t.KubeContext)
+			}
 		}
 		if err := checkFn(ctx, t.Namespace); err != nil {
 			return err
@@ -444,7 +448,7 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error 
 		resolver := t.ScopeResolver
 		if resolver == nil {
 			var err error
-			resolver, err = GetDiscoveryScopeResolver()
+			resolver, err = GetDiscoveryScopeResolver(t.KubeContext)
 			if err != nil {
 				return fmt.Errorf("failed to get discovery scope resolver: %w", err)
 			}
@@ -460,7 +464,12 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error 
 		replaced = retargeted
 	}
 
-	cmd := exec.CommandContext(ctx, "kubectl", "apply", "-f", "-")
+	var applyArgs []string
+	if t.KubeContext != "" {
+		applyArgs = append(applyArgs, "--context", t.KubeContext)
+	}
+	applyArgs = append(applyArgs, "apply", "-f", "-")
+	cmd := exec.CommandContext(ctx, "kubectl", applyArgs...)
 	cmd.Stdin = bytes.NewBufferString(replaced)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -476,7 +485,12 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error 
 	} else {
 		for _, name := range crdNames {
 			klog.Infof("Waiting for CRD %s to be established...", name)
-			waitCmd := exec.CommandContext(ctx, "kubectl", "wait", "--for=condition=Established", "customresourcedefinition/"+name, "--timeout=60s")
+			var waitArgs []string
+			if t.KubeContext != "" {
+				waitArgs = append(waitArgs, "--context", t.KubeContext)
+			}
+			waitArgs = append(waitArgs, "wait", "--for=condition=Established", "customresourcedefinition/"+name, "--timeout=60s")
+			waitCmd := exec.CommandContext(ctx, "kubectl", waitArgs...)
 			waitCmd.Stdout = os.Stdout
 			waitCmd.Stderr = os.Stderr
 			if err := waitCmd.Run(); err != nil {
@@ -558,6 +572,7 @@ func DeployTasksForManifests(manifests []string, opts ...DeployTaskOptions) task
 			OriginalNamespace: opt.OriginalNamespace,
 			ScopeResolver:     opt.ScopeResolver,
 			CheckNamespace:    opt.CheckNamespace,
+			KubeContext:       opt.KubeContext,
 		})
 	}
 

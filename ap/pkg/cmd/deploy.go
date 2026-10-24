@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/e2e"
@@ -31,6 +32,7 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	toolKind "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kind"
 	"github.com/spf13/cobra"
+	"k8s.io/klog/v2"
 )
 
 // DeployOptions holds the configuration for the "deploy" command.
@@ -39,9 +41,10 @@ type DeployOptions struct {
 	SkipPush     bool
 	BuildkitHost string
 	Namespace    string
+	Cluster      string
 	Targets      []string
 
-	kindCluster string
+	kubeTarget *KubeCluster
 
 	plans []deployPlan
 }
@@ -67,6 +70,7 @@ func BuildDeployCommand(rootOpt *RootOptions) *cobra.Command {
 	cmd.Flags().BoolVar(&opt.SkipPush, "skip-push", false, "Skip pushing images to registry")
 	cmd.Flags().StringVar(&opt.BuildkitHost, "buildkit-host", "", "Buildkit host to use (e.g. k8s://namespace/service)")
 	cmd.Flags().StringVarP(&opt.Namespace, "namespace", "n", "", "Target namespace for namespaced manifests")
+	cmd.Flags().StringVar(&opt.Cluster, "cluster", "", "Target cluster (kind://<name> or kubeconfig context)")
 
 	return cmd
 }
@@ -80,6 +84,14 @@ func (opt *DeployOptions) Resolve(args []string) error {
 
 	if err := k8s.ValidateNamespaceName(opt.Namespace); err != nil {
 		return err
+	}
+
+	if opt.Cluster != "" {
+		target, err := ParseClusterFlag(opt.Cluster)
+		if err != nil {
+			return err
+		}
+		opt.kubeTarget = target
 	}
 
 	if opt.RootFlag != "" {
@@ -299,6 +311,160 @@ func ParseKindClusterFromContext(contextName string) (string, bool) {
 	return "", false
 }
 
+// KubeCluster represents a target Kubernetes cluster for deployment.
+type KubeCluster struct {
+	mu             sync.Mutex
+	context        string
+	kindCluster    string
+	isKind         bool
+	kubeConfigFile string
+}
+
+// NewKubeCluster creates a new KubeCluster.
+func NewKubeCluster(contextName, kindCluster string, isKind bool) *KubeCluster {
+	return &KubeCluster{
+		context:     contextName,
+		kindCluster: kindCluster,
+		isKind:      isKind,
+	}
+}
+
+// IsKind reports whether this cluster target is a kind cluster.
+func (c *KubeCluster) IsKind() bool {
+	if c == nil {
+		return false
+	}
+	return c.isKind
+}
+
+// KindClusterName returns the name of the kind cluster, if applicable.
+func (c *KubeCluster) KindClusterName() string {
+	if c == nil {
+		return ""
+	}
+	return c.kindCluster
+}
+
+// Context returns the kubeconfig context name, if specified.
+func (c *KubeCluster) Context() string {
+	if c == nil {
+		return ""
+	}
+	return c.context
+}
+
+// KubeConfigPath builds a temporary kubeconfig under ~/.kube/ap/<tmpfile> to avoid collisions,
+// returning the path to the temporary kubeconfig file.
+func (c *KubeCluster) KubeConfigPath() (string, error) {
+	if c == nil {
+		return "", fmt.Errorf("cluster is nil")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.kubeConfigFile != "" {
+		return c.kubeConfigFile, nil
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get user home directory: %w", err)
+	}
+
+	dir := filepath.Join(home, ".kube", "ap")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return "", fmt.Errorf("failed to create directory %s: %w", dir, err)
+	}
+
+	tmpFile, err := os.CreateTemp(dir, "kubeconfig-*.yaml")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temporary kubeconfig: %w", err)
+	}
+	defer func() {
+		if closeErr := tmpFile.Close(); closeErr != nil {
+			klog.V(2).Infof("failed to close temporary file %s: %v", tmpFile.Name(), closeErr)
+		}
+	}()
+
+	args := []string{"config", "view", "--raw", "--minify"}
+	if c.context != "" {
+		args = append(args, "--context="+c.context)
+	}
+
+	cmd := execCommandContext(context.Background(), "kubectl", args...)
+	out, err := cmd.Output()
+	if err != nil {
+		if rmErr := os.Remove(tmpFile.Name()); rmErr != nil && !os.IsNotExist(rmErr) {
+			klog.V(2).Infof("failed to remove temporary file %s: %v", tmpFile.Name(), rmErr)
+		}
+		return "", fmt.Errorf("failed to generate minified kubeconfig: %w", err)
+	}
+
+	if _, err := tmpFile.Write(out); err != nil {
+		if rmErr := os.Remove(tmpFile.Name()); rmErr != nil && !os.IsNotExist(rmErr) {
+			klog.V(2).Infof("failed to remove temporary file %s: %v", tmpFile.Name(), rmErr)
+		}
+		return "", fmt.Errorf("failed to write temporary kubeconfig: %w", err)
+	}
+
+	if err := tmpFile.Close(); err != nil {
+		if rmErr := os.Remove(tmpFile.Name()); rmErr != nil && !os.IsNotExist(rmErr) {
+			klog.V(2).Infof("failed to remove temporary file %s: %v", tmpFile.Name(), rmErr)
+		}
+		return "", fmt.Errorf("failed to close temporary kubeconfig: %w", err)
+	}
+
+	c.kubeConfigFile = tmpFile.Name()
+	return c.kubeConfigFile, nil
+}
+
+// Cleanup removes the temporary kubeconfig file if one was created.
+func (c *KubeCluster) Cleanup() error {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.kubeConfigFile != "" {
+		err := os.Remove(c.kubeConfigFile)
+		c.kubeConfigFile = ""
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+// ParseClusterFlag parses the --cluster flag value.
+// Accepted forms:
+// - empty: unspecified (uses current context)
+// - kind://<name>: target kind cluster <name> (context="kind-<name>", kindCluster="<name>", isKind=true)
+// - <context>: target kubeconfig context (kind mode if prefix is "kind-")
+// Anything with an unknown scheme is an error naming the two accepted forms.
+func ParseClusterFlag(val string) (*KubeCluster, error) {
+	val = strings.TrimSpace(val)
+	if val == "" {
+		return &KubeCluster{}, nil
+	}
+	if strings.Contains(val, "://") {
+		if name, ok := strings.CutPrefix(val, "kind://"); ok && name != "" {
+			return &KubeCluster{
+				context:     "kind-" + name,
+				kindCluster: name,
+				isKind:      true,
+			}, nil
+		}
+		return nil, fmt.Errorf("invalid --cluster %q; expected kind://<name> or <context>", val)
+	}
+	kindCluster, isKind := ParseKindClusterFromContext(val)
+	return &KubeCluster{
+		context:     val,
+		kindCluster: kindCluster,
+		isKind:      isKind,
+	}, nil
+}
+
 var execCommandContext = exec.CommandContext
 
 func getCurrentKubeContext(ctx context.Context) string {
@@ -345,11 +511,29 @@ func (t *KindLoadTask) GetChildren() []tasks.Task {
 
 // BuildDeployPlan constructs the task tree for deploying artifacts according to DeployOptions.
 func BuildDeployPlan(opt DeployOptions, r *repo.Repo, buildkitHost string) ([]tasks.Task, error) {
-	push := !opt.SkipPush && opt.kindCluster == ""
-	return buildDeployTasks(r, opt.plans, push, buildkitHost, opt.Namespace, opt.kindCluster)
+	if opt.Cluster != "" && opt.kubeTarget == nil {
+		target, err := ParseClusterFlag(opt.Cluster)
+		if err != nil {
+			return nil, err
+		}
+		opt.kubeTarget = target
+	}
+	if opt.kubeTarget != nil && opt.kubeTarget.IsKind() && !strings.HasPrefix(opt.Cluster, "kind://") {
+		if len(opt.plans) > 0 {
+			if cfg, err := config.Load(opt.plans[0].apRoot); err == nil && cfg.ImageRepo() == "images.local" {
+				opt.kubeTarget.isKind = false
+				opt.kubeTarget.kindCluster = ""
+			}
+		}
+	}
+	isKind := opt.kubeTarget.IsKind()
+	push := !opt.SkipPush && !isKind
+	kindCluster := opt.kubeTarget.KindClusterName()
+	kubeContext := opt.kubeTarget.Context()
+	return buildDeployTasks(r, opt.plans, push, buildkitHost, opt.Namespace, kindCluster, kubeContext)
 }
 
-func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost string, namespace string, kindCluster string) ([]tasks.Task, error) {
+func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost string, namespace string, kindCluster string, kubeContext string) ([]tasks.Task, error) {
 	var allTasks []tasks.Task
 
 	var originalNamespace string
@@ -396,6 +580,7 @@ func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost 
 		deployTasks := k8s.DeployTasksForManifests(plan.manifests, k8s.DeployTaskOptions{
 			Namespace:         namespace,
 			OriginalNamespace: originalNamespace,
+			KubeContext:       kubeContext,
 		})
 		group.Tasks = append(group.Tasks, deployTasks)
 
@@ -409,12 +594,6 @@ func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost 
 func RunDeploy(ctx context.Context, opt DeployOptions) error {
 	if err := requireRepoRoot(opt.RootOptions); err != nil {
 		return err
-	}
-
-	if !opt.DryRun && opt.Namespace != "" {
-		if err := k8s.DefaultCheckNamespaceCached(ctx, opt.Namespace); err != nil {
-			return err
-		}
 	}
 
 	buildkitHost, err := images.ResolveBuildkitHost(opt.BuildkitHost)
@@ -435,9 +614,37 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		return fmt.Errorf("IMAGE_PREFIX is not set; it is required for deploy")
 	}
 
-	if cfg.ImageRepo() != "images.local" {
+	if opt.Cluster != "" {
+		target, err := ParseClusterFlag(opt.Cluster)
+		if err != nil {
+			return err
+		}
+		opt.kubeTarget = target
+		if opt.kubeTarget.IsKind() && !strings.HasPrefix(opt.Cluster, "kind://") && cfg.ImageRepo() == "images.local" {
+			opt.kubeTarget.isKind = false
+			opt.kubeTarget.kindCluster = ""
+		}
+	} else if cfg.ImageRepo() != "images.local" {
 		if cluster, ok := ParseKindClusterFromContext(getCurrentKubeContext(ctx)); ok {
-			opt.kindCluster = cluster
+			opt.kubeTarget = &KubeCluster{
+				kindCluster: cluster,
+				isKind:      true,
+			}
+		}
+	}
+
+	if opt.kubeTarget != nil {
+		defer func() {
+			if cleanupErr := opt.kubeTarget.Cleanup(); cleanupErr != nil {
+				klog.V(2).Infof("failed to cleanup kube target: %v", cleanupErr)
+			}
+		}()
+	}
+
+	kubeContext := opt.kubeTarget.Context()
+	if !opt.DryRun && opt.Namespace != "" {
+		if err := k8s.DefaultCheckNamespaceCached(ctx, opt.Namespace, kubeContext); err != nil {
+			return err
 		}
 	}
 
