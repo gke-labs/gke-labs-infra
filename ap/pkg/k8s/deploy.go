@@ -408,9 +408,6 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error 
 		return err
 	}
 	imageRepository := cfg.ImageRepo()
-	if imageRepository == "" {
-		return fmt.Errorf("IMAGE_PREFIX is not set; it is required for deploy")
-	}
 	tag := os.Getenv("IMAGE_TAG")
 	if tag == "" {
 		tag = "latest"

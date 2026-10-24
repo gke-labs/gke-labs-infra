@@ -350,6 +350,18 @@ func BuildDeployPlan(opt DeployOptions, r *repo.Repo, buildkitHost string) ([]ta
 }
 
 func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost string, namespace string, kindCluster string) ([]tasks.Task, error) {
+	if kindCluster != "" {
+		for _, plan := range plans {
+			if len(plan.imageNames) > 0 {
+				tag := os.Getenv("IMAGE_TAG")
+				if tag == "" || tag == "latest" {
+					return nil, fmt.Errorf("set IMAGE_TAG to a non-latest value so pods use imagePullPolicy IfNotPresent")
+				}
+				break
+			}
+		}
+	}
+
 	var allTasks []tasks.Task
 
 	var originalNamespace string
@@ -379,9 +391,6 @@ func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost 
 			}
 			imageRepo := cfg.ImageRepo()
 			tag := os.Getenv("IMAGE_TAG")
-			if tag == "" {
-				tag = "latest"
-			}
 			var fullImages []string
 			for _, img := range plan.imageNames {
 				fullImages = append(fullImages, images.FullImageName(imageRepo, img, tag))
@@ -427,18 +436,8 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		return err
 	}
 
-	cfg, err := config.Load(opt.RepoRoot)
-	if err != nil {
-		return err
-	}
-	if cfg.ImageRepo() == "" {
-		return fmt.Errorf("IMAGE_PREFIX is not set; it is required for deploy")
-	}
-
-	if cfg.ImageRepo() != "images.local" {
-		if cluster, ok := ParseKindClusterFromContext(getCurrentKubeContext(ctx)); ok {
-			opt.kindCluster = cluster
-		}
+	if cluster, ok := ParseKindClusterFromContext(getCurrentKubeContext(ctx)); ok {
+		opt.kindCluster = cluster
 	}
 
 	allTasks, err := BuildDeployPlan(opt, r, buildkitHost)

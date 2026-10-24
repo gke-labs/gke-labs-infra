@@ -25,7 +25,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
@@ -269,7 +268,6 @@ func TestBuildDeployPlan_KindMode(t *testing.T) {
 
 	t.Run("kind mode wiring", func(t *testing.T) {
 		tempDir := setupFixtureRepo(t)
-		t.Setenv("IMAGE_PREFIX", "example.com/test")
 
 		opt := DeployOptions{
 			RootOptions: &RootOptions{
@@ -317,7 +315,7 @@ func TestBuildDeployPlan_KindMode(t *testing.T) {
 		if kindLoads[0].ClusterName != "my-cluster" {
 			t.Errorf("cluster = %q, want 'my-cluster'", kindLoads[0].ClusterName)
 		}
-		expectedImages := []string{"example.com/test/a:v1.0", "example.com/test/b:v1.0"}
+		expectedImages := []string{"images.local/a:v1.0", "images.local/b:v1.0"}
 		if !reflect.DeepEqual(kindLoads[0].Images, expectedImages) {
 			t.Errorf("images = %v, want %v", kindLoads[0].Images, expectedImages)
 		}
@@ -328,49 +326,36 @@ func TestBuildDeployPlan_KindMode(t *testing.T) {
 		}
 	})
 
-	t.Run("images.local prefix exempt from kind load", func(t *testing.T) {
-		tempDir := setupFixtureRepo(t)
-		t.Setenv("IMAGE_PREFIX", "images.local")
+	t.Run("fails fast on unset or latest IMAGE_TAG", func(t *testing.T) {
+		for _, tag := range []string{"", "latest"} {
+			t.Run(fmt.Sprintf("tag=%q", tag), func(t *testing.T) {
+				tempDir := setupFixtureRepo(t)
+				t.Setenv("IMAGE_TAG", tag)
 
-		opt := DeployOptions{
-			RootOptions: &RootOptions{
-				RepoRoot: tempDir,
-				APRoots:  []string{tempDir},
-				DryRun:   true,
-			},
-			kindCluster: "my-cluster",
-		}
-		// In RunDeploy, kindCluster is only set if ImageRepo() != "images.local"
-		// If ImageRepo() == "images.local", RunDeploy skips setting kindCluster.
-		cfg, err := config.Load(tempDir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if cfg.ImageRepo() == "images.local" {
-			opt.kindCluster = ""
-		}
-
-		if err := opt.Resolve(nil); err != nil {
-			t.Fatalf("opt.Resolve failed: %v", err)
-		}
-		r, err := opt.GetRepo()
-		if err != nil {
-			t.Fatalf("opt.GetRepo failed: %v", err)
-		}
-
-		allTasks, err := BuildDeployPlan(opt, r, "")
-		if err != nil {
-			t.Fatalf("BuildDeployPlan failed: %v", err)
-		}
-
-		for _, task := range allTasks {
-			if group, ok := task.(*tasks.Group); ok {
-				for _, child := range group.Tasks {
-					if _, ok := child.(*KindLoadTask); ok {
-						t.Error("expected no KindLoadTask when imagePrefix is images.local")
-					}
+				opt := DeployOptions{
+					RootOptions: &RootOptions{
+						RepoRoot: tempDir,
+						APRoots:  []string{tempDir},
+						DryRun:   true,
+					},
+					kindCluster: "my-cluster",
 				}
-			}
+				if err := opt.Resolve(nil); err != nil {
+					t.Fatalf("opt.Resolve failed: %v", err)
+				}
+				r, err := opt.GetRepo()
+				if err != nil {
+					t.Fatalf("opt.GetRepo failed: %v", err)
+				}
+
+				_, err = BuildDeployPlan(opt, r, "")
+				if err == nil {
+					t.Fatalf("expected error for tag %q, got nil", tag)
+				}
+				if !strings.Contains(err.Error(), "set IMAGE_TAG to a non-latest value so pods use imagePullPolicy IfNotPresent") {
+					t.Errorf("unexpected error message: %v", err)
+				}
+			})
 		}
 	})
 }

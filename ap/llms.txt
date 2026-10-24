@@ -42,7 +42,7 @@ When making changes to an AP-managed project, coding agents should follow this v
 -   **Command**: `ap deploy`
 -   **Images**: `ap` automatically builds Docker images found in the `images/<image-name>` directory.
 -   **Kubernetes**: `ap` deploys Kubernetes manifests located in the `k8s` directory.
--   **Kind**: When the current context is a kind cluster, `ap deploy` builds locally, loads images with `kind load docker-image`, and applies; set a non-`latest` `IMAGE_TAG` so pods use `imagePullPolicy: IfNotPresent`.
+-   **Kind**: When the current context is a kind cluster, `ap deploy` works with no `IMAGE_PREFIX`, building locally, loading images with `kind load docker-image`, and applying; `IMAGE_TAG` must be non-`latest` for now so pods use `imagePullPolicy: IfNotPresent`.
 
 ## Kubernetes Manifests
 
