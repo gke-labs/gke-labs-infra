@@ -194,7 +194,44 @@ func FindReferencedImagesInFile(path string) ([]string, error) {
 	return FindPlaceholderImages(string(content))
 }
 
-func replacePlaceholderImages(content string, imageRepository string, imageTag string) (string, error) {
+// ResolveImageReference computes the substituted image reference for a placeholder image.
+// If imageTag is not "latest", it returns <imageRepository>/<imageName>:<imageTag> without digest.
+// If imageTag is "latest" (or empty), and a digest exists in digests, it emits
+// <imageRepository>/<imageName>:<imageTag>@sha256:<digest> (or <imageRepository>/<imageName>:<digest>
+// if digest is a fallback tag like latest-<hex>).
+func ResolveImageReference(imageRepository, imageName, imageTag string, digests map[string]string) string {
+	tag := imageTag
+	if tag == "" {
+		tag = "latest"
+	}
+	prefix := imageName
+	if imageRepository != "" {
+		prefix = fmt.Sprintf("%s/%s", imageRepository, imageName)
+	}
+
+	if tag != "latest" {
+		return fmt.Sprintf("%s:%s", prefix, tag)
+	}
+
+	var digest string
+	if digests != nil {
+		digest = digests[imageName]
+	}
+	if digest == "" {
+		return fmt.Sprintf("%s:%s", prefix, tag)
+	}
+
+	if strings.HasPrefix(digest, "latest-") {
+		return fmt.Sprintf("%s:%s", prefix, digest)
+	}
+
+	if !strings.HasPrefix(digest, "sha256:") {
+		digest = "sha256:" + digest
+	}
+	return fmt.Sprintf("%s:%s@%s", prefix, tag, digest)
+}
+
+func replacePlaceholderImages(content string, imageRepository string, imageTag string, imageDigests ...map[string]string) (string, error) {
 	decoder := yaml.NewDecoder(strings.NewReader(content))
 	var placeholders []*yaml.Node
 	for {
@@ -207,6 +244,11 @@ func replacePlaceholderImages(content string, imageRepository string, imageTag s
 			return "", fmt.Errorf("failed to decode YAML: %w", err)
 		}
 		placeholders = collectPlaceholders(&node, placeholders, nil)
+	}
+
+	var digests map[string]string
+	if len(imageDigests) > 0 {
+		digests = imageDigests[0]
 	}
 
 	lineOffsets := getLineOffsets(content)
@@ -234,7 +276,7 @@ func replacePlaceholderImages(content string, imageRepository string, imageTag s
 			return "", fmt.Errorf("invalid placeholder image %q", p.Value)
 		}
 
-		newVal := fmt.Sprintf("%s/%s:%s", imageRepository, base, imageTag)
+		newVal := ResolveImageReference(imageRepository, base, imageTag, digests)
 		replacements = append(replacements, replacement{
 			offset: start,
 			length: end - start,
@@ -243,7 +285,7 @@ func replacePlaceholderImages(content string, imageRepository string, imageTag s
 	}
 
 	for _, match := range findImageReferenceMatches(content) {
-		newVal := fmt.Sprintf("%s/%s:%s", imageRepository, match.imageName, imageTag)
+		newVal := ResolveImageReference(imageRepository, match.imageName, imageTag, digests)
 		replacements = append(replacements, replacement{
 			offset: match.start,
 			length: match.end - match.start,
@@ -391,6 +433,9 @@ type DeployTaskOptions struct {
 	OriginalNamespace string
 	ScopeResolver     ScopeResolver
 	CheckNamespace    func(ctx context.Context, namespace string) error
+	ImageRepository   string
+	ImageTag          string
+	ImageDigests      map[string]string
 }
 
 // KubectlApplyTask represents a task to apply a single k8s manifest.
@@ -400,20 +445,26 @@ type KubectlApplyTask struct {
 	OriginalNamespace string
 	ScopeResolver     ScopeResolver
 	CheckNamespace    func(ctx context.Context, namespace string) error
+	ImageRepository   string
+	ImageTag          string
+	ImageDigests      map[string]string
 }
 
 func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error {
-	cfg, err := config.Load(scope.RepoRoot)
-	if err != nil {
-		return err
-	}
-	imageRepository := cfg.ImageRepo()
+	imageRepository := t.ImageRepository
 	if imageRepository == "" {
-		return fmt.Errorf("IMAGE_PREFIX is not set; it is required for deploy")
+		cfg, err := config.Load(scope.RepoRoot)
+		if err != nil {
+			return err
+		}
+		imageRepository = cfg.ImageRepo()
+		if imageRepository == "" {
+			return fmt.Errorf("IMAGE_PREFIX is not set; it is required for deploy")
+		}
 	}
-	tag := os.Getenv("IMAGE_TAG")
+	tag := t.ImageTag
 	if tag == "" {
-		tag = "latest"
+		tag = config.ImageTag()
 	}
 
 	relPath, err := filepath.Rel(scope.RepoRoot, t.ManifestPath)
@@ -427,7 +478,7 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error 
 		return err
 	}
 
-	replaced, err := replacePlaceholderImages(string(content), imageRepository, tag)
+	replaced, err := replacePlaceholderImages(string(content), imageRepository, tag, t.ImageDigests)
 	if err != nil {
 		return fmt.Errorf("failed to replace placeholders in %s: %w", relPath, err)
 	}
@@ -496,7 +547,35 @@ func (t *KubectlApplyTask) GetName() string {
 }
 
 func (t *KubectlApplyTask) GetChildren() []tasks.Task {
-	return nil
+	imageRepository := t.ImageRepository
+	imageTag := t.ImageTag
+	if imageRepository == "" {
+		if dir := filepath.Dir(t.ManifestPath); dir != "" {
+			if cfg, err := config.Load(dir); err == nil && cfg != nil {
+				imageRepository = cfg.ImageRepo()
+			}
+		}
+	}
+	if imageTag == "" {
+		imageTag = config.ImageTag()
+	}
+	if imageRepository == "" {
+		return nil
+	}
+
+	referenced, err := FindReferencedImagesInFile(t.ManifestPath)
+	if err != nil || len(referenced) == 0 {
+		return nil
+	}
+
+	var children []tasks.Task
+	for _, img := range referenced {
+		ref := ResolveImageReference(imageRepository, img, imageTag, t.ImageDigests)
+		children = append(children, &tasks.DummyTask{
+			Name: ref,
+		})
+	}
+	return children
 }
 
 func getCRDNames(content []byte) ([]string, error) {
@@ -558,6 +637,9 @@ func DeployTasksForManifests(manifests []string, opts ...DeployTaskOptions) task
 			OriginalNamespace: opt.OriginalNamespace,
 			ScopeResolver:     opt.ScopeResolver,
 			CheckNamespace:    opt.CheckNamespace,
+			ImageRepository:   opt.ImageRepository,
+			ImageTag:          opt.ImageTag,
+			ImageDigests:      opt.ImageDigests,
 		})
 	}
 

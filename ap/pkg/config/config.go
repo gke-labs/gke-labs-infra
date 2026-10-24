@@ -404,6 +404,20 @@ func (c *Config) ImageRepo() string {
 	return repo
 }
 
+// ImageTag returns the image tag to use, defaulting to "latest".
+func (c *Config) ImageTag() string {
+	tag := os.Getenv("IMAGE_TAG")
+	if tag == "" {
+		return "latest"
+	}
+	return tag
+}
+
+// ImageTag returns the image tag from the environment, defaulting to "latest".
+func ImageTag() string {
+	return (*Config)(nil).ImageTag()
+}
+
 type HeadersConfig struct {
 	License         string   `json:"license"`
 	CopyrightHolder string   `json:"copyrightHolder"`

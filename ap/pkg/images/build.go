@@ -16,6 +16,7 @@ package images
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -87,6 +88,7 @@ type DockerBuildTask struct {
 	BuildkitHost string
 	DockerBin    string
 	BuildxBin    string
+	OnDigest     func(imageName, digest string)
 }
 
 func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.APScope) error {
@@ -102,10 +104,7 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	}
 	platforms := imagesCfg.GetPlatforms()
 
-	tag := os.Getenv("IMAGE_TAG")
-	if tag == "" {
-		tag = "latest"
-	}
+	tag := cfg.ImageTag()
 
 	actualImagePrefix := imagePrefix
 	if imagePrefix == "images.local" && t.Push {
@@ -204,10 +203,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 
 	buildctlImageName := fullImageName
 	if imagePrefix == "images.local" && t.Push && strings.HasPrefix(t.BuildkitHost, "k8s://") {
-		tag := os.Getenv("IMAGE_TAG")
-		if tag == "" {
-			tag = "latest"
-		}
+		tag := config.ImageTag()
 		buildctlImageName = fmt.Sprintf("in-cluster-image-registry.in-cluster-image-registry-system.svc.cluster.local:80/%s:%s", t.ImageName, tag)
 	}
 
@@ -216,10 +212,18 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 		output += ",registry.insecure=true"
 	}
 
-	tag := os.Getenv("IMAGE_TAG")
-	if tag == "" {
-		tag = "latest"
+	tag := config.ImageTag()
+
+	metaDir, err := os.MkdirTemp("", "ap-buildctl-meta-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temp dir for buildctl metadata: %w", err)
 	}
+	defer func() {
+		if err := os.RemoveAll(metaDir); err != nil {
+			klog.V(2).Infof("failed to remove temp dir: %v", err)
+		}
+	}()
+	metaFile := filepath.Join(metaDir, "metadata.json")
 
 	buildctlArgs := []string{
 		"build",
@@ -230,6 +234,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 		"--opt", "build-arg:IMAGE_PREFIX=" + imagePrefix,
 		"--opt", "build-arg:IMAGE_TAG=" + tag,
 		"--output", output,
+		"--metadata-file", metaFile,
 	}
 
 	if len(platforms) > 0 {
@@ -254,7 +259,14 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 					cmd.Stdout = os.Stdout
 					cmd.Stderr = os.Stderr
 					cmd.Env = append(os.Environ(), "BUILDKIT_HOST=tcp://localhost:2375")
-					return cmd.Run()
+					if err := cmd.Run(); err != nil {
+						return err
+					}
+					digest := extractDigestFromMetadataFile(metaFile)
+					if digest != "" && t.OnDigest != nil {
+						t.OnDigest(t.ImageName, digest)
+					}
+					return nil
 				},
 			},
 			Service:    service,
@@ -273,16 +285,30 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("buildctl build failed for %s: %w", t.ImageName, err)
 	}
+	if t.OnDigest != nil {
+		digest := extractDigestFromMetadataFile(metaFile)
+		if digest != "" {
+			t.OnDigest(t.ImageName, digest)
+		}
+	}
 	return nil
 }
 
 func (t *DockerBuildTask) runDocker(ctx context.Context, buildxBin, root, fullImageName, relDockerfilePath, imagePrefix string, platforms []string) error {
 	klog.Infof("Building image %s from %s using docker buildx", fullImageName, root)
 
-	tag := os.Getenv("IMAGE_TAG")
-	if tag == "" {
-		tag = "latest"
+	tag := config.ImageTag()
+
+	metaDir, err := os.MkdirTemp("", "ap-buildx-meta-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temp dir for build metadata: %w", err)
 	}
+	defer func() {
+		if err := os.RemoveAll(metaDir); err != nil {
+			klog.V(2).Infof("failed to remove temp dir: %v", err)
+		}
+	}()
+	metaFile := filepath.Join(metaDir, "metadata.json")
 
 	args := []string{
 		"build",
@@ -290,6 +316,7 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, buildxBin, root, fullIm
 		"-f", relDockerfilePath,
 		"--build-arg", "IMAGE_PREFIX=" + imagePrefix,
 		"--build-arg", "IMAGE_TAG=" + tag,
+		"--metadata-file", metaFile,
 	}
 
 	if t.Push {
@@ -317,7 +344,68 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, buildxBin, root, fullIm
 		return fmt.Errorf("docker build failed for %s: %w", t.ImageName, err)
 	}
 
+	if t.OnDigest != nil {
+		digest := extractDigestFromMetadataFile(metaFile)
+		if digest == "" {
+			digest = inspectImageDigest(ctx, buildxBin, fullImageName)
+		}
+		if digest != "" {
+			t.OnDigest(t.ImageName, digest)
+		}
+	}
+
 	return nil
+}
+
+type buildMetadataFile struct {
+	Digest string `json:"containerimage.digest"`
+}
+
+func extractDigestFromMetadataFile(metaPath string) string {
+	data, err := os.ReadFile(metaPath)
+	if err != nil {
+		return ""
+	}
+	var meta buildMetadataFile
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(meta.Digest)
+}
+
+func inspectImageDigest(ctx context.Context, dockerBin, fullImageName string) string {
+	cmd := execCommandContext(ctx, dockerBin, "image", "inspect", "--format", "{{if .Descriptor}}{{.Descriptor.digest}}{{end}}", fullImageName)
+	cmd.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(dockerBin))
+	out, err := cmd.Output()
+	if err == nil {
+		d := strings.TrimSpace(string(out))
+		if d != "" && d != "<no value>" {
+			return d
+		}
+	}
+
+	cmd = execCommandContext(ctx, dockerBin, "image", "inspect", "--format", "{{index .RepoDigests 0}}", fullImageName)
+	cmd.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(dockerBin))
+	out, err = cmd.Output()
+	if err == nil {
+		d := strings.TrimSpace(string(out))
+		if idx := strings.LastIndex(d, "@"); idx != -1 {
+			return d[idx+1:]
+		}
+	}
+
+	cmd = execCommandContext(ctx, dockerBin, "image", "inspect", "--format", "{{.Id}}", fullImageName)
+	cmd.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(dockerBin))
+	out, err = cmd.Output()
+	if err == nil {
+		id := strings.TrimSpace(string(out))
+		hex := strings.TrimPrefix(id, "sha256:")
+		if len(hex) >= 12 {
+			return "latest-" + hex[:12]
+		}
+	}
+
+	return ""
 }
 
 func (t *DockerBuildTask) GetName() string {
@@ -351,11 +439,28 @@ func FindImageNames(r *repo.Repo, root string) ([]string, error) {
 	return names, nil
 }
 
+// BuildTaskOptions holds optional settings for BuildTasksForImages.
+type BuildTaskOptions struct {
+	ImageDigests map[string]string
+	OnDigest     func(imageName, digest string)
+}
+
 // BuildTasksForImages returns a task group for building only the specified docker images.
-func BuildTasksForImages(r *repo.Repo, root string, push bool, buildkitHost string, imageNames []string) (tasks.Task, error) {
+func BuildTasksForImages(r *repo.Repo, root string, push bool, buildkitHost string, imageNames []string, opts ...BuildTaskOptions) (tasks.Task, error) {
 	cfg, err := config.Load(root)
 	if err != nil {
 		return nil, err
+	}
+
+	var opt BuildTaskOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+	onDigest := opt.OnDigest
+	if onDigest == nil && opt.ImageDigests != nil {
+		onDigest = func(name, digest string) {
+			opt.ImageDigests[name] = digest
+		}
 	}
 
 	dockerfiles, err := findDockerfiles(r, root)
@@ -390,6 +495,7 @@ func BuildTasksForImages(r *repo.Repo, root string, push bool, buildkitHost stri
 			Root:         root,
 			Push:         push,
 			BuildkitHost: buildkitHost,
+			OnDigest:     onDigest,
 		})
 	}
 

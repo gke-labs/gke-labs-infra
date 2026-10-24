@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
+	toolDocker "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/docker"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kind"
 )
 
@@ -217,6 +218,10 @@ func LoadImages(ctx context.Context, kindBin, cluster string, images []string) e
 	cmd := exec.CommandContext(ctx, kindBin, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(kindBin))
+	if dockerBin, err := toolDocker.EnsureDocker(ctx, ""); err == nil && dockerBin != "" {
+		cmd.Env = fileutils.PrependPath(cmd.Env, filepath.Dir(dockerBin))
+	}
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to load image(s) into kind cluster %q: %w", cluster, err)
 	}

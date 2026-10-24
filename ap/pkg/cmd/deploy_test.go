@@ -1209,3 +1209,59 @@ func TestDeploy_RunDeploy_NonexistentNamespaceFailsEarly(t *testing.T) {
 		t.Errorf("expected error to mention 'target namespace \"nonexistent-ns\" does not exist', got: %v", err)
 	}
 }
+
+func TestDeploy_DryRun_PrintsResolvedReference(t *testing.T) {
+	tempDir := setupFixtureRepo(t)
+
+	// 1. Default tag (latest)
+	t.Run("default tag prints resolved latest reference", func(t *testing.T) {
+		t.Setenv("IMAGE_TAG", "")
+		opt := DeployOptions{
+			RootOptions: &RootOptions{
+				RepoRoot: tempDir,
+				APRoot:   tempDir,
+				DryRun:   true,
+			},
+			BuildkitHost: "k8s://autodeploy-system/buildkit",
+		}
+		if err := opt.Resolve([]string{"./k8s"}); err != nil {
+			t.Fatalf("opt.Resolve failed: %v", err)
+		}
+
+		out := captureStdout(t, func() {
+			if err := RunDeploy(t.Context(), opt); err != nil {
+				t.Fatalf("RunDeploy failed: %v", err)
+			}
+		})
+
+		if !strings.Contains(out, "images.local/a:latest") {
+			t.Errorf("expected dry-run output to contain resolved reference 'images.local/a:latest', got:\n%s", out)
+		}
+	})
+
+	// 2. Explicit unique tag
+	t.Run("unique IMAGE_TAG prints resolved tagged reference", func(t *testing.T) {
+		t.Setenv("IMAGE_TAG", "v2.0")
+		opt := DeployOptions{
+			RootOptions: &RootOptions{
+				RepoRoot: tempDir,
+				APRoot:   tempDir,
+				DryRun:   true,
+			},
+			BuildkitHost: "k8s://autodeploy-system/buildkit",
+		}
+		if err := opt.Resolve([]string{"./k8s"}); err != nil {
+			t.Fatalf("opt.Resolve failed: %v", err)
+		}
+
+		out := captureStdout(t, func() {
+			if err := RunDeploy(t.Context(), opt); err != nil {
+				t.Fatalf("RunDeploy failed: %v", err)
+			}
+		})
+
+		if !strings.Contains(out, "images.local/a:v2.0") {
+			t.Errorf("expected dry-run output to contain resolved reference 'images.local/a:v2.0', got:\n%s", out)
+		}
+	})
+}

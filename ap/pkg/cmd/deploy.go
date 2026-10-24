@@ -25,12 +25,16 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/e2e"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/imageref"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
+	toolDocker "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/docker"
 	toolKind "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kind"
 	"github.com/spf13/cobra"
+	"k8s.io/klog/v2"
 )
 
 // DeployOptions holds the configuration for the "deploy" command.
@@ -312,9 +316,10 @@ func getCurrentKubeContext(ctx context.Context) string {
 
 // KindLoadTask loads docker images into a kind cluster using the tool-managed kind binary.
 type KindLoadTask struct {
-	RepoRoot    string
-	ClusterName string
-	Images      []string
+	RepoRoot     string
+	ClusterName  string
+	Images       []string
+	ImageDigests map[string]string
 }
 
 func (t *KindLoadTask) Run(ctx context.Context, scope *tasks.APScope) error {
@@ -329,7 +334,80 @@ func (t *KindLoadTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	if err != nil {
 		return fmt.Errorf("failed to ensure kind tool: %w", err)
 	}
-	return e2e.LoadImages(ctx, kindBin, t.ClusterName, t.Images)
+	if err := e2e.LoadImages(ctx, kindBin, t.ClusterName, t.Images); err != nil {
+		return err
+	}
+
+	if len(t.ImageDigests) > 0 {
+		t.tagContainerdDigests(ctx, kindBin, root)
+	}
+
+	return nil
+}
+
+// tagContainerdDigests tags loaded images in kind's containerd image store with their buildx
+// manifest digests so they are addressable by digest (e.g. tag@sha256:<digest>).
+//
+// This is kind-specific: on standard registry push paths, the remote registry receives the OCI
+// manifest index containing the canonical digest, and kubelet resolves/pulls the digest from the
+// registry. However, when deploying locally to a kind cluster, `kind load docker-image` archives
+// the local docker image via `docker save` and imports it into containerd via `ctr images import`.
+// That archive import creates local repository tags (e.g. repo:latest) but does not record the
+// buildx manifest digest in containerd's image index. Consequently, containerd treats a digest-pinned
+// image reference in the pod spec (repo:latest@sha256:<digest>) as a local cache miss and attempts
+// to pull it from the remote registry (which fails for never-pushed images). Explicitly adding the
+// digest tag in containerd via `ctr --namespace=k8s.io images tag` ensures containerd recognizes
+// the loaded image locally when kubelet resolves the digest.
+func (t *KindLoadTask) tagContainerdDigests(ctx context.Context, kindBin, root string) {
+	dockerBin, err := toolDocker.EnsureDocker(ctx, "")
+	if err != nil || dockerBin == "" {
+		dockerBin = "docker"
+	}
+
+	cmd := execCommandContext(ctx, kindBin, "get", "nodes", "--name", t.ClusterName)
+	cmd.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(kindBin))
+	if dockerBin != "docker" {
+		cmd.Env = fileutils.PrependPath(cmd.Env, filepath.Dir(dockerBin))
+	}
+	out, err := cmd.Output()
+	var nodes []string
+	if err == nil {
+		for _, line := range strings.Split(string(out), "\n") {
+			line = strings.TrimSpace(line)
+			if line != "" {
+				nodes = append(nodes, line)
+			}
+		}
+	}
+	if len(nodes) == 0 {
+		nodes = []string{t.ClusterName + "-control-plane"}
+	}
+
+	for _, fullImage := range t.Images {
+		ref, err := imageref.Parse(fullImage)
+		if err != nil {
+			continue
+		}
+		imgName := ref.Name()
+		digest := t.ImageDigests[imgName]
+		if digest == "" || !strings.HasPrefix(digest, "sha256:") {
+			continue
+		}
+
+		for _, node := range nodes {
+			tagCmd1 := execCommandContext(ctx, dockerBin, "exec", node, "ctr", "--namespace=k8s.io", "images", "tag", fullImage, fullImage+"@"+digest)
+			if err := tagCmd1.Run(); err != nil {
+				klog.V(2).Infof("failed to tag %s in containerd on node %s: %v", fullImage, node, err)
+			}
+
+			refWithoutTag := ref
+			refWithoutTag.Tag = ""
+			tagCmd2 := execCommandContext(ctx, dockerBin, "exec", node, "ctr", "--namespace=k8s.io", "images", "tag", fullImage, refWithoutTag.String()+"@"+digest)
+			if err := tagCmd2.Run(); err != nil {
+				klog.V(2).Infof("failed to tag %s in containerd on node %s: %v", refWithoutTag.String(), node, err)
+			}
+		}
+	}
 }
 
 func (t *KindLoadTask) GetName() string {
@@ -366,36 +444,42 @@ func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost 
 			Name: fmt.Sprintf("deploy-%s", filepath.Base(plan.apRoot)),
 		}
 
-		buildTasks, err := images.BuildTasksForImages(r.Under(plan.apRoot), plan.apRoot, push, buildkitHost, plan.imageNames)
+		cfg, err := config.Load(plan.apRoot)
+		if err != nil {
+			return nil, err
+		}
+		imageRepo := cfg.ImageRepo()
+		tag := cfg.ImageTag()
+
+		imageDigests := make(map[string]string)
+
+		buildTasks, err := images.BuildTasksForImages(r.Under(plan.apRoot), plan.apRoot, push, buildkitHost, plan.imageNames, images.BuildTaskOptions{
+			ImageDigests: imageDigests,
+		})
 		if err != nil {
 			return nil, fmt.Errorf("build failed during deploy for %s: %w", plan.apRoot, err)
 		}
 		group.Tasks = append(group.Tasks, buildTasks)
 
 		if kindCluster != "" && len(plan.imageNames) > 0 {
-			cfg, err := config.Load(plan.apRoot)
-			if err != nil {
-				return nil, err
-			}
-			imageRepo := cfg.ImageRepo()
-			tag := os.Getenv("IMAGE_TAG")
-			if tag == "" {
-				tag = "latest"
-			}
 			var fullImages []string
 			for _, img := range plan.imageNames {
 				fullImages = append(fullImages, images.FullImageName(imageRepo, img, tag))
 			}
 			group.Tasks = append(group.Tasks, &KindLoadTask{
-				RepoRoot:    plan.apRoot,
-				ClusterName: kindCluster,
-				Images:      fullImages,
+				RepoRoot:     plan.apRoot,
+				ClusterName:  kindCluster,
+				Images:       fullImages,
+				ImageDigests: imageDigests,
 			})
 		}
 
 		deployTasks := k8s.DeployTasksForManifests(plan.manifests, k8s.DeployTaskOptions{
 			Namespace:         namespace,
 			OriginalNamespace: originalNamespace,
+			ImageRepository:   imageRepo,
+			ImageTag:          tag,
+			ImageDigests:      imageDigests,
 		})
 		group.Tasks = append(group.Tasks, deployTasks)
 

@@ -660,3 +660,147 @@ spec:
 		})
 	}
 }
+
+func TestReplacePlaceholderImages_ReferenceRewriting(t *testing.T) {
+	manifestWithMix := `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mixed-app
+spec:
+  template:
+    spec:
+      containers:
+      - name: app
+        image: app
+        env:
+        - name: APP_IMAGE
+          value: ${IMAGE_PREFIX}/app
+      - name: sidecar
+        image: gcr.io/external/sidecar:v1.2.3
+      - name: proxy
+        image: docker.io/library/nginx:1.25-alpine
+`
+
+	t.Run("tag (unique IMAGE_TAG leaves tag intact without digest)", func(t *testing.T) {
+		digests := map[string]string{
+			"app": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		}
+		got, err := replacePlaceholderImages(manifestWithMix, "example.com/repo", "v1.0", digests)
+		if err != nil {
+			t.Fatalf("replacePlaceholderImages failed: %v", err)
+		}
+
+		expected := `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mixed-app
+spec:
+  template:
+    spec:
+      containers:
+      - name: app
+        image: example.com/repo/app:v1.0
+        env:
+        - name: APP_IMAGE
+          value: example.com/repo/app:v1.0
+      - name: sidecar
+        image: gcr.io/external/sidecar:v1.2.3
+      - name: proxy
+        image: docker.io/library/nginx:1.25-alpine
+`
+		if got != expected {
+			t.Errorf("replacePlaceholderImages mismatch (-got +want):\nGOT:\n%s\nWANT:\n%s", got, expected)
+		}
+	})
+
+	t.Run("tag@digest (default/latest tag rewrites to tag@sha256:digest)", func(t *testing.T) {
+		digests := map[string]string{
+			"app": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		}
+		got, err := replacePlaceholderImages(manifestWithMix, "example.com/repo", "latest", digests)
+		if err != nil {
+			t.Fatalf("replacePlaceholderImages failed: %v", err)
+		}
+
+		expected := `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mixed-app
+spec:
+  template:
+    spec:
+      containers:
+      - name: app
+        image: example.com/repo/app:latest@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+        env:
+        - name: APP_IMAGE
+          value: example.com/repo/app:latest@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+      - name: sidecar
+        image: gcr.io/external/sidecar:v1.2.3
+      - name: proxy
+        image: docker.io/library/nginx:1.25-alpine
+`
+		if got != expected {
+			t.Errorf("replacePlaceholderImages mismatch (-got +want):\nGOT:\n%s\nWANT:\n%s", got, expected)
+		}
+	})
+
+	t.Run("untouched external reference (external references are preserved without modification)", func(t *testing.T) {
+		externalManifest := `
+apiVersion: v1
+kind: Pod
+metadata:
+  name: external-only
+spec:
+  containers:
+  - name: c1
+    image: quay.io/coreos/etcd:v3.5.0
+  - name: c2
+    image: registry.k8s.io/pause:3.10
+`
+		digests := map[string]string{
+			"etcd":  "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+			"pause": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+		}
+		got, err := replacePlaceholderImages(externalManifest, "example.com/repo", "latest", digests)
+		if err != nil {
+			t.Fatalf("replacePlaceholderImages failed: %v", err)
+		}
+		if got != externalManifest {
+			t.Errorf("expected external references to remain untouched, got:\n%s", got)
+		}
+	})
+
+	t.Run("tag@digest with empty tag defaults to latest@sha256:digest", func(t *testing.T) {
+		input := "image: app"
+		digests := map[string]string{
+			"app": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+		}
+		got, err := replacePlaceholderImages(input, "images.local", "", digests)
+		if err != nil {
+			t.Fatalf("replacePlaceholderImages failed: %v", err)
+		}
+		want := "image: images.local/app:latest@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("content hash fallback tag", func(t *testing.T) {
+		input := "image: app"
+		digests := map[string]string{
+			"app": "latest-abcdef123456",
+		}
+		got, err := replacePlaceholderImages(input, "images.local", "latest", digests)
+		if err != nil {
+			t.Fatalf("replacePlaceholderImages failed: %v", err)
+		}
+		want := "image: images.local/app:latest-abcdef123456"
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+}

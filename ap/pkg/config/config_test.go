@@ -722,3 +722,24 @@ platforms:
 		}
 	}
 }
+
+func TestImageTag(t *testing.T) {
+	// When IMAGE_TAG is unset, defaults to "latest"
+	t.Setenv("IMAGE_TAG", "")
+	var cfg *Config
+	if got := cfg.ImageTag(); got != "latest" {
+		t.Errorf("cfg.ImageTag() = %q, want %q", got, "latest")
+	}
+	if got := ImageTag(); got != "latest" {
+		t.Errorf("ImageTag() = %q, want %q", got, "latest")
+	}
+
+	// When IMAGE_TAG is set, returns the configured value
+	t.Setenv("IMAGE_TAG", "v1.2.3")
+	if got := cfg.ImageTag(); got != "v1.2.3" {
+		t.Errorf("cfg.ImageTag() = %q, want %q", got, "v1.2.3")
+	}
+	if got := ImageTag(); got != "v1.2.3" {
+		t.Errorf("ImageTag() = %q, want %q", got, "v1.2.3")
+	}
+}
