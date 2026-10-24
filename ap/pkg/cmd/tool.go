@@ -17,9 +17,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/docker"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kind"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/protoc"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool"
 	"github.com/spf13/cobra"
 )
 
@@ -30,12 +28,70 @@ func BuildToolCommand(rootOpt *RootOptions) *cobra.Command {
 		Short: "Manage and run pinned developer tools",
 	}
 
-	cmd.AddCommand(BuildToolProtocCommand(rootOpt))
-	cmd.AddCommand(BuildToolDockerCommand(rootOpt))
-	cmd.AddCommand(BuildToolDockerBuildxCommand(rootOpt))
-	cmd.AddCommand(BuildToolKindCommand(rootOpt))
+	for _, t := range tool.All() {
+		cmd.AddCommand(buildToolSubcommand(rootOpt, t))
+	}
+	cmd.AddCommand(BuildToolLinkCommand(rootOpt))
 	cmd.AddCommand(BuildToolUpdateVersionsCommand(rootOpt))
 
+	return cmd
+}
+
+func buildToolSubcommand(rootOpt *RootOptions, t *tool.Tool) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:                t.Name + " [--] [args...]",
+		Short:              t.Short,
+		DisableFlagParsing: true,
+		RunE: func(cmd *cobra.Command, rawArgs []string) error {
+			raw := rawArgs
+			dryRun := rootOpt.DryRun
+			if len(raw) > 0 && raw[0] == "--dry-run" {
+				dryRun = true
+				raw = raw[1:]
+			}
+			if len(raw) > 0 && raw[0] == "--" {
+				raw = raw[1:]
+			}
+
+			repoRoot := rootOpt.APRoot
+			if repoRoot == "" {
+				repoRoot = rootOpt.RepoRoot
+			}
+			if repoRoot == "" {
+				repoRoot = tool.FindRepoRoot()
+			}
+
+			return t.Run(cmd.Context(), tool.RunOptions{
+				RepoRoot: repoRoot,
+				Args:     raw,
+				DryRun:   dryRun,
+				Stdout:   cmd.OutOrStdout(),
+				Stderr:   cmd.ErrOrStderr(),
+				Stdin:    cmd.InOrStdin(),
+			})
+		},
+	}
+	return cmd
+}
+
+// BuildToolLinkCommand constructs the cobra command for "tool link".
+func BuildToolLinkCommand(rootOpt *RootOptions) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "link [dir]",
+		Short: "Create symlinks for managed tools pointing to ap",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var dir string
+			if len(args) > 0 {
+				dir = args[0]
+			}
+			_, err := tool.Link(tool.LinkOptions{
+				TargetDir: dir,
+				Stdout:    cmd.OutOrStdout(),
+			})
+			return err
+		},
+	}
 	return cmd
 }
 
@@ -49,13 +105,6 @@ type ToolUpdateVersionsOptions struct {
 
 // BuildToolUpdateVersionsCommand constructs the cobra command for "tool update-versions".
 func BuildToolUpdateVersionsCommand(rootOpt *RootOptions) *cobra.Command {
-	opts := ToolUpdateVersionsOptions{
-		Protoc: true,
-		Docker: true,
-		Buildx: true,
-		Kind:   true,
-	}
-
 	cmd := &cobra.Command{
 		Use:   "update-versions",
 		Short: "Update baked-in tool release versions and checksums in versions.yaml",
@@ -73,24 +122,24 @@ func BuildToolUpdateVersionsCommand(rootOpt *RootOptions) *cobra.Command {
 				}
 			}
 
-			if opts.Protoc {
-				if err := protoc.Update(cmd.Context(), repoRoot); err != nil {
-					return fmt.Errorf("failed updating protoc versions: %w", err)
+			for _, t := range tool.All() {
+				if t.Update == nil {
+					continue
 				}
-			}
-
-			if opts.Docker || opts.Buildx {
-				if err := docker.Update(cmd.Context(), repoRoot, docker.UpdateOptions{
-					Docker: opts.Docker,
-					Buildx: opts.Buildx,
-				}); err != nil {
-					return fmt.Errorf("failed updating docker versions: %w", err)
+				flagName := t.UpdateFlag
+				if flagName == "" {
+					flagName = t.Name
 				}
-			}
+				enabled, err := cmd.Flags().GetBool(flagName)
+				if err != nil {
+					return err
+				}
+				if !enabled {
+					continue
+				}
 
-			if opts.Kind {
-				if err := kind.Update(cmd.Context(), repoRoot); err != nil {
-					return fmt.Errorf("failed updating kind versions: %w", err)
+				if err := t.Update(cmd.Context(), repoRoot); err != nil {
+					return fmt.Errorf("failed updating %s versions: %w", t.Name, err)
 				}
 			}
 
@@ -98,10 +147,20 @@ func BuildToolUpdateVersionsCommand(rootOpt *RootOptions) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&opts.Protoc, "protoc", true, "Update protoc and plugin versions in ap/pkg/tool/protoc/versions.yaml")
-	cmd.Flags().BoolVar(&opts.Docker, "docker", true, "Update Docker versions in ap/pkg/tool/docker/versions.yaml")
-	cmd.Flags().BoolVar(&opts.Buildx, "buildx", true, "Update Docker Buildx versions in ap/pkg/tool/docker/versions.yaml")
-	cmd.Flags().BoolVar(&opts.Kind, "kind", true, "Update kind versions in ap/pkg/tool/kind/versions.yaml")
+	for _, t := range tool.All() {
+		if t.Update == nil {
+			continue
+		}
+		flagName := t.UpdateFlag
+		if flagName == "" {
+			flagName = t.Name
+		}
+		desc := t.UpdateDesc
+		if desc == "" {
+			desc = fmt.Sprintf("Update %s versions in versions.yaml", t.Name)
+		}
+		cmd.Flags().Bool(flagName, true, desc)
+	}
 
 	return cmd
 }

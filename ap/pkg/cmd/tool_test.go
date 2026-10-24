@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -400,5 +401,79 @@ func TestToolDocker_BuildxRewrite(t *testing.T) {
 	// Verify "buildx" was rewritten and stripped from the subcommand args
 	if strings.Contains(output, "docker-buildx buildx version") {
 		t.Errorf("expected buildx to be rewritten, but found duplicate: %s", output)
+	}
+}
+
+func TestToolLink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinking is not supported on Windows")
+	}
+
+	tempDir := t.TempDir()
+	fakeAp := filepath.Join(t.TempDir(), "ap")
+	if err := os.WriteFile(fakeAp, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AP_EXECUTABLE", fakeAp)
+
+	rootCmd := BuildRootCommand()
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"tool", "link", tempDir})
+
+	err := rootCmd.ExecuteContext(t.Context())
+	if err != nil {
+		t.Fatalf("unexpected error running ap tool link: %v\nOutput: %s", err, buf.String())
+	}
+
+	output := buf.String()
+	expectedTools := []string{"kind", "docker", "docker-buildx", "protoc"}
+	for _, toolName := range expectedTools {
+		linkPath := filepath.Join(tempDir, toolName)
+		fi, err := os.Lstat(linkPath)
+		if err != nil {
+			t.Fatalf("expected symlink for %s at %s: %v", toolName, linkPath, err)
+		}
+		if fi.Mode()&os.ModeSymlink == 0 {
+			t.Fatalf("expected %s to be a symlink, got mode %v", linkPath, fi.Mode())
+		}
+		dest, err := os.Readlink(linkPath)
+		if err != nil {
+			t.Fatalf("failed to readlink for %s: %v", linkPath, err)
+		}
+		if dest != fakeAp {
+			t.Fatalf("expected symlink %s to point to %s, got %s", linkPath, fakeAp, dest)
+		}
+		if !strings.Contains(output, linkPath) {
+			t.Errorf("expected output to mention %s, got: %s", linkPath, output)
+		}
+	}
+
+	// Test refreshing existing links
+	buf.Reset()
+	rootCmd.SetArgs([]string{"tool", "link", tempDir})
+	if err := rootCmd.ExecuteContext(t.Context()); err != nil {
+		t.Fatalf("unexpected error refreshing ap tool link: %v\nOutput: %s", err, buf.String())
+	}
+
+	// Test default dir (AP_CACHE_DIR/bin)
+	cacheDir := t.TempDir()
+	t.Setenv("AP_CACHE_DIR", cacheDir)
+	buf.Reset()
+	rootCmd.SetArgs([]string{"tool", "link"})
+	if err := rootCmd.ExecuteContext(t.Context()); err != nil {
+		t.Fatalf("unexpected error running ap tool link with default dir: %v\nOutput: %s", err, buf.String())
+	}
+	defaultBinDir := filepath.Join(cacheDir, "bin")
+	for _, toolName := range expectedTools {
+		linkPath := filepath.Join(defaultBinDir, toolName)
+		dest, err := os.Readlink(linkPath)
+		if err != nil {
+			t.Fatalf("failed to readlink in default dir for %s: %v", toolName, err)
+		}
+		if dest != fakeAp {
+			t.Fatalf("expected default symlink %s to point to %s, got %s", linkPath, fakeAp, dest)
+		}
 	}
 }

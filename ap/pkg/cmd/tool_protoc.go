@@ -18,10 +18,8 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
-	"strings"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/protoc"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool"
 	"github.com/spf13/cobra"
 )
 
@@ -36,91 +34,31 @@ type ToolProtocOptions struct {
 
 // BuildToolProtocCommand constructs the cobra command for "tool protoc".
 func BuildToolProtocCommand(rootOpt *RootOptions) *cobra.Command {
-	opt := ToolProtocOptions{
-		RootOptions: rootOpt,
+	t, ok := tool.Lookup("protoc")
+	if !ok {
+		panic("tool protoc not found in registry")
 	}
-
-	cmd := &cobra.Command{
-		Use:                "protoc [--] [args...]",
-		Short:              "Run protoc with pinned binary and language plugins",
-		DisableFlagParsing: true,
-		RunE: func(cmd *cobra.Command, rawArgs []string) error {
-			raw := rawArgs
-			dryRun := opt.DryRun
-			if len(raw) > 0 && raw[0] == "--dry-run" {
-				dryRun = true
-				raw = raw[1:]
-			}
-			if len(raw) > 0 && raw[0] == "--" {
-				raw = raw[1:]
-			}
-
-			opt.DryRun = dryRun
-			opt.Args = raw
-			opt.Stdout = cmd.OutOrStdout()
-			opt.Stderr = cmd.ErrOrStderr()
-			opt.Stdin = cmd.InOrStdin()
-			return RunToolProtoc(cmd.Context(), opt)
-		},
-	}
-
-	return cmd
+	return buildToolSubcommand(rootOpt, t)
 }
 
 // RunToolProtoc executes the protoc tool with the pinned plugins and settings.
 func RunToolProtoc(ctx context.Context, opt ToolProtocOptions) error {
-	workDir := opt.APRoot
-	if workDir == "" {
-		workDir = opt.RepoRoot
-	}
-	if workDir == "" {
-		var err error
-		workDir, err = os.Getwd()
-		if err != nil {
-			return fmt.Errorf("failed to get current working directory: %w", err)
-		}
+	t, ok := tool.Lookup("protoc")
+	if !ok {
+		return fmt.Errorf("tool protoc not registered")
 	}
 
-	cfg, err := protoc.LoadConfig(workDir)
-	if err != nil {
-		return err
-	}
-	if cfg == nil && opt.RepoRoot != "" && opt.RepoRoot != workDir {
-		cfg, err = protoc.LoadConfig(opt.RepoRoot)
-		if err != nil {
-			return err
-		}
-	}
-	if cfg == nil {
-		cfg = protoc.DefaultConfig()
+	repoRoot := opt.APRoot
+	if repoRoot == "" {
+		repoRoot = opt.RepoRoot
 	}
 
-	stdout := opt.Stdout
-	if stdout == nil {
-		stdout = os.Stdout
-	}
-	stderr := opt.Stderr
-	if stderr == nil {
-		stderr = os.Stderr
-	}
-	stdin := opt.Stdin
-	if stdin == nil {
-		stdin = os.Stdin
-	}
-
-	if opt.DryRun {
-		env, err := protoc.PrepareProtoc(ctx, cfg, opt.Args)
-		if err != nil {
-			return err
-		}
-		var fullArgs []string
-		fullArgs = append(fullArgs, opt.Args...)
-		if env.IncludeDir != "" {
-			fullArgs = append(fullArgs, "-I"+env.IncludeDir)
-		}
-		_, err = fmt.Fprintf(stdout, "[dry-run] %s %s\n", env.ProtocBin, strings.Join(fullArgs, " "))
-		return err
-	}
-
-	return protoc.RunProtoc(ctx, cfg, workDir, opt.Args, stdout, stderr, stdin)
+	return t.Run(ctx, tool.RunOptions{
+		RepoRoot: repoRoot,
+		Args:     opt.Args,
+		DryRun:   opt.DryRun,
+		Stdout:   opt.Stdout,
+		Stderr:   opt.Stderr,
+		Stdin:    opt.Stdin,
+	})
 }
