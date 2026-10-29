@@ -36,6 +36,7 @@ When making changes to an AP-managed project, coding agents should follow this v
 3.  **Test**:
     -   Run `ap test` for unit and integration tests.
     -   Run `ap e2e` for end-to-end tests.
+        -   If a kind worker's kubelet restarts in a loop while other nodes are Ready, check inotify limits; CI jobs that create more than one kind cluster should raise them with a visible `sudo sysctl -w` step.
 
 ## Deployment
 

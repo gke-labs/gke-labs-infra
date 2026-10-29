@@ -164,6 +164,7 @@ func (h *Harness) setupCluster(skipCreation bool) {
 		}
 
 		if !exists {
+			warnInotifyLimits()
 			h.t.Logf("Creating kind cluster %s", h.clusterName)
 			h.runCmd(h.KindCommand(), "create", "cluster", "--name", h.clusterName)
 		}
