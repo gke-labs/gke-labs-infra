@@ -21,7 +21,8 @@ import (
 	"syscall"
 )
 
-func execProcess(inv *Invocation) error {
+// ExecProcess executes the tool pass-through using syscall.Exec on Unix.
+func ExecProcess(inv *Invocation) error {
 	argv := append([]string{inv.Binary}, inv.Args...)
 	env := inv.Env
 	if len(env) == 0 {

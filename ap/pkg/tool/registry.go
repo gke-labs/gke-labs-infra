@@ -100,7 +100,7 @@ func (t *Tool) Exec(ctx context.Context, repoRoot string, args []string) error {
 	if err != nil {
 		return err
 	}
-	return execProcess(inv)
+	return ExecProcess(inv)
 }
 
 func loadToolConfig[T any](repoRoot string, load func(string) (*T, error), defaultFn func() *T) (*T, error) {
@@ -468,4 +468,32 @@ func FindRepoRoot() string {
 		return apRoot
 	}
 	return repoRoot
+}
+
+// FindRepoRootFromPath discovers the repository root by walking up from the given file or directory path
+// until .git is found. It does not check environment variables or cwd.
+func FindRepoRootFromPath(path string) (string, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to stat %q: %w", path, err)
+	}
+	dir := path
+	if !fi.IsDir() {
+		dir = filepath.Dir(path)
+	}
+	for {
+		hasGit, err := fileutils.FileExists(filepath.Join(dir, ".git"))
+		if err != nil {
+			return "", err
+		}
+		if hasGit {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return "", fmt.Errorf("could not find git repository root for %q (walked up from %q)", path, dir)
 }

@@ -21,7 +21,8 @@ import (
 	"os/exec"
 )
 
-func execProcess(inv *Invocation) error {
+// ExecProcess executes the tool pass-through mirroring as a child process on Windows/fallback.
+func ExecProcess(inv *Invocation) error {
 	cmd := exec.Command(inv.Binary, inv.Args...)
 	cmd.Env = inv.Env
 	if len(cmd.Env) == 0 {

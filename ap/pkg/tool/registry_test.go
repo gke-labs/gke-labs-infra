@@ -200,3 +200,40 @@ func TestToolSymlink_PreservesWorkingDirectory(t *testing.T) {
 		t.Errorf("argument mismatch: got %q, want %q", lines[1], "arg: "+relArg)
 	}
 }
+
+func TestFindRepoRootFromPath(t *testing.T) {
+	repoDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repoDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	nestedDir := filepath.Join(repoDir, "a", "b", "c")
+	if err := os.MkdirAll(nestedDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	filePath := filepath.Join(nestedDir, "script.sh")
+	if err := os.WriteFile(filePath, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("nested file", func(t *testing.T) {
+		root, err := FindRepoRootFromPath(filePath)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if root != repoDir {
+			t.Errorf("expected root %s, got %s", repoDir, root)
+		}
+	})
+
+	t.Run("outside git repository", func(t *testing.T) {
+		nonRepoDir := t.TempDir()
+		nonRepoFile := filepath.Join(nonRepoDir, "file.txt")
+		if err := os.WriteFile(nonRepoFile, []byte("data"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := FindRepoRootFromPath(nonRepoFile)
+		if err == nil {
+			t.Fatal("expected error for path outside git repository")
+		}
+	})
+}
