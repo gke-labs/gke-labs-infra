@@ -771,8 +771,14 @@ jobs:
 				jobName = jobName + suffix
 			}
 
+			timeoutMinutes := 15
+			if strings.Contains(jobName, "e2e") {
+				timeoutMinutes = 40
+			}
+
 			sb.WriteString(fmt.Sprintf(`  %s:
     runs-on: ubuntu-latest
+    timeout-minutes: %d
     env:
       ARTIFACTS: /tmp/artifacts
     steps:
@@ -782,7 +788,7 @@ jobs:
           # Presubmit scripts never push; don't leave the token in
           # .git/config (zizmor: artipacked).
           persist-credentials: false
-`, jobName, actionCheckout))
+`, jobName, timeoutMinutes, actionCheckout))
 
 			if goModExists {
 				relGoMod, err := filepath.Rel(repoRoot, filepath.Join(apRoot, "go.mod"))
