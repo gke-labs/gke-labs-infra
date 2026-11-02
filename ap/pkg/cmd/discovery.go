@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/portability"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/format"
 	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
@@ -130,7 +131,7 @@ func DiscoverScopes(r *sourcetree.SourceTree, repoRoot string, apRoots []string)
 		}
 
 		// Portability lint tasks
-		portabilityTask, err := golang.NewPortabilityTask(scope.SourceTree, apRoot, repoRoot)
+		portabilityTask, err := portability.NewTask(scope.SourceTree, apRoot, repoRoot)
 		if err != nil {
 			return nil, fmt.Errorf("failed to discover portability task in %s: %w", apRoot, err)
 		}

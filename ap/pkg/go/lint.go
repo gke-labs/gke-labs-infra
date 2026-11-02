@@ -280,11 +280,6 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	for _, a := range t.Analyzers {
 		findings := findingsByAnalyzer[a.Name]
 
-		baselineRoot := t.RepoRoot
-		if baselineRoot == "" {
-			baselineRoot = t.Dir
-		}
-
 		configured := ""
 		if lc := t.Settings[a.Name]; lc != nil {
 			configured = lc.GetBaseline()
@@ -293,132 +288,20 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.APScope) error {
 			configured = t.BaselinePath
 		}
 
-		baselinePath := baseline.ResolveBaselinePath(t.RepoRoot, t.Dir, a.Name, configured, t.WriteBaseline)
-		if baselinePath != "" {
-			bDir := filepath.Dir(baselinePath)
-			if filepath.Base(bDir) == ".ap" {
-				baselineRoot = filepath.Dir(bDir)
-			}
-		}
-
-		for i := range findings {
-			findings[i].RelFile = relPath(baselineRoot, findings[i].Pos.Filename)
-			findings[i].RepoRel = relPath(t.RepoRoot, findings[i].Pos.Filename)
-			findings[i].ModRel = relPath(t.Dir, findings[i].Pos.Filename)
-		}
-
-		sort.Slice(findings, func(i, j int) bool {
-			if findings[i].RelFile != findings[j].RelFile {
-				return findings[i].RelFile < findings[j].RelFile
-			}
-			if findings[i].Pos.Line != findings[j].Pos.Line {
-				return findings[i].Pos.Line < findings[j].Pos.Line
-			}
-			if findings[i].Pos.Column != findings[j].Pos.Column {
-				return findings[i].Pos.Column < findings[j].Pos.Column
-			}
-			if findings[i].Category != findings[j].Category {
-				return findings[i].Category < findings[j].Category
-			}
-			return findings[i].Detail < findings[j].Detail
+		mode := string(t.Enabled[a.Name])
+		_, err := baseline.Apply(findings, baseline.ApplyOptions{
+			Name:            a.Name,
+			RepoRoot:        t.RepoRoot,
+			Dir:             t.Dir,
+			ConfiguredPath:  configured,
+			WriteBaseline:   t.WriteBaseline,
+			AllCheckedFiles: allCheckedFiles,
+			Mode:            mode,
+			Stdout:          scope.GetStdout(),
+			Stderr:          scope.GetStderr(),
 		})
-
-		if t.WriteBaseline {
-			var existingEntries []baseline.Entry
-			if baselinePath != "" {
-				entries, err := baseline.Load(baselinePath)
-				if err != nil {
-					errs = append(errs, err)
-					continue
-				}
-				existingEntries = entries
-			}
-
-			hasChanges := false
-			if len(findings) > 0 {
-				hasChanges = true
-			}
-			var finalEntries []baseline.Entry
-			for _, e := range existingEntries {
-				entryFile := filepath.ToSlash(e.File)
-				if !allCheckedFiles[entryFile] {
-					finalEntries = append(finalEntries, e)
-				} else {
-					hasChanges = true
-				}
-			}
-
-			if !hasChanges {
-				continue
-			}
-
-			for _, f := range findings {
-				relFile := relPath(baselineRoot, f.Pos.Filename)
-				finalEntries = append(finalEntries, baseline.Entry{
-					File:          relFile,
-					EnclosingFunc: f.EnclosingFunc,
-					Category:      f.Category,
-					Detail:        f.Detail,
-					Callee:        f.Detail,
-				})
-			}
-
-			if baselinePath != "" {
-				if err := baseline.Write(baselinePath, a.Name, finalEntries); err != nil {
-					errs = append(errs, fmt.Errorf("failed to write baseline to %s: %w", baselinePath, err))
-					continue
-				}
-			}
-			if _, err := fmt.Fprintf(scope.GetStdout(), "Wrote %d baseline entries to %s\n", len(finalEntries), baselinePath); err != nil {
-				klog.V(2).Infof("failed to write baseline message: %v", err)
-			}
-			continue
-		}
-
-		var baselineEntries []baseline.Entry
-		if baselinePath != "" {
-			entries, err := baseline.Load(baselinePath)
-			if err != nil {
-				errs = append(errs, err)
-				continue
-			}
-			baselineEntries = entries
-		}
-
-		newFindings, staleEntries := baseline.Match(findings, baselineEntries, allCheckedFiles, baselineRoot)
-		for _, stale := range staleEntries {
-			if _, err := fmt.Fprintf(scope.GetStdout(), "stale baseline entry: %s (remove from baseline)\n", stale); err != nil {
-				klog.V(2).Infof("failed to write stale entry: %v", err)
-			}
-		}
-
-		findingsToReport := newFindings
-		if len(baselineEntries) == 0 {
-			findingsToReport = findings
-		}
-
-		for _, f := range findingsToReport {
-			msg := f.Message
-			if msg == "" {
-				msg = f.Detail
-			}
-			if _, err := fmt.Fprintf(scope.GetStderr(), "%s: %s\n", f.Pos, msg); err != nil {
-				klog.V(2).Infof("failed to write diagnostic: %v", err)
-			}
-			for _, rel := range f.Related {
-				if _, err := fmt.Fprintf(scope.GetStderr(), "%s:\t%s\n", rel.Pos, rel.Message); err != nil {
-					klog.V(2).Infof("failed to write related info: %v", err)
-				}
-			}
-		}
-
-		mode := t.Enabled[a.Name]
-		if len(findingsToReport) > 0 {
-			if mode == codestyle.ModeError {
-				errs = append(errs, fmt.Errorf("%s check failed in %s", a.Name, t.Dir))
-			} else if mode == codestyle.ModeWarn {
-				klog.Warningf("%s check failed in %s: %d diagnostics found", a.Name, t.Dir, len(findingsToReport))
-			}
+		if err != nil {
+			errs = append(errs, err)
 		}
 	}
 
@@ -426,13 +309,17 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	return errors.Join(errs...)
 }
 
-// SetWriteBaseline recursively sets WriteBaseline on any AnalyzersTask or PortabilityTask in the task tree.
+type writeBaselineSetter interface {
+	SetWriteBaseline(bool)
+}
+
+// SetWriteBaseline recursively sets WriteBaseline on any task supporting it in the task tree.
 func SetWriteBaseline(t tasks.Task, writeBaseline bool) {
 	if at, ok := t.(*AnalyzersTask); ok {
 		at.WriteBaseline = writeBaseline
 	}
-	if pt, ok := t.(*PortabilityTask); ok {
-		pt.WriteBaseline = writeBaseline
+	if wb, ok := t.(writeBaselineSetter); ok {
+		wb.SetWriteBaseline(writeBaseline)
 	}
 	for _, child := range t.GetChildren() {
 		SetWriteBaseline(child, writeBaseline)
