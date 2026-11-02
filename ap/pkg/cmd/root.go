@@ -169,6 +169,7 @@ func BuildRootCommand() *cobra.Command {
 	cmd.AddCommand(BuildVersionCommand(&opt))
 	cmd.AddCommand(BuildToolCommand(&opt))
 	cmd.AddCommand(BuildRunCommand())
+	cmd.AddCommand(BuildBashCommand())
 
 	return cmd
 }
