@@ -39,8 +39,20 @@ func TestPortabilityFindings(t *testing.T) {
 			wantAlternative: "GNU only; compute dates in Go or use date -u +%s arithmetic",
 		},
 		{
+			name:            "date -d in command substitution",
+			line:            "d=$(date -d yesterday +%F)",
+			wantConstruct:   "date -d",
+			wantAlternative: "GNU only; compute dates in Go or use date -u +%s arithmetic",
+		},
+		{
 			name:            "stat -c (GNU only)",
 			line:            "stat -c %s file",
+			wantConstruct:   "stat -c",
+			wantAlternative: "GNU only; use wc -c <file for sizes, or Go",
+		},
+		{
+			name:            "stat -c in command substitution",
+			line:            "size=$(stat -c %s f)",
 			wantConstruct:   "stat -c",
 			wantAlternative: "GNU only; use wc -c <file for sizes, or Go",
 		},

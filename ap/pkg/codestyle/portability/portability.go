@@ -108,7 +108,8 @@ func portabilityFindings(path string, lines []string) []Finding {
 
 func matchesRule(fields []string, r rule) bool {
 	for i, f := range fields {
-		if f == r.cmd || filepath.Base(f) == r.cmd {
+		cmd := normalizeCmd(f)
+		if cmd == r.cmd || filepath.Base(cmd) == r.cmd {
 			if r.flag == "" {
 				return true
 			}
@@ -120,6 +121,28 @@ func matchesRule(fields []string, r rule) bool {
 		}
 	}
 	return false
+}
+
+func normalizeCmd(token string) string {
+	if idx := strings.LastIndex(token, "="); idx != -1 {
+		token = token[idx+1:]
+	}
+	for {
+		if strings.HasPrefix(token, "$(") {
+			token = strings.TrimPrefix(token, "$(")
+			continue
+		}
+		if strings.HasPrefix(token, "(") {
+			token = strings.TrimPrefix(token, "(")
+			continue
+		}
+		if strings.HasPrefix(token, "`") {
+			token = strings.TrimPrefix(token, "`")
+			continue
+		}
+		break
+	}
+	return token
 }
 
 // Task checks task scripts in dev/tasks for non-portable constructs.
@@ -196,18 +219,18 @@ func (t *Task) Run(ctx context.Context, scope *tasks.APScope) error {
 	for _, path := range t.Scripts {
 		allCheckedFiles[filepath.ToSlash(path)] = true
 		if t.RepoRoot != "" {
-			if rel, err := filepath.Rel(t.RepoRoot, path); err == nil {
-				allCheckedFiles[filepath.ToSlash(rel)] = true
-			} else {
-				allCheckedFiles[filepath.ToSlash(path)] = true
+			rel, err := filepath.Rel(t.RepoRoot, path)
+			if err != nil {
+				return fmt.Errorf("failed to get relative path for %s: %w", path, err)
 			}
+			allCheckedFiles[filepath.ToSlash(rel)] = true
 		}
 		if t.APRoot != "" {
-			if rel, err := filepath.Rel(t.APRoot, path); err == nil {
-				allCheckedFiles[filepath.ToSlash(rel)] = true
-			} else {
-				allCheckedFiles[filepath.ToSlash(path)] = true
+			rel, err := filepath.Rel(t.APRoot, path)
+			if err != nil {
+				return fmt.Errorf("failed to get relative path for %s: %w", path, err)
 			}
+			allCheckedFiles[filepath.ToSlash(rel)] = true
 		}
 
 		data, err := os.ReadFile(path)

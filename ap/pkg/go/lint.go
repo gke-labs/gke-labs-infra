@@ -315,9 +315,6 @@ type writeBaselineSetter interface {
 
 // SetWriteBaseline recursively sets WriteBaseline on any task supporting it in the task tree.
 func SetWriteBaseline(t tasks.Task, writeBaseline bool) {
-	if at, ok := t.(*AnalyzersTask); ok {
-		at.WriteBaseline = writeBaseline
-	}
 	if wb, ok := t.(writeBaselineSetter); ok {
 		wb.SetWriteBaseline(writeBaseline)
 	}
@@ -343,6 +340,10 @@ func (t *AnalyzersTask) GetName() string {
 
 func (t *AnalyzersTask) GetChildren() []tasks.Task {
 	return nil
+}
+
+func (t *AnalyzersTask) SetWriteBaseline(wb bool) {
+	t.WriteBaseline = wb
 }
 
 func determineTargetGOOS(r *sourcetree.SourceTree, dir string, skipGlobs []string, hostGOOS string) []string {
