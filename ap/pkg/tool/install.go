@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 )
@@ -156,4 +157,31 @@ func Install(opt InstallOptions) (string, error) {
 	}
 
 	return targetDir, nil
+}
+
+// ScriptEnv ensures the managed-tool symlinks exist for repoRoot and returns an environment
+// slice with that tool bin directory prepended to PATH and REPO_ROOT set.
+func ScriptEnv(repoRoot string) ([]string, error) {
+	binDir, err := Install(InstallOptions{
+		RepoRoot: repoRoot,
+		Stdout:   io.Discard,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare tool bin directory for PATH: %w", err)
+	}
+
+	path := binDir
+	if curPath := os.Getenv("PATH"); curPath != "" {
+		path = binDir + string(os.PathListSeparator) + curPath
+	}
+
+	var env []string
+	for _, e := range os.Environ() {
+		if strings.HasPrefix(strings.ToUpper(e), "PATH=") || strings.HasPrefix(e, "REPO_ROOT=") {
+			continue
+		}
+		env = append(env, e)
+	}
+	env = append(env, "PATH="+path, "REPO_ROOT="+repoRoot)
+	return env, nil
 }

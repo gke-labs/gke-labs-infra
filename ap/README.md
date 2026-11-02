@@ -275,6 +275,7 @@ Commands:
 - `deploy`: Deploy artifacts
 - `generate`: Run generation tasks (runs legacy `dev/tasks/generate-*` scripts, `go generate ./...` in modules that contain `//go:generate` directives, and built-in presubmit/workflow generators; supports `--verify` to prove generators restore perturbed outputs, `--audit-generated` to find generated files lacking headers, and `--strict`)
 - `format`: Run formatting tasks
+- `run`: Run a script from the repository root with managed tools on PATH (use as `#!/usr/bin/env -S ap run bash`, requires coreutils 8.30+)
 - `versionbump`: Bump project versions (e.g. Go)
 - `serve`: Start the sandbox server
 - `alpha`: Experimental commands (e.g. `alpha sandbox`)

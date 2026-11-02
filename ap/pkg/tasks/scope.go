@@ -16,10 +16,8 @@ package tasks
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"os"
-	"strings"
 	"sync"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
@@ -119,7 +117,7 @@ func (s *APScope) EnsureKubectl(ctx context.Context) (string, error) {
 }
 
 // ScriptEnv returns an environment slice with the tool bin directory prepended to PATH,
-// populated once per scope using tool.Install and memoized.
+// populated once per scope using tool.ScriptEnv and memoized.
 func (s *APScope) ScriptEnv() ([]string, error) {
 	scriptEnvResolveMu.Lock()
 	defer scriptEnvResolveMu.Unlock()
@@ -127,26 +125,9 @@ func (s *APScope) ScriptEnv() ([]string, error) {
 		return s.scriptEnv, nil
 	}
 
-	binDir, err := tool.Install(tool.InstallOptions{
-		RepoRoot: s.RepoRoot,
-		Stdout:   io.Discard,
-	})
+	env, err := tool.ScriptEnv(s.RepoRoot)
 	if err != nil {
-		return nil, fmt.Errorf("failed to prepare tool bin directory for PATH: %w", err)
-	}
-
-	var env []string
-	foundPath := false
-	for _, e := range os.Environ() {
-		if strings.HasPrefix(strings.ToUpper(e), "PATH=") {
-			foundPath = true
-			env = append(env, "PATH="+binDir+string(os.PathListSeparator)+e[5:])
-		} else {
-			env = append(env, e)
-		}
-	}
-	if !foundPath {
-		env = append(env, "PATH="+binDir)
+		return nil, err
 	}
 	s.scriptEnv = env
 	return env, nil
