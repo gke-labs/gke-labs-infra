@@ -173,6 +173,53 @@ func TestRun_Success(t *testing.T) {
 				t.Errorf("expected ARGS=shebang_arg, got output:\n%s", output)
 			}
 		})
+
+		// Subtest 3: Shebang execution via #!/usr/bin/env -S ap bash
+		t.Run("ap bash shebang execution", func(t *testing.T) {
+			binDir := t.TempDir()
+			apLink := filepath.Join(binDir, "ap")
+			if err := os.Symlink(testExe, apLink); err != nil {
+				t.Fatalf("failed to create ap symlink: %v", err)
+			}
+
+			shebangScript := filepath.Join(taskDir, "ap-bash-hello")
+			content := "#!/usr/bin/env -S ap bash\n" +
+				"echo \"PWD=$(pwd)\"\n" +
+				"echo \"REPO_ROOT=$REPO_ROOT\"\n" +
+				"echo \"KUBECTL=$(command -v kubectl)\"\n" +
+				"echo \"ARGS=$*\"\n"
+			if err := os.WriteFile(shebangScript, []byte(content), 0755); err != nil {
+				t.Fatalf("failed to write shebang script: %v", err)
+			}
+
+			outsideDir := t.TempDir()
+			cmd := exec.Command(shebangScript, "bash_arg")
+			cmd.Dir = outsideDir
+
+			env := filterEnv("REPO_ROOT", "AP_ROOT", "PATH")
+			env = append(env, "PATH="+binDir+":"+os.Getenv("PATH"))
+			env = append(env, "AP_TEST_EXEC=1", "AP_EXECUTABLE="+testExe)
+			cmd.Env = env
+
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("ap bash shebang script execution failed: %v\nOutput: %s", err, string(out))
+			}
+
+			output := string(out)
+			if !strings.Contains(output, "PWD="+realRepoDir) {
+				t.Errorf("expected PWD=%s, got output:\n%s", realRepoDir, output)
+			}
+			if !strings.Contains(output, "REPO_ROOT="+realRepoDir) {
+				t.Errorf("expected REPO_ROOT=%s, got output:\n%s", realRepoDir, output)
+			}
+			if !strings.Contains(output, "KUBECTL="+expectedKubectl) {
+				t.Errorf("expected KUBECTL=%s, got output:\n%s", expectedKubectl, output)
+			}
+			if !strings.Contains(output, "ARGS=bash_arg") {
+				t.Errorf("expected ARGS=bash_arg, got output:\n%s", output)
+			}
+		})
 	}
 }
 
