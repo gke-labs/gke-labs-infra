@@ -85,6 +85,14 @@ func TestRegistry_FindAndDefaults(t *testing.T) {
 			wantDefaultSkipGen:   false,
 			wantDefaultSkipTests: false,
 		},
+		{
+			name:                 "portability",
+			lookup:               "portability",
+			wantName:             "portability",
+			wantDefaultMode:      ModeError,
+			wantDefaultSkipGen:   false,
+			wantDefaultSkipTests: false,
+		},
 	}
 
 	for _, tt := range tests {

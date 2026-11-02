@@ -129,6 +129,15 @@ func DiscoverScopes(r *sourcetree.SourceTree, repoRoot string, apRoots []string)
 			scope.LintTasks = append(scope.LintTasks, goLintTasks)
 		}
 
+		// Portability lint tasks
+		portabilityTask, err := golang.NewPortabilityTask(scope.SourceTree, apRoot, repoRoot)
+		if err != nil {
+			return nil, fmt.Errorf("failed to discover portability task in %s: %w", apRoot, err)
+		}
+		if portabilityTask != nil {
+			scope.LintTasks = append(scope.LintTasks, portabilityTask)
+		}
+
 		scopes = append(scopes, scope)
 	}
 

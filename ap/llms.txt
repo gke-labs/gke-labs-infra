@@ -33,6 +33,7 @@ When making changes to an AP-managed project, coding agents should follow this v
 1.  **Generate Code**: Run `ap generate` to update any generated files, CI scripts, or manifests (note: `ap generate` also runs `ap fmt` to format code, tidy Go modules, and stamp license headers).
 2.  **Lint**: Run `ap lint` to ensure code follows project style and quality guidelines.
     -   When adopting a strict check at `mode: error` with existing findings, run `ap lint --write-baseline`, commit the `.ap/*-baseline.txt` files, and fix entries over time.
+    -   Task scripts must be portable across macOS and Linux; `ap lint` flags known GNU-only / bash-4-only constructs.
 3.  **Test**:
     -   Run `ap test` for unit and integration tests.
     -   Run `ap e2e` for end-to-end tests.

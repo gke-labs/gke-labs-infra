@@ -178,6 +178,14 @@ var Analyzers = []Registered{
 			return deferinloop.NewAnalyzer(policy)
 		},
 	},
+	{
+		Name:                 "portability",
+		ConfigName:           "portability",
+		DefaultMode:          ModeError,
+		DefaultSkipGenerated: false,
+		DefaultSkipTests:     false,
+		NewSettings:          func() config.LinterConfig { return &config.CommonLinterConfig{} },
+	},
 }
 
 func init() {

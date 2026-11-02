@@ -219,3 +219,106 @@ func main() {
 		t.Errorf("expected output to report stale baseline entry, got:\n%s", output)
 	}
 }
+
+func TestRunLint_PortabilityBaseline(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(tmpDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	apDir := filepath.Join(tmpDir, ".ap")
+	if err := os.Mkdir(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	tasksDir := filepath.Join(tmpDir, "dev", "tasks")
+	if err := os.MkdirAll(tasksDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	taskScript := `#!/bin/bash
+date -d @12345
+`
+	scriptPath := filepath.Join(tasksDir, "my-task")
+	if err := os.WriteFile(scriptPath, []byte(taskScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Chdir(tmpDir)
+
+	opt := LintOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: tmpDir,
+			APRoots:  []string{tmpDir},
+		},
+	}
+
+	// 1. ap lint fails with portability check error
+	err := RunLint(t.Context(), opt)
+	if err == nil {
+		t.Fatalf("expected RunLint to fail on portability finding")
+	}
+	if !strings.Contains(err.Error(), "portability check failed") {
+		t.Fatalf("expected portability check failure, got: %v", err)
+	}
+
+	// 2. ap lint --write-baseline creates .ap/portability-baseline.txt
+	optWrite := LintOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: tmpDir,
+			APRoots:  []string{tmpDir},
+		},
+		WriteBaseline: true,
+	}
+	if err := RunLint(t.Context(), optWrite); err != nil {
+		t.Fatalf("ap lint --write-baseline failed: %v", err)
+	}
+
+	baselineFile := filepath.Join(apDir, "portability-baseline.txt")
+	entries, err := baseline.Load(baselineFile)
+	if err != nil {
+		t.Fatalf("failed to load baseline: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 baseline entry, got %d", len(entries))
+	}
+	if entries[0].File != "dev/tasks/my-task" || entries[0].Detail != "date -d" {
+		t.Errorf("unexpected baseline entry: %+v", entries[0])
+	}
+
+	// 3. ap lint passes with baseline
+	if err := RunLint(t.Context(), opt); err != nil {
+		t.Fatalf("expected ap lint to pass with baseline, got: %v", err)
+	}
+
+	// 4. fixing the script reports stale entry
+	fixedScript := `#!/bin/bash
+date -u +%s
+`
+	if err := os.WriteFile(scriptPath, []byte(fixedScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+
+	lintErr := RunLint(t.Context(), opt)
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+	output := buf.String()
+
+	if lintErr != nil {
+		t.Fatalf("expected ap lint to pass after fix, got: %v", lintErr)
+	}
+	if !strings.Contains(output, "stale baseline entry") {
+		t.Errorf("expected output to report stale baseline entry, got:\n%s", output)
+	}
+}

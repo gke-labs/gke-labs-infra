@@ -426,10 +426,13 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	return errors.Join(errs...)
 }
 
-// SetWriteBaseline recursively sets WriteBaseline on any AnalyzersTask in the task tree.
+// SetWriteBaseline recursively sets WriteBaseline on any AnalyzersTask or PortabilityTask in the task tree.
 func SetWriteBaseline(t tasks.Task, writeBaseline bool) {
 	if at, ok := t.(*AnalyzersTask); ok {
 		at.WriteBaseline = writeBaseline
+	}
+	if pt, ok := t.(*PortabilityTask); ok {
+		pt.WriteBaseline = writeBaseline
 	}
 	for _, child := range t.GetChildren() {
 		SetWriteBaseline(child, writeBaseline)
