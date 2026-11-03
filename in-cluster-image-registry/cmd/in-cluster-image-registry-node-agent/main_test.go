@@ -1062,7 +1062,8 @@ func TestReconcile_RestartWhenConfigNewerThanContainerd(t *testing.T) {
 
 	// 1. File mtime after a fake start time -> restart requested.
 	// Write already-configured config so updateContainerdConfig returns changed = false.
-	if err := os.WriteFile(configPath, []byte(fixtureV4Configured), 0644); err != nil {
+	configuredConfig := strings.ReplaceAll(fixtureV4Configured, "/etc/containerd/certs.d", certsDir)
+	if err := os.WriteFile(configPath, []byte(configuredConfig), 0644); err != nil {
 		t.Fatalf("failed to write config: %v", err)
 	}
 	mtimeAfter := t0.Add(10 * time.Minute)
