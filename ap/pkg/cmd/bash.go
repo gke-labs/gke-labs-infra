@@ -20,10 +20,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool"
 	"github.com/spf13/cobra"
+	"k8s.io/klog/v2"
 )
 
 // BuildBashCommand constructs the cobra command for "bash".
@@ -86,9 +88,13 @@ func RunScript(ctx context.Context, script string, scriptArgs []string) error {
 		}
 	}
 
-	binary, err := exec.LookPath("bash")
+	bash, err := resolveBash()
 	if err != nil {
-		return fmt.Errorf("failed to find bash on PATH: %w", err)
+		return err
+	}
+
+	if bash.Major > 0 && bash.Major < 4 {
+		klog.Warningf("bash at %s is %s; scripts run in CI with bash 5. Install a newer bash (e.g. brew install bash) and make sure it is first on PATH.", bash.Path, bash.Version)
 	}
 
 	if err := os.Chdir(repoRoot); err != nil {
@@ -96,10 +102,76 @@ func RunScript(ctx context.Context, script string, scriptArgs []string) error {
 	}
 
 	inv := &tool.Invocation{
-		Binary: binary,
+		Binary: bash.Path,
 		Args:   append([]string{absScript}, scriptArgs...),
 		Env:    env,
 	}
 
 	return tool.ExecProcess(inv)
+}
+
+type bashTool struct {
+	Path    string
+	Version string
+	Major   int
+}
+
+// resolveBash locates bash on PATH and attempts to inspect its version.
+func resolveBash() (*bashTool, error) {
+	binary, err := exec.LookPath("bash")
+	if err != nil {
+		return nil, fmt.Errorf("failed to find bash on PATH: %w", err)
+	}
+
+	bt := &bashTool{
+		Path: binary,
+	}
+
+	cmd := exec.Command(binary, "--version")
+	out, err := cmd.Output()
+	if err != nil {
+		klog.V(2).Infof("failed to run %s --version: %v", binary, err)
+		return bt, nil
+	}
+
+	ver, major, err := parseBashVersion(string(out))
+	if err != nil {
+		klog.V(2).Infof("failed to parse bash version from %s: %v", binary, err)
+		return bt, nil
+	}
+
+	bt.Version = ver
+	bt.Major = major
+	return bt, nil
+}
+
+// parseBashVersion extracts the version string and major version number from
+// the output (or first line) of "bash --version".
+func parseBashVersion(output string) (string, int, error) {
+	lines := strings.Split(output, "\n")
+	var firstLine string
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if l != "" {
+			firstLine = l
+			break
+		}
+	}
+	if firstLine == "" {
+		return "", 0, fmt.Errorf("empty bash version output")
+	}
+
+	fields := strings.Fields(firstLine)
+	for i, f := range fields {
+		if f == "version" && i+1 < len(fields) {
+			version := fields[i+1]
+			majorStr := strings.TrimPrefix(strings.Split(version, ".")[0], "v")
+			major, err := strconv.Atoi(majorStr)
+			if err != nil {
+				return "", 0, fmt.Errorf("failed to parse major version from %q: %w", version, err)
+			}
+			return version, major, nil
+		}
+	}
+	return "", 0, fmt.Errorf("could not find version token in bash output: %q", firstLine)
 }

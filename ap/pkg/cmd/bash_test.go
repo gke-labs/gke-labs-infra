@@ -214,3 +214,70 @@ func TestBash_ErrorCases(t *testing.T) {
 		}
 	})
 }
+
+func TestParseBashVersion(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		wantVersion string
+		wantMajor   int
+		wantErr     bool
+	}{
+		{
+			name:        "bash 3.2 line",
+			input:       "GNU bash, version 3.2.57(1)-release (x86_64-apple-darwin20)",
+			wantVersion: "3.2.57(1)-release",
+			wantMajor:   3,
+		},
+		{
+			name:        "bash 5 line",
+			input:       "GNU bash, version 5.2.37(1)-release (x86_64-pc-linux-gnu)",
+			wantVersion: "5.2.37(1)-release",
+			wantMajor:   5,
+		},
+		{
+			name: "multiline output",
+			input: "GNU bash, version 5.2.37(1)-release (x86_64-pc-linux-gnu)\n" +
+				"Copyright (C) 2022 Free Software Foundation, Inc.\n" +
+				"License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n",
+			wantVersion: "5.2.37(1)-release",
+			wantMajor:   5,
+		},
+		{
+			name:    "empty input",
+			input:   "",
+			wantErr: true,
+		},
+		{
+			name:    "missing version token",
+			input:   "some shell output without version keyword",
+			wantErr: true,
+		},
+		{
+			name:    "non-numeric major version",
+			input:   "GNU bash, version invalid",
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotVersion, gotMajor, err := parseBashVersion(tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("parseBashVersion(%q) expected error, got nil", tc.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseBashVersion(%q) unexpected error: %v", tc.input, err)
+			}
+			if gotVersion != tc.wantVersion {
+				t.Errorf("parseBashVersion(%q) gotVersion = %q, want %q", tc.input, gotVersion, tc.wantVersion)
+			}
+			if gotMajor != tc.wantMajor {
+				t.Errorf("parseBashVersion(%q) gotMajor = %d, want %d", tc.input, gotMajor, tc.wantMajor)
+			}
+		})
+	}
+}
