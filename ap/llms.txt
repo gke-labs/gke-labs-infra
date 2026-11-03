@@ -51,6 +51,7 @@ When making changes to an AP-managed project, coding agents should follow this v
 
 - `ap tool install [dir]` creates symlinks for managed tools (`kind`, `kubectl`, `docker`, `docker-buildx`, `protoc`, `go`) pointing to `ap` for busybox-style dispatch to pinned tool binaries. In a repository, it defaults to `${REPO_ROOT}/.build/bin`. Discovered task scripts have `${REPO_ROOT}/.build/bin` prepended to `PATH` automatically. Scripts should call tools by name and never download them; `ap` provides them on `PATH`.
 - `ap bash <script> [args...]` runs a bash script from the repository root with `${REPO_ROOT}/.build/bin` on `PATH` and `REPO_ROOT` exported (`#!/usr/bin/env -S ap bash`, requires coreutils 8.30+).
+    -   Scripts should assume bash 4+, and `ap bash` warns when the local bash is older.
 
 ## Kubernetes Manifests
 

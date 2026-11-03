@@ -20,10 +20,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool"
 	"github.com/spf13/cobra"
+	"k8s.io/klog/v2"
 )
 
 // BuildBashCommand constructs the cobra command for "bash".
@@ -91,6 +94,8 @@ func RunScript(ctx context.Context, script string, scriptArgs []string) error {
 		return fmt.Errorf("failed to find bash on PATH: %w", err)
 	}
 
+	checkBashVersion(binary)
+
 	if err := os.Chdir(repoRoot); err != nil {
 		return fmt.Errorf("failed to change directory to repo root %s: %w", repoRoot, err)
 	}
@@ -102,4 +107,58 @@ func RunScript(ctx context.Context, script string, scriptArgs []string) error {
 	}
 
 	return tool.ExecProcess(inv)
+}
+
+var checkBashOnce sync.Once
+
+// checkBashVersion verifies that the resolved bash binary is version 4 or newer.
+// If it is older than 4, it emits a warning. The check runs once per process.
+func checkBashVersion(binary string) {
+	checkBashOnce.Do(func() {
+		cmd := exec.Command(binary, "--version")
+		out, err := cmd.Output()
+		if err != nil {
+			klog.V(2).Infof("failed to run %s --version: %v", binary, err)
+			return
+		}
+		ver, major, err := parseBashVersion(string(out))
+		if err != nil {
+			klog.V(2).Infof("failed to parse bash version from %s: %v", binary, err)
+			return
+		}
+		if major < 4 {
+			klog.Warningf("bash at %s is %s; scripts run in CI with bash 5. Install a newer bash (e.g. brew install bash) and make sure it is first on PATH.", binary, ver)
+		}
+	})
+}
+
+// parseBashVersion extracts the version string and major version number from
+// the output (or first line) of "bash --version".
+func parseBashVersion(output string) (string, int, error) {
+	lines := strings.Split(output, "\n")
+	var firstLine string
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if l != "" {
+			firstLine = l
+			break
+		}
+	}
+	if firstLine == "" {
+		return "", 0, fmt.Errorf("empty bash version output")
+	}
+
+	fields := strings.Fields(firstLine)
+	for i, f := range fields {
+		if f == "version" && i+1 < len(fields) {
+			version := fields[i+1]
+			majorStr := strings.TrimPrefix(strings.Split(version, ".")[0], "v")
+			major, err := strconv.Atoi(majorStr)
+			if err != nil {
+				return "", 0, fmt.Errorf("failed to parse major version from %q: %w", version, err)
+			}
+			return version, major, nil
+		}
+	}
+	return "", 0, fmt.Errorf("could not find version token in bash output: %q", firstLine)
 }
