@@ -21,10 +21,13 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -402,4 +405,169 @@ func FormatEnclosingFunc(fn *ast.FuncDecl) string {
 		return fmt.Sprintf("(%s).%s", types.ExprString(recv), fn.Name.Name)
 	}
 	return fn.Name.Name
+}
+
+// ApplyOptions configures baseline matching, reporting, and recording.
+type ApplyOptions struct {
+	Name            string
+	RepoRoot        string
+	Dir             string
+	ConfiguredPath  string
+	WriteBaseline   bool
+	AllCheckedFiles map[string]bool
+	Mode            string
+	Stdout          io.Writer
+	Stderr          io.Writer
+}
+
+func relPath(base, target string) string {
+	if base == "" {
+		return filepath.ToSlash(target)
+	}
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return filepath.ToSlash(target)
+	}
+	return filepath.ToSlash(rel)
+}
+
+// Apply handles baseline resolution, relative path normalization, deterministic sorting,
+// baseline writing or matching, diagnostic reporting, and mode-based error generation.
+func Apply(findings []Finding, opts ApplyOptions) ([]Finding, error) {
+	baselineRoot := opts.RepoRoot
+	if baselineRoot == "" {
+		baselineRoot = opts.Dir
+	}
+
+	baselinePath := ResolveBaselinePath(opts.RepoRoot, opts.Dir, opts.Name, opts.ConfiguredPath, opts.WriteBaseline)
+	if baselinePath != "" {
+		bDir := filepath.Dir(baselinePath)
+		if filepath.Base(bDir) == ".ap" {
+			baselineRoot = filepath.Dir(bDir)
+		}
+	}
+
+	for i := range findings {
+		if findings[i].RelFile == "" {
+			findings[i].RelFile = relPath(baselineRoot, findings[i].Pos.Filename)
+		}
+		if findings[i].RepoRel == "" {
+			findings[i].RepoRel = relPath(opts.RepoRoot, findings[i].Pos.Filename)
+		}
+		if findings[i].ModRel == "" {
+			findings[i].ModRel = relPath(opts.Dir, findings[i].Pos.Filename)
+		}
+	}
+
+	sort.Slice(findings, func(i, j int) bool {
+		if findings[i].RelFile != findings[j].RelFile {
+			return findings[i].RelFile < findings[j].RelFile
+		}
+		if findings[i].Pos.Line != findings[j].Pos.Line {
+			return findings[i].Pos.Line < findings[j].Pos.Line
+		}
+		if findings[i].Pos.Column != findings[j].Pos.Column {
+			return findings[i].Pos.Column < findings[j].Pos.Column
+		}
+		if findings[i].Category != findings[j].Category {
+			return findings[i].Category < findings[j].Category
+		}
+		return findings[i].Detail < findings[j].Detail
+	})
+
+	if opts.WriteBaseline {
+		var existingEntries []Entry
+		if baselinePath != "" {
+			entries, err := Load(baselinePath)
+			if err != nil {
+				return nil, err
+			}
+			existingEntries = entries
+		}
+
+		hasChanges := len(findings) > 0
+		var finalEntries []Entry
+		for _, e := range existingEntries {
+			entryFile := filepath.ToSlash(e.File)
+			if !opts.AllCheckedFiles[entryFile] {
+				finalEntries = append(finalEntries, e)
+			} else {
+				hasChanges = true
+			}
+		}
+
+		if hasChanges {
+			for _, f := range findings {
+				relFile := relPath(baselineRoot, f.Pos.Filename)
+				finalEntries = append(finalEntries, Entry{
+					File:          relFile,
+					EnclosingFunc: f.EnclosingFunc,
+					Category:      f.Category,
+					Detail:        f.Detail,
+					Callee:        f.Detail,
+				})
+			}
+
+			if baselinePath != "" {
+				if err := Write(baselinePath, opts.Name, finalEntries); err != nil {
+					return nil, fmt.Errorf("failed to write baseline to %s: %w", baselinePath, err)
+				}
+			}
+			if opts.Stdout != nil {
+				if _, err := fmt.Fprintf(opts.Stdout, "Wrote %d baseline entries to %s\n", len(finalEntries), baselinePath); err != nil {
+					klog.V(2).Infof("failed to write baseline message: %v", err)
+				}
+			}
+		}
+		return nil, nil
+	}
+
+	var baselineEntries []Entry
+	if baselinePath != "" {
+		entries, err := Load(baselinePath)
+		if err != nil {
+			return nil, err
+		}
+		baselineEntries = entries
+	}
+
+	newFindings, staleEntries := Match(findings, baselineEntries, opts.AllCheckedFiles, baselineRoot)
+	if opts.Stdout != nil {
+		for _, stale := range staleEntries {
+			if _, err := fmt.Fprintf(opts.Stdout, "stale baseline entry: %s (remove from baseline)\n", stale); err != nil {
+				klog.V(2).Infof("failed to write stale entry: %v", err)
+			}
+		}
+	}
+
+	findingsToReport := newFindings
+	if len(baselineEntries) == 0 {
+		findingsToReport = findings
+	}
+
+	if opts.Stderr != nil {
+		for _, f := range findingsToReport {
+			msg := f.Message
+			if msg == "" {
+				msg = f.Detail
+			}
+			if _, err := fmt.Fprintf(opts.Stderr, "%s: %s\n", f.Pos, msg); err != nil {
+				klog.V(2).Infof("failed to write diagnostic: %v", err)
+			}
+			for _, rel := range f.Related {
+				if _, err := fmt.Fprintf(opts.Stderr, "%s:\t%s\n", rel.Pos, rel.Message); err != nil {
+					klog.V(2).Infof("failed to write related info: %v", err)
+				}
+			}
+		}
+	}
+
+	if len(findingsToReport) > 0 {
+		if opts.Mode == "error" || opts.Mode == "" {
+			return findingsToReport, fmt.Errorf("%s check failed in %s", opts.Name, opts.Dir)
+		} else if opts.Mode == "warn" {
+			klog.Warningf("%s check failed in %s: %d diagnostics found", opts.Name, opts.Dir, len(findingsToReport))
+		}
+	}
+	return findingsToReport, nil
 }
