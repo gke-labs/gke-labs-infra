@@ -161,6 +161,24 @@ const expectedOutputD = `version = 3
   config_path = "/etc/containerd/certs.d"
 `
 
+const fixtureV4 = `version = 4
+
+[plugins.'io.containerd.cri.v1.images'.registry]
+  config_path = ''
+`
+
+const expectedOutputV4 = `version = 4
+
+[plugins.'io.containerd.cri.v1.images'.registry]
+  config_path = "/etc/containerd/certs.d"
+`
+
+const fixtureV4Configured = `version = 4
+
+[plugins."io.containerd.cri.v1.images".registry]
+  config_path = "/etc/containerd/certs.d"
+`
+
 const fixtureE = `[plugins."io.containerd.grpc.v1.cri"]
   sandbox_image = "registry.k8s.io/pause:3.9"
 `
@@ -242,6 +260,18 @@ func TestTransformContainerdConfig_TableDriven(t *testing.T) {
 			input:           fixtureD,
 			expectedOutput:  expectedOutputD,
 			expectedChanged: true,
+		},
+		{
+			name:            "(d2) v4 with single-quoted header and empty config_path replaced in place",
+			input:           fixtureV4,
+			expectedOutput:  expectedOutputV4,
+			expectedChanged: true,
+		},
+		{
+			name:            "(d3) v4 with existing certs.d config_path is a no-op",
+			input:           fixtureV4Configured,
+			expectedOutput:  fixtureV4Configured,
+			expectedChanged: false,
 		},
 		{
 			name:            "(e) no version key: grpc.v1.cri table used",

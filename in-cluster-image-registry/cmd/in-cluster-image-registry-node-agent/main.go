@@ -130,8 +130,12 @@ func transformContainerdConfig(content string, certsDPath string) (string, bool,
 		}
 	}
 
+	// containerd 2.x configuration schemas (version 3, and version 4 since
+	// containerd 2.3) keep the registry settings under the cri.v1.images
+	// plugin; only version 1 and 2 files use the grpc.v1.cri plugin.
+	v3Schema := version >= 3
 	var targetPlugin string
-	if version == 3 {
+	if v3Schema {
 		targetPlugin = "io.containerd.cri.v1.images"
 	} else {
 		if !hasVersionKey {
@@ -143,7 +147,7 @@ func transformContainerdConfig(content string, certsDPath string) (string, bool,
 	targetHeader := fmt.Sprintf("[plugins.%q.registry]", targetPlugin)
 
 	// 2. Remove stale v3 block on v2/v1 files
-	if version != 3 {
+	if !v3Schema {
 		staleV3Parts := []string{"plugins", "io.containerd.cri.v1.images", "registry"}
 		var filtered []*toml.Section
 		for _, sec := range sections {
