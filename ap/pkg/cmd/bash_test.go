@@ -61,7 +61,7 @@ outer:
 	return env
 }
 
-func TestRun_Success(t *testing.T) {
+func TestBash_Success(t *testing.T) {
 	testExe, err := os.Executable()
 	if err != nil {
 		t.Fatalf("failed to get test executable: %v", err)
@@ -102,13 +102,13 @@ func TestRun_Success(t *testing.T) {
 
 	// Subtest 1: Invoked from subdirectory with relative script path
 	t.Run("from subdirectory with relative path", func(t *testing.T) {
-		cmd := exec.Command(testExe, "run", "bash", "./hello", "baz")
+		cmd := exec.Command(testExe, "bash", "./hello", "baz")
 		cmd.Dir = taskDir
 		cmd.Env = baseEnv
 
 		out, err := cmd.CombinedOutput()
 		if err != nil {
-			t.Fatalf("run failed: %v\nOutput: %s", err, string(out))
+			t.Fatalf("bash failed: %v\nOutput: %s", err, string(out))
 		}
 
 		output := string(out)
@@ -126,56 +126,9 @@ func TestRun_Success(t *testing.T) {
 		}
 	})
 
-	// Subtest 2: Shebang execution via #!/usr/bin/env -S ap run bash
+	// Subtest 2: Shebang execution via #!/usr/bin/env -S ap bash
 	if runtime.GOOS != "windows" {
 		t.Run("shebang execution", func(t *testing.T) {
-			binDir := t.TempDir()
-			apLink := filepath.Join(binDir, "ap")
-			if err := os.Symlink(testExe, apLink); err != nil {
-				t.Fatalf("failed to create ap symlink: %v", err)
-			}
-
-			shebangScript := filepath.Join(taskDir, "shebang-hello")
-			content := "#!/usr/bin/env -S ap run bash\n" +
-				"echo \"PWD=$(pwd)\"\n" +
-				"echo \"REPO_ROOT=$REPO_ROOT\"\n" +
-				"echo \"KUBECTL=$(command -v kubectl)\"\n" +
-				"echo \"ARGS=$*\"\n"
-			if err := os.WriteFile(shebangScript, []byte(content), 0755); err != nil {
-				t.Fatalf("failed to write shebang script: %v", err)
-			}
-
-			outsideDir := t.TempDir()
-			cmd := exec.Command(shebangScript, "shebang_arg")
-			cmd.Dir = outsideDir
-
-			env := filterEnv("REPO_ROOT", "AP_ROOT", "PATH")
-			env = append(env, "PATH="+binDir+":"+os.Getenv("PATH"))
-			env = append(env, "AP_TEST_EXEC=1", "AP_EXECUTABLE="+testExe)
-			cmd.Env = env
-
-			out, err := cmd.CombinedOutput()
-			if err != nil {
-				t.Fatalf("shebang script execution failed: %v\nOutput: %s", err, string(out))
-			}
-
-			output := string(out)
-			if !strings.Contains(output, "PWD="+realRepoDir) {
-				t.Errorf("expected PWD=%s, got output:\n%s", realRepoDir, output)
-			}
-			if !strings.Contains(output, "REPO_ROOT="+realRepoDir) {
-				t.Errorf("expected REPO_ROOT=%s, got output:\n%s", realRepoDir, output)
-			}
-			if !strings.Contains(output, "KUBECTL="+expectedKubectl) {
-				t.Errorf("expected KUBECTL=%s, got output:\n%s", expectedKubectl, output)
-			}
-			if !strings.Contains(output, "ARGS=shebang_arg") {
-				t.Errorf("expected ARGS=shebang_arg, got output:\n%s", output)
-			}
-		})
-
-		// Subtest 3: Shebang execution via #!/usr/bin/env -S ap bash
-		t.Run("ap bash shebang execution", func(t *testing.T) {
 			binDir := t.TempDir()
 			apLink := filepath.Join(binDir, "ap")
 			if err := os.Symlink(testExe, apLink); err != nil {
@@ -223,7 +176,7 @@ func TestRun_Success(t *testing.T) {
 	}
 }
 
-func TestRun_ErrorCases(t *testing.T) {
+func TestBash_ErrorCases(t *testing.T) {
 	testExe, err := os.Executable()
 	if err != nil {
 		t.Fatalf("failed to get test executable: %v", err)
@@ -231,15 +184,15 @@ func TestRun_ErrorCases(t *testing.T) {
 	baseEnv := filterEnv("REPO_ROOT", "AP_ROOT")
 	baseEnv = append(baseEnv, "AP_TEST_EXEC=1", "AP_EXECUTABLE="+testExe)
 
-	t.Run("fewer than 2 arguments", func(t *testing.T) {
-		cmd := exec.Command(testExe, "run", "bash")
+	t.Run("missing script argument", func(t *testing.T) {
+		cmd := exec.Command(testExe, "bash")
 		cmd.Env = baseEnv
 		out, err := cmd.CombinedOutput()
 		if err == nil {
 			t.Fatalf("expected error for missing script argument, but succeeded:\n%s", string(out))
 		}
-		if !strings.Contains(string(out), "requires at least 2 arguments") {
-			t.Errorf("expected 'requires at least 2 arguments' error message, got:\n%s", string(out))
+		if !strings.Contains(string(out), "requires at least 1 argument") {
+			t.Errorf("expected 'requires at least 1 argument' error message, got:\n%s", string(out))
 		}
 	})
 
@@ -250,7 +203,7 @@ func TestRun_ErrorCases(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		cmd := exec.Command(testExe, "run", "bash", scriptPath)
+		cmd := exec.Command(testExe, "bash", scriptPath)
 		cmd.Env = baseEnv
 		out, err := cmd.CombinedOutput()
 		if err == nil {

@@ -15,8 +15,14 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool"
 	"github.com/spf13/cobra"
 )
 
@@ -32,7 +38,7 @@ func BuildBashCommand() *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, rawArgs []string) error {
 			args := rawArgs
-			if len(args) == 0 || (len(args) == 1 && (args[0] == "-h" || args[0] == "--help")) {
+			if len(args) == 1 && (args[0] == "-h" || args[0] == "--help") {
 				return cmd.Help()
 			}
 			if len(args) > 0 && args[0] == "--" {
@@ -41,8 +47,59 @@ func BuildBashCommand() *cobra.Command {
 			if len(args) < 1 {
 				return fmt.Errorf("requires at least 1 argument: <script> [args...]")
 			}
-			return RunScript(cmd.Context(), "bash", args[0], args[1:])
+			return RunScript(cmd.Context(), args[0], args[1:])
 		},
 	}
 	return cmd
+}
+
+// RunScript resolves repository root from script, prepares the tool environment, changes directory to repo root,
+// and executes bash with script and args.
+func RunScript(ctx context.Context, script string, scriptArgs []string) error {
+	absScript, err := filepath.Abs(script)
+	if err != nil {
+		return fmt.Errorf("failed to get absolute path for script %q: %w", script, err)
+	}
+	eval, err := filepath.EvalSymlinks(absScript)
+	if err != nil {
+		return fmt.Errorf("failed to resolve symlink for script %q: %w", script, err)
+	}
+	absScript = eval
+
+	repoRoot, err := tool.FindRepoRootFromPath(absScript)
+	if err != nil {
+		return err
+	}
+
+	env, err := tool.ScriptEnv(repoRoot)
+	if err != nil {
+		return err
+	}
+
+	// Update PATH in current process so LookPath searches the newly prepared tool bin directory as well.
+	for _, e := range env {
+		if strings.HasPrefix(strings.ToUpper(e), "PATH=") {
+			if err := os.Setenv("PATH", e[5:]); err != nil {
+				return fmt.Errorf("failed to set PATH: %w", err)
+			}
+			break
+		}
+	}
+
+	binary, err := exec.LookPath("bash")
+	if err != nil {
+		return fmt.Errorf("failed to find bash on PATH: %w", err)
+	}
+
+	if err := os.Chdir(repoRoot); err != nil {
+		return fmt.Errorf("failed to change directory to repo root %s: %w", repoRoot, err)
+	}
+
+	inv := &tool.Invocation{
+		Binary: binary,
+		Args:   append([]string{absScript}, scriptArgs...),
+		Env:    env,
+	}
+
+	return tool.ExecProcess(inv)
 }
