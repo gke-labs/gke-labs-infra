@@ -452,7 +452,7 @@ func TestTransformContainerdConfig_TableDriven(t *testing.T) {
 					dirExistsFn = origDirExists
 				}()
 			}
-			gotOutput, gotCertsDir, gotChanged, _, err := transformContainerdConfig(tc.input, defaultCertsDDirectory)
+			res, err := transformContainerdConfig(tc.input, defaultCertsDDirectory)
 			if tc.expectErr {
 				if err == nil {
 					t.Fatalf("expected error, got nil")
@@ -462,16 +462,16 @@ func TestTransformContainerdConfig_TableDriven(t *testing.T) {
 			if err != nil {
 				t.Fatalf("transformContainerdConfig failed: %v", err)
 			}
-			if gotChanged != tc.expectedChanged {
-				t.Errorf("expected changed=%v, got %v", tc.expectedChanged, gotChanged)
+			if res.Changed != tc.expectedChanged {
+				t.Errorf("expected changed=%v, got %v", tc.expectedChanged, res.Changed)
 			}
-			if tc.expectedCertsDir != "" && gotCertsDir != tc.expectedCertsDir {
-				t.Errorf("expected certsDir=%q, got %q", tc.expectedCertsDir, gotCertsDir)
+			if tc.expectedCertsDir != "" && res.CertsDir != tc.expectedCertsDir {
+				t.Errorf("expected certsDir=%q, got %q", tc.expectedCertsDir, res.CertsDir)
 			}
-			if diff := cmp.Diff(tc.expectedOutput, gotOutput); diff != "" {
+			if diff := cmp.Diff(tc.expectedOutput, res.Content); diff != "" {
 				t.Errorf("output mismatch (-want +got):\n%s", diff)
 			}
-			validateTOMLOrContainerd(t, gotOutput)
+			validateTOMLOrContainerd(t, res.Content)
 		})
 	}
 }
@@ -504,7 +504,8 @@ func TestUpdateContainerdConfig_FullLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read updated config: %v", err)
 	}
-	if diff := cmp.Diff(expectedOutputA, string(content)); diff != "" {
+	expectedOutput := strings.ReplaceAll(expectedOutputA, defaultCertsDDirectory, certsDir)
+	if diff := cmp.Diff(expectedOutput, string(content)); diff != "" {
 		t.Errorf("updated config mismatch (-want +got):\n%s", diff)
 	}
 

@@ -133,7 +133,14 @@ func reconcile(ctx context.Context, clientset kubernetes.Interface) error {
 	return nil
 }
 
-func transformContainerdConfig(content string, certsDPath string) (string, string, bool, map[string][]string, error) {
+type transformResult struct {
+	Content  string
+	CertsDir string
+	Changed  bool
+	Mirrors  map[string][]string
+}
+
+func transformContainerdConfig(content string, certsDPath string) (*transformResult, error) {
 	sections := toml.ParseSections(content)
 	changed := false
 	mirrorsToTranslate := make(map[string][]string)
@@ -152,7 +159,7 @@ func transformContainerdConfig(content string, certsDPath string) (string, strin
 				vStr := strings.Trim(strings.TrimSpace(val), `"'`)
 				v, err := strconv.Atoi(vStr)
 				if err != nil {
-					return "", "", false, nil, fmt.Errorf("invalid version %q: %w", vStr, err)
+					return nil, fmt.Errorf("invalid version %q: %w", vStr, err)
 				}
 				version = v
 				break
@@ -287,7 +294,12 @@ func transformContainerdConfig(content string, certsDPath string) (string, strin
 	}
 
 	if !changed {
-		return content, effectiveCertsDDir, false, mirrorsToTranslate, nil
+		return &transformResult{
+			Content:  content,
+			CertsDir: effectiveCertsDDir,
+			Changed:  false,
+			Mirrors:  mirrorsToTranslate,
+		}, nil
 	}
 
 	var allLines []string
@@ -295,7 +307,12 @@ func transformContainerdConfig(content string, certsDPath string) (string, strin
 		allLines = append(allLines, sec.Render()...)
 	}
 	newContent := strings.Join(allLines, "\n")
-	return newContent, effectiveCertsDDir, changed, mirrorsToTranslate, nil
+	return &transformResult{
+		Content:  newContent,
+		CertsDir: effectiveCertsDDir,
+		Changed:  true,
+		Mirrors:  mirrorsToTranslate,
+	}, nil
 }
 
 func translateMirrorConfig(certsDPath string, host string, endpoints []string) error {
@@ -373,31 +390,25 @@ func updateContainerdConfig(path string) (string, bool, error) {
 
 	strContent := string(content)
 	lastPreWriteContent = strContent
-	newContent, certsDir, changed, mirrorsToTranslate, err := transformContainerdConfig(strContent, defaultCertsDDirectory)
+	result, err := transformContainerdConfig(strContent, certsDDirectory)
 	if err != nil {
 		return "", false, fmt.Errorf("failed to transform %s: %w", path, err)
 	}
 
-	// If the default directory was returned because config_path was absent or empty,
-	// allow certsDDirectory to override defaultCertsDDirectory (e.g. in tests).
-	if certsDir == defaultCertsDDirectory && certsDDirectory != defaultCertsDDirectory {
-		certsDir = certsDDirectory
-	}
-
-	// Translate mirrors into <certsDir>/<host>/hosts.toml before writing config.toml.
+	// Translate mirrors into <result.CertsDir>/<host>/hosts.toml before writing config.toml.
 	// If translation fails, abort before modifying config.toml so the node does not
 	// silently lose mirror endpoints.
-	for host, endpoints := range mirrorsToTranslate {
-		if err := translateMirrorConfig(certsDir, host, endpoints); err != nil {
+	for host, endpoints := range result.Mirrors {
+		if err := translateMirrorConfig(result.CertsDir, host, endpoints); err != nil {
 			return "", false, fmt.Errorf("failed to translate mirror config for %s: %w", host, err)
 		}
 	}
 
-	if !changed {
-		return certsDir, false, nil
+	if !result.Changed {
+		return result.CertsDir, false, nil
 	}
 
-	klog.Infof("Containerd config diff:\n%s", linediff.Diff(strContent, newContent))
+	klog.Infof("Containerd config diff:\n%s", linediff.Diff(strContent, result.Content))
 
 	// Backup before writing if backup does not already exist
 	backupPath := path + ".in-cluster-image-registry.bak"
@@ -424,7 +435,7 @@ func updateContainerdConfig(path string) (string, bool, error) {
 		}
 	}()
 
-	if _, err := tmpFile.WriteString(newContent); err != nil {
+	if _, err := tmpFile.WriteString(result.Content); err != nil {
 		return "", false, fmt.Errorf("failed to write candidate config to %s: %w", tmpName, err)
 	}
 	if err := tmpFile.Chmod(0644); err != nil {
@@ -447,7 +458,7 @@ func updateContainerdConfig(path string) (string, bool, error) {
 	}
 	klog.Infof("Successfully updated containerd config at %s", path)
 
-	return certsDir, true, nil
+	return result.CertsDir, true, nil
 }
 
 func defaultValidateConfig(tmpPath string) error {
