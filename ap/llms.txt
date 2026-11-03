@@ -2,12 +2,10 @@
 
 `ap` (short for **autoproject**) is an opinionated automation tool for gke-labs projects. It uses a "convention over configuration" approach to handle common development tasks.
 
-## AP Roots
+## Repository Root and Subtrees
 
-- A `.ap` directory marks an **AP root**.
-- A repository can contain multiple AP roots, allowing for multiple independent projects within one repo.
-- By default, `ap` commands operate on all AP roots found within the git repository.
-- Use the `--root` flag to specify a single AP root (e.g., `ap --root autodeploy lint`).
+- The git repository root (containing `.git`) is the only root; configuration is read from `<repo>/.ap/`.
+- Commands operate on a subtree of the repository: either the positional target when specified (e.g., `ap e2e autodeploy`, `ap deploy <dir>`), the subtree of the current working directory, or the whole repository when run from the root.
 
 ## Initializing / Onboarding Projects
 
