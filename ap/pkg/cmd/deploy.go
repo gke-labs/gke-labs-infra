@@ -280,6 +280,9 @@ func buildDeployPlans(r *sourcetree.SourceTree, repoRoot, currentAPRoot string, 
 	if err != nil {
 		return nil, err
 	}
+	if len(roots) == 0 {
+		return nil, fmt.Errorf("no scopes found for deploy")
+	}
 
 	var plans []deployPlan
 	for _, apRoot := range roots {

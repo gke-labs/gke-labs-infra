@@ -15,8 +15,8 @@ When you run `ap`, it identifies the closest ap root by walking up from your cur
 ### Environment Variables
 
 You can configure `ap` behavior and override root discovery by setting the following environment variables:
-- `AP_ROOT`: Explicitly sets the path to the ap root.
-- `REPO_ROOT`: Explicitly sets the path to the git repository root.
+- `AP_ROOT`: Explicitly sets the path to the ap root (only applies when the working directory is inside it).
+- `REPO_ROOT`: Explicitly sets the path to the git repository root (only applies when the working directory is inside it).
 - `AP_CACHE_DIR`: Explicitly sets the root cache directory (defaults to `~/.cache/ap` or the OS equivalent; holds tools/protoc, plugins, and codestyle analysis cache).
 
 ## Generation

@@ -237,3 +237,69 @@ func TestFindRepoRootFromPath(t *testing.T) {
 		}
 	})
 }
+
+func TestFindRoots_IgnoresOuterRoots(t *testing.T) {
+	repoA := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repoA, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	repoB := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repoB, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repoB, ".ap"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("REPO_ROOT", repoA)
+	t.Setenv("AP_ROOT", "")
+
+	t.Chdir(repoB)
+
+	gotRepoRoot, gotAPRoot, err := FindRoots()
+	if err != nil {
+		t.Fatalf("FindRoots failed: %v", err)
+	}
+
+	canonicalRepoB, err := filepath.EvalSymlinks(repoB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalGotRepo, err := filepath.EvalSymlinks(gotRepoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalGotAP, err := filepath.EvalSymlinks(gotAPRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if canonicalGotRepo != canonicalRepoB {
+		t.Errorf("expected RepoRoot %s, got %s", canonicalRepoB, canonicalGotRepo)
+	}
+	if canonicalGotAP != canonicalRepoB {
+		t.Errorf("expected APRoot %s, got %s", canonicalRepoB, canonicalGotAP)
+	}
+
+	// Also verify when outer AP_ROOT is inherited
+	t.Setenv("AP_ROOT", repoA)
+	gotRepoRoot2, gotAPRoot2, err := FindRoots()
+	if err != nil {
+		t.Fatalf("FindRoots failed with outer AP_ROOT: %v", err)
+	}
+	canonicalGotRepo2, err := filepath.EvalSymlinks(gotRepoRoot2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalGotAP2, err := filepath.EvalSymlinks(gotAPRoot2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if canonicalGotRepo2 != canonicalRepoB {
+		t.Errorf("expected RepoRoot %s, got %s", canonicalRepoB, canonicalGotRepo2)
+	}
+	if canonicalGotAP2 != canonicalRepoB {
+		t.Errorf("expected APRoot %s, got %s", canonicalRepoB, canonicalGotAP2)
+	}
+}
