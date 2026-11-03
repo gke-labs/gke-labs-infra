@@ -35,21 +35,51 @@ import (
 )
 
 const (
-	defaultCertsDDirectory = "/etc/containerd/certs.d"
-	containerdConfigPath   = "/etc/containerd/config.toml"
-	registryHost           = "images.local"
-	namespace              = "in-cluster-image-registry-system"
-	serviceName            = "in-cluster-image-registry"
+	defaultCertsDDirectory      = "/etc/containerd/certs.d"
+	defaultContainerdConfigPath = "/etc/containerd/config.toml"
+	registryHost                = "images.local"
+	namespace                   = "in-cluster-image-registry-system"
+	serviceName                 = "in-cluster-image-registry"
 )
 
 var (
 	certsDDirectory         = defaultCertsDDirectory
+	containerdConfigPath    = defaultContainerdConfigPath
 	containerdHealthTimeout = 30 * time.Second
 	lastPreWriteContent     string
 	validateConfigFn        = defaultValidateConfig
 	restartContainerdFn     = defaultRestartContainerd
 	checkContainerdActiveFn = defaultCheckContainerdActive
+	dirExistsFn             = defaultDirExists
 )
+
+func defaultDirExists(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return info.IsDir()
+}
+
+func resolveConfigPath(raw string) string {
+	parts := strings.Split(raw, ":")
+	var candidates []string
+	for _, p := range parts {
+		trimmed := strings.TrimSpace(p)
+		if trimmed != "" {
+			candidates = append(candidates, trimmed)
+		}
+	}
+	if len(candidates) == 0 {
+		return ""
+	}
+	for _, c := range candidates {
+		if dirExistsFn(c) {
+			return c
+		}
+	}
+	return candidates[0]
+}
 
 func main() {
 	config, err := rest.InClusterConfig()
@@ -71,7 +101,7 @@ func main() {
 	}
 }
 
-func reconcile(ctx context.Context, clientset *kubernetes.Clientset) error {
+func reconcile(ctx context.Context, clientset kubernetes.Interface) error {
 	svc, err := clientset.CoreV1().Services(namespace).Get(ctx, serviceName, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get service %s/%s: %w", namespace, serviceName, err)
@@ -84,14 +114,14 @@ func reconcile(ctx context.Context, clientset *kubernetes.Clientset) error {
 
 	klog.Infof("Found service %s ClusterIP: %s", serviceName, clusterIP)
 
-	hostsPath := filepath.Join(certsDDirectory, registryHost, "hosts.toml")
-	if err := updateHostsConfig(hostsPath, clusterIP); err != nil {
-		return fmt.Errorf("failed to update hosts config: %w", err)
-	}
-
-	changed, err := updateContainerdConfig(containerdConfigPath)
+	certsDir, changed, err := updateContainerdConfig(containerdConfigPath)
 	if err != nil {
 		return fmt.Errorf("failed to update containerd config: %w", err)
+	}
+
+	hostsPath := filepath.Join(certsDir, registryHost, "hosts.toml")
+	if err := updateHostsConfig(hostsPath, clusterIP); err != nil {
+		return fmt.Errorf("failed to update hosts config: %w", err)
 	}
 
 	if changed {
@@ -103,7 +133,7 @@ func reconcile(ctx context.Context, clientset *kubernetes.Clientset) error {
 	return nil
 }
 
-func transformContainerdConfig(content string, certsDPath string) (string, bool, map[string][]string, error) {
+func transformContainerdConfig(content string, certsDPath string) (string, string, bool, map[string][]string, error) {
 	sections := toml.ParseSections(content)
 	changed := false
 	mirrorsToTranslate := make(map[string][]string)
@@ -122,7 +152,7 @@ func transformContainerdConfig(content string, certsDPath string) (string, bool,
 				vStr := strings.Trim(strings.TrimSpace(val), `"'`)
 				v, err := strconv.Atoi(vStr)
 				if err != nil {
-					return "", false, nil, fmt.Errorf("invalid version %q: %w", vStr, err)
+					return "", "", false, nil, fmt.Errorf("invalid version %q: %w", vStr, err)
 				}
 				version = v
 				break
@@ -202,6 +232,7 @@ func transformContainerdConfig(content string, certsDPath string) (string, bool,
 		}
 	}
 
+	var effectiveCertsDDir string
 	if targetSec != nil {
 		configPathIdx := -1
 		for i, line := range targetSec.Lines {
@@ -213,13 +244,17 @@ func transformContainerdConfig(content string, certsDPath string) (string, bool,
 				if strings.TrimSpace(key) == "config_path" {
 					configPathIdx = i
 					cleanVal := strings.Trim(strings.TrimSpace(val), `"'`)
-					if cleanVal != certsDPath {
+					resolved := resolveConfigPath(cleanVal)
+					if resolved == "" {
 						indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
 						if indent == "" {
 							indent = "  "
 						}
 						targetSec.Lines[i] = fmt.Sprintf("%sconfig_path = %q", indent, certsDPath)
 						changed = true
+						effectiveCertsDDir = certsDPath
+					} else {
+						effectiveCertsDDir = resolved
 					}
 					break
 				}
@@ -229,6 +264,7 @@ func transformContainerdConfig(content string, certsDPath string) (string, bool,
 		if configPathIdx == -1 {
 			targetSec.Lines = append([]string{fmt.Sprintf("  config_path = %q", certsDPath)}, targetSec.Lines...)
 			changed = true
+			effectiveCertsDDir = certsDPath
 		}
 	} else {
 		lastSec := sections[len(sections)-1]
@@ -247,6 +283,11 @@ func transformContainerdConfig(content string, certsDPath string) (string, bool,
 		}
 		sections = append(sections, newSec)
 		changed = true
+		effectiveCertsDDir = certsDPath
+	}
+
+	if !changed {
+		return content, effectiveCertsDDir, false, mirrorsToTranslate, nil
 	}
 
 	var allLines []string
@@ -254,7 +295,7 @@ func transformContainerdConfig(content string, certsDPath string) (string, bool,
 		allLines = append(allLines, sec.Render()...)
 	}
 	newContent := strings.Join(allLines, "\n")
-	return newContent, changed, mirrorsToTranslate, nil
+	return newContent, effectiveCertsDDir, changed, mirrorsToTranslate, nil
 }
 
 func translateMirrorConfig(certsDPath string, host string, endpoints []string) error {
@@ -320,42 +361,49 @@ func copyFile(src, dst string) (err error) {
 	return destFile.Sync()
 }
 
-func updateContainerdConfig(path string) (bool, error) {
+func updateContainerdConfig(path string) (string, bool, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			klog.Warningf("containerd config file %s does not exist", path)
-			return false, nil
+			return certsDDirectory, false, nil
 		}
-		return false, fmt.Errorf("failed to read %s: %w", path, err)
+		return "", false, fmt.Errorf("failed to read %s: %w", path, err)
 	}
 
 	strContent := string(content)
 	lastPreWriteContent = strContent
-	newContent, changed, mirrorsToTranslate, err := transformContainerdConfig(strContent, defaultCertsDDirectory)
+	newContent, certsDir, changed, mirrorsToTranslate, err := transformContainerdConfig(strContent, defaultCertsDDirectory)
 	if err != nil {
-		return false, fmt.Errorf("failed to transform %s: %w", path, err)
-	}
-	if !changed {
-		return false, nil
+		return "", false, fmt.Errorf("failed to transform %s: %w", path, err)
 	}
 
-	klog.Infof("Containerd config diff:\n%s", linediff.Diff(strContent, newContent))
+	// If the default directory was returned because config_path was absent or empty,
+	// allow certsDDirectory to override defaultCertsDDirectory (e.g. in tests).
+	if certsDir == defaultCertsDDirectory && certsDDirectory != defaultCertsDDirectory {
+		certsDir = certsDDirectory
+	}
 
-	// Translate mirrors into certs.d/<host>/hosts.toml before writing config.toml.
+	// Translate mirrors into <certsDir>/<host>/hosts.toml before writing config.toml.
 	// If translation fails, abort before modifying config.toml so the node does not
 	// silently lose mirror endpoints.
 	for host, endpoints := range mirrorsToTranslate {
-		if err := translateMirrorConfig(certsDDirectory, host, endpoints); err != nil {
-			return false, fmt.Errorf("failed to translate mirror config for %s: %w", host, err)
+		if err := translateMirrorConfig(certsDir, host, endpoints); err != nil {
+			return "", false, fmt.Errorf("failed to translate mirror config for %s: %w", host, err)
 		}
 	}
+
+	if !changed {
+		return certsDir, false, nil
+	}
+
+	klog.Infof("Containerd config diff:\n%s", linediff.Diff(strContent, newContent))
 
 	// Backup before writing if backup does not already exist
 	backupPath := path + ".in-cluster-image-registry.bak"
 	if _, err := os.Stat(backupPath); os.IsNotExist(err) {
 		if err := copyFile(path, backupPath); err != nil {
-			return false, fmt.Errorf("failed to create backup %s: %w", backupPath, err)
+			return "", false, fmt.Errorf("failed to create backup %s: %w", backupPath, err)
 		}
 		klog.Infof("Created initial backup of containerd config at %s", backupPath)
 	}
@@ -364,7 +412,7 @@ func updateContainerdConfig(path string) (bool, error) {
 	dir := filepath.Dir(path)
 	tmpFile, err := os.CreateTemp(dir, "config.toml.tmp.*")
 	if err != nil {
-		return false, fmt.Errorf("failed to create temp file: %w", err)
+		return "", false, fmt.Errorf("failed to create temp file: %w", err)
 	}
 	tmpName := tmpFile.Name()
 	defer func() {
@@ -377,29 +425,29 @@ func updateContainerdConfig(path string) (bool, error) {
 	}()
 
 	if _, err := tmpFile.WriteString(newContent); err != nil {
-		return false, fmt.Errorf("failed to write candidate config to %s: %w", tmpName, err)
+		return "", false, fmt.Errorf("failed to write candidate config to %s: %w", tmpName, err)
 	}
 	if err := tmpFile.Chmod(0644); err != nil {
-		return false, fmt.Errorf("failed to chmod %s: %w", tmpName, err)
+		return "", false, fmt.Errorf("failed to chmod %s: %w", tmpName, err)
 	}
 	if err := tmpFile.Close(); err != nil {
-		return false, fmt.Errorf("failed to close %s: %w", tmpName, err)
+		return "", false, fmt.Errorf("failed to close %s: %w", tmpName, err)
 	}
 
 	// Validate candidate: containerd config dump verifies TOML syntax and checks for duplicate
 	// keys/tables, but does not execute CRI plugin validation (e.g. mirrors vs config_path conflicts);
 	// runtime health is verified by polling systemctl is-active containerd post-restart.
 	if err := validateConfigFn(tmpName); err != nil {
-		return false, fmt.Errorf("candidate containerd config validation failed: %w", err)
+		return "", false, fmt.Errorf("candidate containerd config validation failed: %w", err)
 	}
 
 	// Rename into place
 	if err := os.Rename(tmpName, path); err != nil {
-		return false, fmt.Errorf("failed to rename %s to %s: %w", tmpName, path, err)
+		return "", false, fmt.Errorf("failed to rename %s to %s: %w", tmpName, path, err)
 	}
 	klog.Infof("Successfully updated containerd config at %s", path)
 
-	return true, nil
+	return certsDir, true, nil
 }
 
 func defaultValidateConfig(tmpPath string) error {
