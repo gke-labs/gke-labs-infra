@@ -24,6 +24,9 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/pelletier/go-toml/v2"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 const fixtureA = `version = 2
@@ -190,6 +193,75 @@ const expectedOutputE = `[plugins."io.containerd.grpc.v1.cri"]
   config_path = "/etc/containerd/certs.d"
 `
 
+const fixtureV2ExistingConfigPath = `version = 2
+
+[plugins."io.containerd.grpc.v1.cri".registry]
+  config_path = "/some/other/dir"
+`
+
+const fixtureV3ExistingConfigPath = `version = 3
+
+[plugins."io.containerd.cri.v1.images".registry]
+  config_path = "/some/other/dir"
+`
+
+const fixtureV4ExistingConfigPath = `version = 4
+
+[plugins."io.containerd.cri.v1.images".registry]
+  config_path = "/some/other/dir"
+`
+
+const fixtureV2MissingConfigPath = `version = 2
+
+[plugins."io.containerd.grpc.v1.cri".registry]
+`
+
+const expectedOutputV2MissingConfigPath = `version = 2
+
+[plugins."io.containerd.grpc.v1.cri".registry]
+  config_path = "/etc/containerd/certs.d"
+`
+
+const fixtureV3MissingConfigPath = `version = 3
+
+[plugins."io.containerd.cri.v1.images".registry]
+`
+
+const expectedOutputV3MissingConfigPath = `version = 3
+
+[plugins."io.containerd.cri.v1.images".registry]
+  config_path = "/etc/containerd/certs.d"
+`
+
+const fixtureV4MissingConfigPath = `version = 4
+
+[plugins."io.containerd.cri.v1.images".registry]
+`
+
+const expectedOutputV4MissingConfigPath = `version = 4
+
+[plugins."io.containerd.cri.v1.images".registry]
+  config_path = "/etc/containerd/certs.d"
+`
+
+const fixtureV2ExistingWithMirrors = `version = 2
+
+[plugins."io.containerd.grpc.v1.cri".registry]
+  config_path = "/custom/certs.d"
+
+[plugins."io.containerd.grpc.v1.cri".registry.mirrors."docker.io"]
+  endpoint = ["https://mirror.gcr.io"]
+`
+
+const expectedOutputV2ExistingWithMirrors = `version = 2
+
+[plugins."io.containerd.grpc.v1.cri".registry]
+  config_path = "/custom/certs.d"
+
+# [plugins."io.containerd.grpc.v1.cri".registry.mirrors."docker.io"]
+#   endpoint = ["https://mirror.gcr.io"]
+`
+
 func init() {
 	// In unit test environments where containerd is not runnable via nsenter,
 	// validate config candidate using the TOML parser.
@@ -231,59 +303,138 @@ func validateTOMLOrContainerd(t *testing.T, content string) {
 
 func TestTransformContainerdConfig_TableDriven(t *testing.T) {
 	tests := []struct {
-		name            string
-		input           string
-		expectedOutput  string
-		expectedChanged bool
-		expectErr       bool
+		name             string
+		input            string
+		expectedOutput   string
+		expectedCertsDir string
+		expectedChanged  bool
+		expectErr        bool
+		dirExists        func(string) bool
 	}{
 		{
-			name:            "(a) fixture upgrade case: stale v3 removed, mirrors neutralized, v2 certs.d added",
-			input:           fixtureA,
-			expectedOutput:  expectedOutputA,
-			expectedChanged: true,
+			name:             "(a) fixture upgrade case: stale v3 removed, mirrors neutralized, v2 certs.d added",
+			input:            fixtureA,
+			expectedOutput:   expectedOutputA,
+			expectedCertsDir: defaultCertsDDirectory,
+			expectedChanged:  true,
 		},
 		{
-			name:            "(b) fresh GKE node: fixture minus stale v3 block -> same expected output",
-			input:           fixtureB,
-			expectedOutput:  expectedOutputA,
-			expectedChanged: true,
+			name:             "(b) fresh GKE node: fixture minus stale v3 block -> same expected output",
+			input:            fixtureB,
+			expectedOutput:   expectedOutputA,
+			expectedCertsDir: defaultCertsDDirectory,
+			expectedChanged:  true,
 		},
 		{
-			name:            "(c) v2 with single-quoted header and empty config_path replaced in place",
-			input:           fixtureC,
-			expectedOutput:  expectedOutputC,
-			expectedChanged: true,
+			name:             "(c) v2 with single-quoted header and empty config_path replaced in place",
+			input:            fixtureC,
+			expectedOutput:   expectedOutputC,
+			expectedCertsDir: defaultCertsDDirectory,
+			expectedChanged:  true,
 		},
 		{
-			name:            "(d) v3 with single-quoted header and empty config_path replaced in place",
-			input:           fixtureD,
-			expectedOutput:  expectedOutputD,
-			expectedChanged: true,
+			name:             "(d) v3 with single-quoted header and empty config_path replaced in place",
+			input:            fixtureD,
+			expectedOutput:   expectedOutputD,
+			expectedCertsDir: defaultCertsDDirectory,
+			expectedChanged:  true,
 		},
 		{
-			name:            "(d2) v4 with single-quoted header and empty config_path replaced in place",
-			input:           fixtureV4,
-			expectedOutput:  expectedOutputV4,
-			expectedChanged: true,
+			name:             "(d2) v4 with single-quoted header and empty config_path replaced in place",
+			input:            fixtureV4,
+			expectedOutput:   expectedOutputV4,
+			expectedCertsDir: defaultCertsDDirectory,
+			expectedChanged:  true,
 		},
 		{
-			name:            "(d3) v4 with existing certs.d config_path is a no-op",
-			input:           fixtureV4Configured,
-			expectedOutput:  fixtureV4Configured,
-			expectedChanged: false,
+			name:             "(d3) v4 with existing certs.d config_path is a no-op",
+			input:            fixtureV4Configured,
+			expectedOutput:   fixtureV4Configured,
+			expectedCertsDir: defaultCertsDDirectory,
+			expectedChanged:  false,
 		},
 		{
-			name:            "(e) no version key: grpc.v1.cri table used",
-			input:           fixtureE,
-			expectedOutput:  expectedOutputE,
-			expectedChanged: true,
+			name:             "(e) no version key: grpc.v1.cri table used",
+			input:            fixtureE,
+			expectedOutput:   expectedOutputE,
+			expectedCertsDir: defaultCertsDDirectory,
+			expectedChanged:  true,
 		},
 		{
-			name:            "(f) running on the output of (a): idempotent no-op",
-			input:           expectedOutputA,
-			expectedOutput:  expectedOutputA,
-			expectedChanged: false,
+			name:             "(f) running on the output of (a): idempotent no-op",
+			input:            expectedOutputA,
+			expectedOutput:   expectedOutputA,
+			expectedCertsDir: defaultCertsDDirectory,
+			expectedChanged:  false,
+		},
+		{
+			name:             "(g1) v2 with existing config_path is not changed and uses existing dir",
+			input:            fixtureV2ExistingConfigPath,
+			expectedOutput:   fixtureV2ExistingConfigPath,
+			expectedCertsDir: "/some/other/dir",
+			expectedChanged:  false,
+		},
+		{
+			name:             "(g2) v3 with existing config_path is not changed and uses existing dir",
+			input:            fixtureV3ExistingConfigPath,
+			expectedOutput:   fixtureV3ExistingConfigPath,
+			expectedCertsDir: "/some/other/dir",
+			expectedChanged:  false,
+		},
+		{
+			name:             "(g3) v4 with existing config_path is not changed and uses existing dir",
+			input:            fixtureV4ExistingConfigPath,
+			expectedOutput:   fixtureV4ExistingConfigPath,
+			expectedCertsDir: "/some/other/dir",
+			expectedChanged:  false,
+		},
+		{
+			name:             "(h1) v2 with missing config_path adds default",
+			input:            fixtureV2MissingConfigPath,
+			expectedOutput:   expectedOutputV2MissingConfigPath,
+			expectedCertsDir: defaultCertsDDirectory,
+			expectedChanged:  true,
+		},
+		{
+			name:             "(h2) v3 with missing config_path adds default",
+			input:            fixtureV3MissingConfigPath,
+			expectedOutput:   expectedOutputV3MissingConfigPath,
+			expectedCertsDir: defaultCertsDDirectory,
+			expectedChanged:  true,
+		},
+		{
+			name:             "(h3) v4 with missing config_path adds default",
+			input:            fixtureV4MissingConfigPath,
+			expectedOutput:   expectedOutputV4MissingConfigPath,
+			expectedCertsDir: defaultCertsDDirectory,
+			expectedChanged:  true,
+		},
+		{
+			name:             "(i) v2 with existing config_path and legacy mirrors translates mirrors and preserves config_path",
+			input:            fixtureV2ExistingWithMirrors,
+			expectedOutput:   expectedOutputV2ExistingWithMirrors,
+			expectedCertsDir: "/custom/certs.d",
+			expectedChanged:  true,
+		},
+		{
+			name:             "(j1) v3 with colon-separated config_path prefers directory that exists on disk",
+			input:            "version = 3\n\n[plugins.\"io.containerd.cri.v1.images\".registry]\n  config_path = \"/nonexistent/first:/custom/second\"\n",
+			expectedOutput:   "version = 3\n\n[plugins.\"io.containerd.cri.v1.images\".registry]\n  config_path = \"/nonexistent/first:/custom/second\"\n",
+			expectedCertsDir: "/custom/second",
+			expectedChanged:  false,
+			dirExists: func(p string) bool {
+				return p == "/custom/second"
+			},
+		},
+		{
+			name:             "(j2) v3 with colon-separated config_path falls back to first entry when neither exists on disk",
+			input:            "version = 3\n\n[plugins.\"io.containerd.cri.v1.images\".registry]\n  config_path = \"/nonexistent/first:/custom/second\"\n",
+			expectedOutput:   "version = 3\n\n[plugins.\"io.containerd.cri.v1.images\".registry]\n  config_path = \"/nonexistent/first:/custom/second\"\n",
+			expectedCertsDir: "/nonexistent/first",
+			expectedChanged:  false,
+			dirExists: func(p string) bool {
+				return false
+			},
 		},
 		{
 			name:      "invalid non-integer version returns error",
@@ -294,7 +445,14 @@ func TestTransformContainerdConfig_TableDriven(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			gotOutput, gotChanged, _, err := transformContainerdConfig(tc.input, defaultCertsDDirectory)
+			if tc.dirExists != nil {
+				origDirExists := dirExistsFn
+				dirExistsFn = tc.dirExists
+				defer func() {
+					dirExistsFn = origDirExists
+				}()
+			}
+			res, err := transformContainerdConfig(tc.input, defaultCertsDDirectory)
 			if tc.expectErr {
 				if err == nil {
 					t.Fatalf("expected error, got nil")
@@ -304,13 +462,16 @@ func TestTransformContainerdConfig_TableDriven(t *testing.T) {
 			if err != nil {
 				t.Fatalf("transformContainerdConfig failed: %v", err)
 			}
-			if gotChanged != tc.expectedChanged {
-				t.Errorf("expected changed=%v, got %v", tc.expectedChanged, gotChanged)
+			if res.Changed != tc.expectedChanged {
+				t.Errorf("expected changed=%v, got %v", tc.expectedChanged, res.Changed)
 			}
-			if diff := cmp.Diff(tc.expectedOutput, gotOutput); diff != "" {
+			if tc.expectedCertsDir != "" && res.CertsDir != tc.expectedCertsDir {
+				t.Errorf("expected certsDir=%q, got %q", tc.expectedCertsDir, res.CertsDir)
+			}
+			if diff := cmp.Diff(tc.expectedOutput, res.Content); diff != "" {
 				t.Errorf("output mismatch (-want +got):\n%s", diff)
 			}
-			validateTOMLOrContainerd(t, gotOutput)
+			validateTOMLOrContainerd(t, res.Content)
 		})
 	}
 }
@@ -331,7 +492,7 @@ func TestUpdateContainerdConfig_FullLifecycle(t *testing.T) {
 	}
 
 	// 1. First run: should change config, create backup, translate mirrors
-	changed, err := updateContainerdConfig(configPath)
+	_, changed, err := updateContainerdConfig(configPath)
 	if err != nil {
 		t.Fatalf("updateContainerdConfig failed: %v", err)
 	}
@@ -343,7 +504,8 @@ func TestUpdateContainerdConfig_FullLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read updated config: %v", err)
 	}
-	if diff := cmp.Diff(expectedOutputA, string(content)); diff != "" {
+	expectedOutput := strings.ReplaceAll(expectedOutputA, defaultCertsDDirectory, certsDir)
+	if diff := cmp.Diff(expectedOutput, string(content)); diff != "" {
 		t.Errorf("updated config mismatch (-want +got):\n%s", diff)
 	}
 
@@ -376,7 +538,7 @@ func TestUpdateContainerdConfig_FullLifecycle(t *testing.T) {
 	}
 
 	// 2. Second run on same file: should be no-op (idempotence)
-	changed, err = updateContainerdConfig(configPath)
+	_, changed, err = updateContainerdConfig(configPath)
 	if err != nil {
 		t.Fatalf("second updateContainerdConfig failed: %v", err)
 	}
@@ -594,5 +756,265 @@ func TestUpdateHostsConfig(t *testing.T) {
 	}
 	if !strings.Contains(string(content), `[host."http://10.96.0.11"]`) {
 		t.Errorf("expected updated IP in content: %s", string(content))
+	}
+}
+
+func TestResolveConfigPath(t *testing.T) {
+	origDirExists := dirExistsFn
+	defer func() {
+		dirExistsFn = origDirExists
+	}()
+
+	existingDirs := map[string]bool{
+		"/custom/exists": true,
+		"/dir2":          true,
+	}
+	dirExistsFn = func(path string) bool {
+		return existingDirs[path]
+	}
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "whitespace only",
+			input:    "   ",
+			expected: "",
+		},
+		{
+			name:     "colons only",
+			input:    " : : ",
+			expected: "",
+		},
+		{
+			name:     "single existing directory",
+			input:    "/custom/exists",
+			expected: "/custom/exists",
+		},
+		{
+			name:     "single nonexistent directory",
+			input:    "/custom/nonexistent",
+			expected: "/custom/nonexistent",
+		},
+		{
+			name:     "colon list prefers existing directory",
+			input:    "/dir1:/dir2",
+			expected: "/dir2",
+		},
+		{
+			name:     "colon list falls back to first entry if none exist",
+			input:    "/no1:/no2",
+			expected: "/no1",
+		},
+		{
+			name:     "colon list with spaces around colons",
+			input:    " /dir1 : /dir2 ",
+			expected: "/dir2",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolveConfigPath(tc.input)
+			if got != tc.expected {
+				t.Errorf("resolveConfigPath(%q) = %q, want %q", tc.input, got, tc.expected)
+			}
+		})
+	}
+}
+
+func TestReconcile_ConfigPathHandling(t *testing.T) {
+	ctx := t.Context()
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      serviceName,
+			Namespace: namespace,
+		},
+		Spec: corev1.ServiceSpec{
+			ClusterIP: "10.96.0.10",
+		},
+	}
+
+	cases := []struct {
+		name                 string
+		initialConfig        string
+		expectedRestartCount int
+		expectConfigChanged  bool
+		expectedCertsDirFunc func(tmpDir string) string
+		setupDir             func(tmpDir string)
+	}{
+		{
+			name:                 "v2 with existing config_path: not changed, no restart, hosts.toml written under config_path",
+			initialConfig:        fixtureV2ExistingConfigPath,
+			expectedRestartCount: 0,
+			expectConfigChanged:  false,
+			expectedCertsDirFunc: func(tmpDir string) string {
+				return filepath.Join(tmpDir, "custom-v2-certs")
+			},
+		},
+		{
+			name:                 "v3 with existing config_path: not changed, no restart, hosts.toml written under config_path",
+			initialConfig:        fixtureV3ExistingConfigPath,
+			expectedRestartCount: 0,
+			expectConfigChanged:  false,
+			expectedCertsDirFunc: func(tmpDir string) string {
+				return filepath.Join(tmpDir, "custom-v3-certs")
+			},
+		},
+		{
+			name:                 "v4 with existing config_path: not changed, no restart, hosts.toml written under config_path",
+			initialConfig:        fixtureV4ExistingConfigPath,
+			expectedRestartCount: 0,
+			expectConfigChanged:  false,
+			expectedCertsDirFunc: func(tmpDir string) string {
+				return filepath.Join(tmpDir, "custom-v4-certs")
+			},
+		},
+		{
+			name:                 "v2 missing config_path: added default, containerd restarted, hosts.toml written",
+			initialConfig:        fixtureV2MissingConfigPath,
+			expectedRestartCount: 1,
+			expectConfigChanged:  true,
+			expectedCertsDirFunc: func(tmpDir string) string {
+				return filepath.Join(tmpDir, "default-certs")
+			},
+		},
+		{
+			name:                 "v3 missing config_path: added default, containerd restarted, hosts.toml written",
+			initialConfig:        fixtureV3MissingConfigPath,
+			expectedRestartCount: 1,
+			expectConfigChanged:  true,
+			expectedCertsDirFunc: func(tmpDir string) string {
+				return filepath.Join(tmpDir, "default-certs")
+			},
+		},
+		{
+			name:                 "v4 missing config_path: added default, containerd restarted, hosts.toml written",
+			initialConfig:        fixtureV4MissingConfigPath,
+			expectedRestartCount: 1,
+			expectConfigChanged:  true,
+			expectedCertsDirFunc: func(tmpDir string) string {
+				return filepath.Join(tmpDir, "default-certs")
+			},
+		},
+		{
+			name:                 "v2 with existing config_path and legacy mirrors: mirrors translated, config_path preserved, restarted",
+			initialConfig:        fixtureV2ExistingWithMirrors,
+			expectedRestartCount: 1,
+			expectConfigChanged:  true,
+			expectedCertsDirFunc: func(tmpDir string) string {
+				return filepath.Join(tmpDir, "custom-mirror-certs")
+			},
+		},
+		{
+			name: "colon-separated config_path prefers existing directory on disk",
+			initialConfig: `version = 3
+
+[plugins."io.containerd.cri.v1.images".registry]
+  config_path = "/nonexistent/first:EXISTING_DIR"
+`,
+			expectedRestartCount: 0,
+			expectConfigChanged:  false,
+			setupDir: func(tmpDir string) {
+				existing := filepath.Join(tmpDir, "existing-colon-dir")
+				if err := os.MkdirAll(existing, 0755); err != nil {
+					t.Fatalf("failed to create existing dir: %v", err)
+				}
+			},
+			expectedCertsDirFunc: func(tmpDir string) string {
+				return filepath.Join(tmpDir, "existing-colon-dir")
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.toml")
+			defaultDir := filepath.Join(tmpDir, "default-certs")
+
+			origConfigPath := containerdConfigPath
+			containerdConfigPath = configPath
+			defer func() { containerdConfigPath = origConfigPath }()
+
+			origCertsDDirectory := certsDDirectory
+			certsDDirectory = defaultDir
+			defer func() { certsDDirectory = origCertsDDirectory }()
+
+			origDirExists := dirExistsFn
+			defer func() { dirExistsFn = origDirExists }()
+
+			restarts := 0
+			origRestart := restartContainerdFn
+			restartContainerdFn = func() error {
+				restarts++
+				return nil
+			}
+			defer func() { restartContainerdFn = origRestart }()
+
+			if tc.setupDir != nil {
+				tc.setupDir(tmpDir)
+			}
+
+			targetCertsDir := tc.expectedCertsDirFunc(tmpDir)
+
+			cfgContent := strings.ReplaceAll(tc.initialConfig, "/some/other/dir", targetCertsDir)
+			cfgContent = strings.ReplaceAll(cfgContent, "/custom/certs.d", targetCertsDir)
+			cfgContent = strings.ReplaceAll(cfgContent, "EXISTING_DIR", targetCertsDir)
+
+			if err := os.WriteFile(configPath, []byte(cfgContent), 0644); err != nil {
+				t.Fatalf("failed to write initial config: %v", err)
+			}
+
+			client := fake.NewSimpleClientset(svc)
+			err := reconcile(ctx, client)
+			if err != nil {
+				t.Fatalf("reconcile failed: %v", err)
+			}
+
+			if restarts != tc.expectedRestartCount {
+				t.Errorf("expected %d restarts, got %d", tc.expectedRestartCount, restarts)
+			}
+
+			currentConfig, err := os.ReadFile(configPath)
+			if err != nil {
+				t.Fatalf("failed to read configPath: %v", err)
+			}
+
+			if !tc.expectConfigChanged && string(currentConfig) != cfgContent {
+				t.Errorf("expected config.toml to remain unchanged (-want +got):\n%s", cmp.Diff(cfgContent, string(currentConfig)))
+			}
+			if tc.expectConfigChanged && string(currentConfig) == cfgContent {
+				t.Errorf("expected config.toml to be modified, but content was unchanged")
+			}
+
+			hostsFile := filepath.Join(targetCertsDir, registryHost, "hosts.toml")
+			hostsContent, err := os.ReadFile(hostsFile)
+			if err != nil {
+				t.Fatalf("expected hosts.toml at %s, but read failed: %v", hostsFile, err)
+			}
+			if !strings.Contains(string(hostsContent), `server = "http://10.96.0.10"`) {
+				t.Errorf("expected ClusterIP in hosts.toml, got:\n%s", string(hostsContent))
+			}
+
+			// If legacy mirrors were present in input, verify mirror translation was written under targetCertsDir
+			if strings.Contains(cfgContent, "mirrors") {
+				mirrorFile := filepath.Join(targetCertsDir, "docker.io", "hosts.toml")
+				mirrorData, err := os.ReadFile(mirrorFile)
+				if err != nil {
+					t.Fatalf("expected translated mirror file at %s: %v", mirrorFile, err)
+				}
+				if !strings.Contains(string(mirrorData), `[host."https://mirror.gcr.io"]`) {
+					t.Errorf("expected mirror.gcr.io in translated mirror file: %s", string(mirrorData))
+				}
+			}
+		})
 	}
 }
