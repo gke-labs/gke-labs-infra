@@ -55,7 +55,7 @@ jobs:
           name: artifacts-ap-build
           path: /tmp/artifacts
           if-no-files-found: ignore
-  ap-e2e:
+  ap-e2e-ap:
     runs-on: ubuntu-latest
     env:
       ARTIFACTS: /tmp/artifacts
@@ -72,14 +72,14 @@ jobs:
         with:
           go-version-file: 'go.mod'
 
-      - name: Run ap-e2e
-        run: ./dev/ci/presubmits/ap-e2e
+      - name: Run ap-e2e-ap
+        run: ./dev/ci/presubmits/ap-e2e-ap
 
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2
         with:
-          name: artifacts-ap-e2e
+          name: artifacts-ap-e2e-ap
           path: /tmp/artifacts
           if-no-files-found: ignore
   ap-e2e-autodeploy:

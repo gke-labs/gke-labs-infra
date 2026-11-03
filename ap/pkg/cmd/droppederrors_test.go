@@ -85,7 +85,7 @@ func main() {
 	optWrite := DroppedErrorsOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tmpDir,
-			APRoot:   tmpDir,
+			Dir:      tmpDir,
 		},
 		Baseline:      baselineFile,
 		WriteBaseline: true,
@@ -103,7 +103,7 @@ func main() {
 	optCheck := DroppedErrorsOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tmpDir,
-			APRoot:   tmpDir,
+			Dir:      tmpDir,
 		},
 		Baseline:  baselineFile,
 		Mode:      "error",
@@ -138,7 +138,7 @@ func main() {
 	optWarn := DroppedErrorsOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tmpDir,
-			APRoot:   tmpDir,
+			Dir:      tmpDir,
 		},
 		Baseline:  baselineFile,
 		Mode:      "warn",
@@ -166,7 +166,7 @@ func TestRunDroppedErrors_InvalidMode(t *testing.T) {
 	opt := DroppedErrorsOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tmpDir,
-			APRoot:   tmpDir,
+			Dir:      tmpDir,
 		},
 		Mode: "eror",
 	}

@@ -32,10 +32,8 @@ import (
 // RootOptions holds the configuration for the root command.
 type RootOptions struct {
 	RepoRoot   string
-	APRoot     string
-	APRoots    []string
+	Dir        string
 	DryRun     bool
-	RootFlag   string
 	SourceTree *sourcetree.SourceTree
 }
 
@@ -63,54 +61,10 @@ func (opt *RootOptions) GetSourceTree() (*sourcetree.SourceTree, error) {
 	return r, nil
 }
 
-// ResolveRoot handles validating and resolving opt.RootFlag if specified.
-func (opt *RootOptions) ResolveRoot() error {
-	if opt.RootFlag == "" {
-		return nil
-	}
-	absRoot := opt.RootFlag
-	if !filepath.IsAbs(absRoot) {
-		wd, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("failed to get current working directory: %w", err)
-		}
-		absRoot = filepath.Join(wd, opt.RootFlag)
-	}
-	fi, err := os.Stat(absRoot)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("specified root %q does not exist", opt.RootFlag)
-		}
-		return fmt.Errorf("failed to stat specified root %q: %w", opt.RootFlag, err)
-	}
-	if !fi.IsDir() {
-		return fmt.Errorf("specified root %q is not a directory", opt.RootFlag)
-	}
-	if _, err := os.Stat(filepath.Join(absRoot, ".ap")); err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("specified root %q is not an AP root (missing .ap directory)", opt.RootFlag)
-		}
-		return fmt.Errorf("failed to check for .ap directory in %q: %w", opt.RootFlag, err)
-	}
-	opt.APRoots = []string{absRoot}
-	opt.APRoot = absRoot
-
-	// If absRoot is outside RepoRoot, anchor RepoRoot to absRoot
-	if opt.RepoRoot == "" || (!strings.HasPrefix(absRoot, opt.RepoRoot+string(filepath.Separator)) && absRoot != opt.RepoRoot) {
-		opt.RepoRoot = absRoot
-		opt.SourceTree = nil
-	}
-	return nil
-}
-
-// Resolve resolves the target paths based on args.
+// Resolve resolves the target subtree path based on args.
 func (opt *RootOptions) Resolve(args []string) error {
 	if opt.RepoRoot == "" {
 		return fmt.Errorf("repo root is not set")
-	}
-
-	if opt.RootFlag != "" {
-		return opt.ResolveRoot()
 	}
 
 	r, err := opt.GetSourceTree()
@@ -118,11 +72,33 @@ func (opt *RootOptions) Resolve(args []string) error {
 		return err
 	}
 
-	roots, err := config.ResolveTargets(r, opt.RepoRoot, opt.APRoot, args)
-	if err != nil {
-		return err
+	if len(args) == 0 {
+		return nil
 	}
-	opt.APRoots = roots
+
+	baseDir := opt.Dir
+	if baseDir == "" {
+		baseDir = opt.RepoRoot
+	}
+
+	target := args[0]
+	resolved := config.ResolveTargetPath(opt.RepoRoot, baseDir, target)
+	resolved = strings.TrimSuffix(resolved, string(filepath.Separator)+"...")
+	if resolved == opt.RepoRoot {
+		opt.Dir = opt.RepoRoot
+		return nil
+	}
+
+	if !r.DirExists(resolved) && !r.FileExists(resolved) && resolved != opt.RepoRoot {
+		return fmt.Errorf("target path %q does not exist", target)
+	}
+
+	rel, err := filepath.Rel(opt.RepoRoot, resolved)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return fmt.Errorf("target path %q is outside repository root", target)
+	}
+
+	opt.Dir = resolved
 	return nil
 }
 
@@ -135,19 +111,22 @@ func BuildRootCommand() *cobra.Command {
 		Short: "ap is a tool for managing gke-labs projects",
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			cmd.SilenceUsage = true
-			repoRoot, apRoot, err := findRoots()
+			repoRoot, err := findRoots()
 			if err != nil {
 				return err
 			}
 			opt.RepoRoot = repoRoot
-			opt.APRoot = apRoot
+			cwd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			opt.Dir = cwd
 			return nil
 		},
 	}
 
 	fs := cmd.PersistentFlags()
 	fs.BoolVar(&opt.DryRun, "dry-run", false, "If true, just print the tasks that would be executed")
-	fs.StringVar(&opt.RootFlag, "root", "", "The specific AP root to operate on")
 
 	klogFlags := flag.NewFlagSet("klog", flag.ContinueOnError)
 	klog.InitFlags(klogFlags)
@@ -173,14 +152,14 @@ func BuildRootCommand() *cobra.Command {
 	return cmd
 }
 
-// findRoots attempts to find the root of the git repository and the closest ap root
-func findRoots() (string, string, error) {
+// findRoots attempts to find the root of the git repository
+func findRoots() (string, error) {
 	return tool.FindRoots()
 }
 
 func requireRepoRoot(opt *RootOptions) error {
 	if opt.RepoRoot == "" {
-		return fmt.Errorf("this command must be run inside a git repository (or set REPO_ROOT or AP_ROOT)")
+		return fmt.Errorf("this command must be run inside a git repository (or set REPO_ROOT)")
 	}
 	return nil
 }

@@ -53,10 +53,7 @@ func buildToolSubcommand(rootOpt *RootOptions, t *tool.Tool) *cobra.Command {
 				raw = raw[1:]
 			}
 
-			repoRoot := rootOpt.APRoot
-			if repoRoot == "" {
-				repoRoot = rootOpt.RepoRoot
-			}
+			repoRoot := rootOpt.RepoRoot
 			if repoRoot == "" {
 				repoRoot = tool.FindRepoRoot()
 			}
@@ -112,18 +109,10 @@ func BuildToolUpdateVersionsCommand(rootOpt *RootOptions) *cobra.Command {
 		Short: "Update baked-in tool release versions and checksums in versions.yaml",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if rootOpt.RootFlag != "" {
-				if err := rootOpt.ResolveRoot(); err != nil {
-					return err
-				}
-			}
 			repoRoot := rootOpt.RepoRoot
 			if repoRoot == "" {
-				repoRoot = rootOpt.APRoot
-			}
-			if repoRoot == "" {
 				var err error
-				repoRoot, _, err = findRoots()
+				repoRoot, err = findRoots()
 				if err != nil {
 					return err
 				}

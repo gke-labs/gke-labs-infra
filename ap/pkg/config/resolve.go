@@ -15,91 +15,60 @@
 package config
 
 import (
-	"fmt"
 	"path/filepath"
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 )
 
-// ResolveTargets resolves directory specifiers to a list of AP root directories.
+// ResolveTargets resolves directory specifiers to a list of target directories.
 // Supported syntaxes:
 //
-//	.     - Current AP root
-//	./... - Current AP root and all child AP roots
-//	//... - Repository root AP root and all child AP roots
-//	//foo - The AP root at repoRoot/foo
-func ResolveTargets(r *sourcetree.SourceTree, repoRoot, currentAPRoot string, args []string) ([]string, error) {
+//	.     - Current directory
+//	./... - Current directory
+//	//... - Repository root
+//	//foo - The directory at repoRoot/foo
+func ResolveTargets(r *sourcetree.SourceTree, repoRoot, currentDir string, args []string) ([]string, error) {
 	if len(args) == 0 {
 		args = []string{"."}
 	}
 
-	var roots []string
+	var targets []string
 	seen := make(map[string]bool)
 
 	for _, arg := range args {
-		var resolved []string
-		var err error
+		var resolved string
 
 		switch {
-		case arg == ".":
-			if currentAPRoot != "" {
-				resolved = []string{currentAPRoot}
-			}
-		case arg == "./...":
-			if currentAPRoot != "" {
-				resolved, err = FindAllAPRoots(r, currentAPRoot)
-				if err != nil {
-					return nil, fmt.Errorf("failed to find AP roots in %s: %w", currentAPRoot, err)
-				}
-				if len(resolved) == 0 {
-					resolved = []string{currentAPRoot}
-				}
-				// If the currentAPRoot itself is an AP root, FindAllAPRoots will include it
-				// because FindAllAPRoots includes the root if it has a .ap directory.
+		case arg == "." || arg == "./...":
+			if currentDir != "" {
+				resolved = currentDir
+			} else {
+				resolved = repoRoot
 			}
 		case arg == "//...":
-			if repoRoot != "" {
-				resolved, err = FindAllAPRoots(r, repoRoot)
-				if err != nil {
-					return nil, fmt.Errorf("failed to find AP roots in %s: %w", repoRoot, err)
-				}
-				if len(resolved) == 0 {
-					resolved = []string{repoRoot}
-				}
-			}
+			resolved = repoRoot
 		default:
-			path := ResolveTargetPath(repoRoot, currentAPRoot, arg)
-			if strings.HasSuffix(path, "/...") {
-				basePath := strings.TrimSuffix(path, "/...")
-				resolved, err = FindAllAPRoots(r, basePath)
-				if err != nil {
-					return nil, fmt.Errorf("failed to find AP roots in %s: %w", basePath, err)
-				}
-				if len(resolved) == 0 {
-					resolved = []string{basePath}
-				}
-			} else {
-				resolved = []string{path}
+			path := ResolveTargetPath(repoRoot, currentDir, arg)
+			if strings.HasSuffix(path, string(filepath.Separator)+"...") {
+				path = strings.TrimSuffix(path, string(filepath.Separator)+"...")
 			}
+			resolved = path
 		}
 
-		for _, r := range resolved {
-			// Clean the path to avoid duplicate entries like /foo/bar and /foo/bar/
-			cleanPath := filepath.Clean(r)
-			if !seen[cleanPath] {
-				roots = append(roots, cleanPath)
-				seen[cleanPath] = true
-			}
+		cleanPath := filepath.Clean(resolved)
+		if !seen[cleanPath] {
+			targets = append(targets, cleanPath)
+			seen[cleanPath] = true
 		}
 	}
 
-	return roots, nil
+	return targets, nil
 }
 
 // ResolveTargetPath converts a target argument (such as "//foo", "./bar", "baz", or absolute path)
 // into an absolute filesystem path, stripping any ":label" suffix.
-func ResolveTargetPath(repoRoot, currentAPRoot, arg string) string {
+func ResolveTargetPath(repoRoot, currentDir, arg string) string {
 	if strings.HasPrefix(arg, "//") {
 		pathPart := strings.TrimPrefix(arg, "//")
 		if idx := strings.Index(pathPart, ":"); idx != -1 {
@@ -117,7 +86,7 @@ func ResolveTargetPath(repoRoot, currentAPRoot, arg string) string {
 	if idx := strings.Index(pathPart, ":"); idx != -1 {
 		pathPart = pathPart[:idx]
 	}
-	base := currentAPRoot
+	base := currentDir
 	if base == "" {
 		base = repoRoot
 	}

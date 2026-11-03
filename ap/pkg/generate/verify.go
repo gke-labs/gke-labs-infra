@@ -395,7 +395,7 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.APScope, al
 			sb.WriteString(f)
 			sb.WriteString("\n")
 		}
-		apCmd, err := GetApCommand(repoRoot, repoRoot)
+		apCmd, err := GetApCommand(repoRoot)
 		if err != nil {
 			apCmd = "go run github.com/gke-labs/gke-labs-infra/ap@latest"
 		}

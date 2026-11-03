@@ -20,11 +20,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileheaders"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
+	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
@@ -109,20 +111,6 @@ func (t *GoGenerateTask) GetChildren() []tasks.Task {
 	return nil
 }
 
-func hasGoGenerate(r *sourcetree.SourceTree, apRoot string) bool {
-	if r == nil {
-		return false
-	}
-	for _, f := range r.Files() {
-		if f.APRoot() == apRoot || f.Module() == apRoot {
-			if f.HasGoGenerate() {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // BuiltinGeneratorTask represents a task to run a built-in generator.
 type BuiltinGeneratorTask struct {
 	Name    string
@@ -142,41 +130,54 @@ func (t *BuiltinGeneratorTask) GetChildren() []tasks.Task {
 	return nil
 }
 
+func hasGoGenerateInModule(r *sourcetree.SourceTree, mod string) bool {
+	if r == nil {
+		return false
+	}
+	for _, f := range r.Files() {
+		if f.Module() == mod && f.HasGoGenerate() {
+			return true
+		}
+	}
+	return false
+}
+
 // GenerateTasks returns a task group for all generation tasks.
 func GenerateTasks(repoRoot string, scopes []*tasks.APScope) (tasks.Task, error) {
 	var allTasks []tasks.Task
 
 	for _, scope := range scopes {
-		apRoot := scope.Dir
+		dir := scope.Dir
 		group := &tasks.Group{
-			Name: fmt.Sprintf("generate-%s", filepath.Base(apRoot)),
+			Name: fmt.Sprintf("generate-%s", filepath.Base(dir)),
 		}
 
 		r := scope.SourceTree
 
 		// 1. Run legacy scripts
-		tasksDir := filepath.Join(apRoot, "dev", "tasks")
-		for _, f := range r.FilesInDir(tasksDir) {
-			name := f.Name
-			if strings.HasPrefix(name, "generate-") {
-				// Skip generate-github-actions as we are replacing it
-				if name == "generate-github-actions" {
-					continue
-				}
-
-				group.Tasks = append(group.Tasks, &LegacyScriptTask{
-					Name: name,
-					Path: f.Path,
-					Dir:  apRoot,
-				})
+		legacyScripts, err := tasks.FindTaskScripts(r, dir, tasks.WithPrefix("generate-"), tasks.WithExcludePrefix("generate-github-actions"))
+		if err != nil {
+			return nil, err
+		}
+		for _, ts := range legacyScripts {
+			script, ok := ts.(*tasks.TaskScript)
+			if !ok {
+				continue
 			}
+			group.Tasks = append(group.Tasks, &LegacyScriptTask{
+				Name: script.Name,
+				Path: script.Path,
+				Dir:  script.Root,
+			})
 		}
 
-		// 2. Run go generate if any Go file in the scope has //go:generate
-		if hasGoGenerate(r, apRoot) {
-			group.Tasks = append(group.Tasks, &GoGenerateTask{
-				Dir: apRoot,
-			})
+		// 2. Run go generate in each discovered module that has //go:generate
+		for _, mod := range r.Under(dir).Modules() {
+			if hasGoGenerateInModule(r, mod) {
+				group.Tasks = append(group.Tasks, &GoGenerateTask{
+					Dir: mod,
+				})
+			}
 		}
 
 		if len(group.Tasks) > 0 {
@@ -238,17 +239,6 @@ func Run(ctx context.Context, repoRoot string, scopes []*tasks.APScope) error {
 	return t.Run(ctx, tasks.NewScope(repoRoot, repoRoot, r))
 }
 
-func getSuffix(repoRoot, apRoot string) string {
-	if repoRoot == apRoot {
-		return ""
-	}
-	rel, err := filepath.Rel(repoRoot, apRoot)
-	if err != nil {
-		return ""
-	}
-	return "-" + strings.ReplaceAll(rel, string(filepath.Separator), "-")
-}
-
 func runGenerateVerifierGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot string) error {
 	presubmitsDir := filepath.Join(repoRoot, "dev", "ci", "presubmits")
 
@@ -259,7 +249,7 @@ func runGenerateVerifierGenerator(_ context.Context, r *sourcetree.SourceTree, r
 		return fmt.Errorf("failed to create presubmits dir: %w", err)
 	}
 
-	apCmd, err := GetApCommand(repoRoot, repoRoot)
+	apCmd, err := GetApCommand(repoRoot)
 	if err != nil {
 		return err
 	}
@@ -333,7 +323,7 @@ func runAuditGeneratedGenerator(_ context.Context, r *sourcetree.SourceTree, rep
 		return fmt.Errorf("failed to create presubmits dir: %w", err)
 	}
 
-	apCmd, err := GetApCommand(repoRoot, repoRoot)
+	apCmd, err := GetApCommand(repoRoot)
 	if err != nil {
 		return err
 	}
@@ -387,7 +377,7 @@ func runApTestGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot st
 		return fmt.Errorf("failed to create presubmits dir: %w", err)
 	}
 
-	apCmd, err := GetApCommand(repoRoot, repoRoot)
+	apCmd, err := GetApCommand(repoRoot)
 	if err != nil {
 		return err
 	}
@@ -441,7 +431,7 @@ func runApLintGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot st
 		return fmt.Errorf("failed to create presubmits dir: %w", err)
 	}
 
-	apCmd, err := GetApCommand(repoRoot, repoRoot)
+	apCmd, err := GetApCommand(repoRoot)
 	if err != nil {
 		return err
 	}
@@ -528,7 +518,7 @@ func runApBuildGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot s
 		return fmt.Errorf("failed to create presubmits dir: %w", err)
 	}
 
-	apCmd, err := GetApCommand(repoRoot, repoRoot)
+	apCmd, err := GetApCommand(repoRoot)
 	if err != nil {
 		return err
 	}
@@ -575,73 +565,108 @@ cd "${REPO_ROOT}"
 func runApE2eGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot string, scopes []*tasks.APScope) error {
 	presubmitsDir := filepath.Join(repoRoot, "dev", "ci", "presubmits")
 
-	// Remove the global ap-e2e script if it exists
-	globalTargetFile := filepath.Join(presubmitsDir, "ap-e2e")
-	exists, err := fileutils.FileExists(globalTargetFile)
+	type e2eTarget struct {
+		target string
+		suffix string
+	}
+
+	targets := make(map[string]e2eTarget)
+
+	for _, scope := range scopes {
+		for _, t := range scope.E2ETasks {
+			if ts, ok := t.(*tasks.TaskScript); ok {
+				rel, err := filepath.Rel(repoRoot, ts.Root)
+				if err != nil {
+					continue
+				}
+				if rel == "." {
+					targets["."] = e2eTarget{target: ".", suffix: ""}
+				} else {
+					suffix := "-" + strings.ReplaceAll(filepath.ToSlash(rel), "/", "-")
+					targets[rel] = e2eTarget{target: rel, suffix: suffix}
+				}
+			} else if gt, ok := t.(*golang.GoE2eTask); ok {
+				rel, err := filepath.Rel(repoRoot, gt.Dir)
+				if err != nil {
+					continue
+				}
+				if rel == "." {
+					targets["."] = e2eTarget{target: ".", suffix: ""}
+				} else {
+					suffix := "-" + strings.ReplaceAll(filepath.ToSlash(rel), "/", "-")
+					targets[rel] = e2eTarget{target: rel, suffix: suffix}
+				}
+			}
+		}
+	}
+
+	desiredFiles := make(map[string]bool)
+	for _, tgt := range targets {
+		targetFile := filepath.Join(presubmitsDir, "ap-e2e"+tgt.suffix)
+		desiredFiles[targetFile] = true
+	}
+
+	// Clean up any ap-e2e* presubmits that are not in desiredFiles
+	entries, err := os.ReadDir(presubmitsDir)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to read presubmits dir: %w", err)
+	}
+	if err == nil {
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), "ap-e2e") {
+				p := filepath.Join(presubmitsDir, e.Name())
+				if !desiredFiles[p] {
+					klog.Infof("Removing %s as no matching e2e tasks found", p)
+					if err := r.Remove(p); err != nil {
+						return fmt.Errorf("failed to remove %s: %w", p, err)
+					}
+				}
+			}
+		}
+	}
+
+	if len(targets) == 0 {
+		return nil
+	}
+
+	if err := os.MkdirAll(presubmitsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create presubmits dir: %w", err)
+	}
+
+	apCmd, err := GetApCommand(repoRoot)
 	if err != nil {
 		return err
 	}
-	if exists {
-		klog.Infof("Removing global %s", globalTargetFile)
-		if err := r.Remove(globalTargetFile); err != nil {
-			return fmt.Errorf("failed to remove %s: %w", globalTargetFile, err)
-		}
+
+	headers, err := config.LoadHeaders(repoRoot)
+	if err != nil {
+		return fmt.Errorf("failed to load headers: %w", err)
+	}
+	headerContent, err := fileheaders.GenerateHeader(headers, "#")
+	if err != nil {
+		return fmt.Errorf("failed to generate header: %w", err)
 	}
 
-	for _, scope := range scopes {
-		apRoot := scope.Dir
-		e2eTasks := scope.E2ETasks
+	skipGuard, err := presubmitSkipGuardFromConfig(repoRoot)
+	if err != nil {
+		return err
+	}
 
-		suffix := getSuffix(repoRoot, apRoot)
-		targetFile := filepath.Join(presubmitsDir, "ap-e2e"+suffix)
+	var headerBlock string
+	if headerContent != "" {
+		headerBlock = headerContent + "\n"
+	}
 
-		if len(e2eTasks) == 0 {
-			exists, err := fileutils.FileExists(targetFile)
-			if err != nil {
-				return err
-			}
-			if exists {
-				klog.Infof("Removing %s as no e2e tasks found", targetFile)
-				if err := r.Remove(targetFile); err != nil {
-					return fmt.Errorf("failed to remove %s: %w", targetFile, err)
-				}
-			}
-			continue
-		}
+	var keys []string
+	for k := range targets {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
 
+	for _, k := range keys {
+		tgt := targets[k]
+		targetFile := filepath.Join(presubmitsDir, "ap-e2e"+tgt.suffix)
 		klog.Infof("Generating %s", targetFile)
-
-		if err := os.MkdirAll(presubmitsDir, 0755); err != nil {
-			return fmt.Errorf("failed to create presubmits dir: %w", err)
-		}
-
-		apCmd, err := GetApCommand(repoRoot, apRoot)
-		if err != nil {
-			return err
-		}
-
-		relApRoot, err := filepath.Rel(repoRoot, apRoot)
-		if err != nil {
-			return fmt.Errorf("failed to get relative path: %w", err)
-		}
-		headers, err := config.LoadHeaders(repoRoot)
-		if err != nil {
-			return fmt.Errorf("failed to load headers: %w", err)
-		}
-		headerContent, err := fileheaders.GenerateHeader(headers, "#")
-		if err != nil {
-			return fmt.Errorf("failed to generate header: %w", err)
-		}
-
-		skipGuard, err := presubmitSkipGuardFromConfig(repoRoot)
-		if err != nil {
-			return err
-		}
-
-		var headerBlock string
-		if headerContent != "" {
-			headerBlock = headerContent + "\n"
-		}
 
 		content := fmt.Sprintf(`#!/bin/bash
 # Code generated by ap generate. DO NOT EDIT.
@@ -655,7 +680,7 @@ cd "${REPO_ROOT}"
 %s
 # Run e2e tests
 %s e2e %s
-`, headerBlock, skipGuard, apCmd, relApRoot)
+`, headerBlock, skipGuard, apCmd, tgt.target)
 		if err := r.WriteFile(targetFile, []byte(content), 0755); err != nil {
 			return fmt.Errorf("failed to write %s: %w", targetFile, err)
 		}
@@ -698,44 +723,31 @@ permissions:
 jobs:
 `)
 
-	for _, scope := range scopes {
-		apRoot := scope.Dir
-		scopeTree := scope.SourceTree
+	presubmitsDir := filepath.Join(repoRoot, "dev", "ci", "presubmits")
+	entries, err := os.ReadDir(presubmitsDir)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to read presubmits dir %s: %w", presubmitsDir, err)
+	}
 
-		suffix := getSuffix(repoRoot, apRoot)
-		presubmitsDir := filepath.Join(apRoot, "dev", "ci", "presubmits")
-		// Read directly from the live filesystem here: earlier generators
-		// in this same run (verify-generate, ap-test, ap-lint, ap-build, ap-e2e,
-		// and any legacy generate-* scripts) write presubmit scripts to
-		// dev/ci/presubmits, so the pre-run in-memory repo tree snapshot does
-		// not contain them on a fresh run.
-		entries, err := os.ReadDir(presubmitsDir)
-		if os.IsNotExist(err) {
+	goModExists := r.FileExists(filepath.Join(repoRoot, "go.mod"))
+	relPresubmitsDir, err := filepath.Rel(repoRoot, presubmitsDir)
+	if err != nil {
+		return err
+	}
+
+	var scriptNames []string
+	for _, entry := range entries {
+		if entry.IsDir() {
 			continue
 		}
-		if err != nil {
-			return fmt.Errorf("failed to read presubmits dir %s: %w", presubmitsDir, err)
-		}
+		scriptNames = append(scriptNames, entry.Name())
+	}
+	sort.Strings(scriptNames)
 
-		goModExists := scopeTree.FileExists(filepath.Join(apRoot, "go.mod"))
+	for _, scriptName := range scriptNames {
+		jobName := scriptName
 
-		relPresubmitsDir, err := filepath.Rel(repoRoot, presubmitsDir)
-		if err != nil {
-			return err
-		}
-
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			scriptName := entry.Name()
-
-			jobName := scriptName
-			if suffix != "" && !strings.HasSuffix(jobName, suffix) {
-				jobName = jobName + suffix
-			}
-
-			sb.WriteString(fmt.Sprintf(`  %s:
+		sb.WriteString(fmt.Sprintf(`  %s:
     runs-on: ubuntu-latest
     env:
       ARTIFACTS: /tmp/artifacts
@@ -748,38 +760,34 @@ jobs:
           persist-credentials: false
 `, jobName, actionCheckout))
 
-			if goModExists {
-				relGoMod, err := filepath.Rel(repoRoot, filepath.Join(apRoot, "go.mod"))
-				if err != nil {
-					return fmt.Errorf("failed to get relative path for go.mod: %w", err)
-				}
-				sb.WriteString(fmt.Sprintf(`
+		if goModExists {
+			sb.WriteString(fmt.Sprintf(`
       - name: Setup Go
         uses: %s
         with:
-          go-version-file: '%s'
-`, actionSetupGo, relGoMod))
-			}
+          go-version-file: 'go.mod'
+`, actionSetupGo))
+		}
 
-			if scriptName == "ap-build" {
-				cleanupTaskPath := filepath.Join(apRoot, "dev", "tasks", "free-disk-space-on-github-actions-runner")
-				hasCleanup, err := fileutils.FileExists(cleanupTaskPath)
+		if scriptName == "ap-build" {
+			cleanupTaskPath := filepath.Join(repoRoot, "dev", "tasks", "free-disk-space-on-github-actions-runner")
+			hasCleanup, err := fileutils.FileExists(cleanupTaskPath)
+			if err != nil {
+				return err
+			}
+			if hasCleanup {
+				relCleanupTask, err := filepath.Rel(repoRoot, cleanupTaskPath)
 				if err != nil {
-					return err
+					return fmt.Errorf("failed to get relative path for cleanup task: %w", err)
 				}
-				if hasCleanup {
-					relCleanupTask, err := filepath.Rel(repoRoot, cleanupTaskPath)
-					if err != nil {
-						return fmt.Errorf("failed to get relative path for cleanup task: %w", err)
-					}
-					sb.WriteString(fmt.Sprintf(`
+				sb.WriteString(fmt.Sprintf(`
       - name: Free disk space
         run: ./%s
 `, relCleanupTask))
-				}
 			}
+		}
 
-			sb.WriteString(fmt.Sprintf(`
+		sb.WriteString(fmt.Sprintf(`
       - name: Run %s
         run: ./%s/%s
 
@@ -791,7 +799,6 @@ jobs:
           path: /tmp/artifacts
           if-no-files-found: ignore
 `, jobName, relPresubmitsDir, scriptName, actionUploadArtifact, jobName))
-		}
 	}
 
 	if err := os.MkdirAll(workflowsDir, 0755); err != nil {
@@ -805,10 +812,10 @@ jobs:
 	return nil
 }
 
-func GetApCommand(repoRoot, apRoot string) (string, error) {
+func GetApCommand(repoRoot string) (string, error) {
 	defaultCmd := "go run github.com/gke-labs/gke-labs-infra/ap@latest"
 
-	cfg, err := config.LoadAPConfig(apRoot)
+	cfg, err := config.LoadAPConfig(repoRoot)
 	if err != nil {
 		return "", err
 	}

@@ -77,7 +77,7 @@ func WithExcludePrefix(prefix string) FindOption {
 	}
 }
 
-// FindTaskScripts looks for executable scripts in dev/tasks that match the prefix.
+// FindTaskScripts looks for executable scripts in dev/tasks anywhere under root that match the prefix.
 func FindTaskScripts(r *sourcetree.SourceTree, root string, opts ...FindOption) ([]Task, error) {
 	if r == nil {
 		return nil, fmt.Errorf("sourcetree is nil")
@@ -87,9 +87,17 @@ func FindTaskScripts(r *sourcetree.SourceTree, root string, opts ...FindOption) 
 		o(&options)
 	}
 
-	tasksDir := filepath.Join(root, "dev", "tasks")
 	var tasks []Task
-	for _, f := range r.FilesInDir(tasksDir) {
+	for _, f := range r.Under(root).Files() {
+		dir := filepath.Dir(f.Path)
+		if filepath.Base(dir) != "tasks" {
+			continue
+		}
+		parentDev := filepath.Dir(dir)
+		if filepath.Base(parentDev) != "dev" {
+			continue
+		}
+
 		name := f.Name
 		if options.Prefix != "" && !strings.HasPrefix(name, options.Prefix) {
 			continue
@@ -97,15 +105,20 @@ func FindTaskScripts(r *sourcetree.SourceTree, root string, opts ...FindOption) 
 		if options.ExcludePrefix != "" && strings.HasPrefix(name, options.ExcludePrefix) {
 			continue
 		}
+
+		taskRoot := filepath.Dir(parentDev)
 		tasks = append(tasks, &TaskScript{
 			Name: name,
 			Path: f.Path,
-			Root: root,
+			Root: taskRoot,
 		})
 	}
 
-	// Sort by name for deterministic order
+	// Sort by name for deterministic order (tie-break by path)
 	sort.Slice(tasks, func(i, j int) bool {
+		if tasks[i].GetName() == tasks[j].GetName() {
+			return tasks[i].(*TaskScript).Path < tasks[j].(*TaskScript).Path
+		}
 		return tasks[i].GetName() < tasks[j].GetName()
 	})
 

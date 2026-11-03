@@ -89,7 +89,6 @@ type File struct {
 	RelPath string // Path relative to view root (forward slash separated)
 	Name    string // File base name
 
-	apRoot string // Enclosing AP root directory path
 	module string // Enclosing Go module directory path
 
 	mu sync.Mutex
@@ -128,11 +127,6 @@ func (f *File) Info() os.FileInfo {
 		f.infoValid = true
 	}
 	return f.info
-}
-
-// APRoot returns the path to the closest enclosing AP root directory.
-func (f *File) APRoot() string {
-	return f.apRoot
 }
 
 // Module returns the path to the closest enclosing Go module root directory.

@@ -118,7 +118,7 @@ func TestRunDeploy_DryRun(t *testing.T) {
 	opt := DeployOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tempDir,
-			APRoots:  []string{tempDir},
+			Dir:      tempDir,
 			DryRun:   true,
 		},
 		BuildkitHost: "k8s://autodeploy-system/buildkit",
@@ -273,7 +273,7 @@ func TestBuildDeployPlan_KindMode(t *testing.T) {
 		opt := DeployOptions{
 			RootOptions: &RootOptions{
 				RepoRoot: tempDir,
-				APRoots:  []string{tempDir},
+				Dir:      tempDir,
 				DryRun:   true,
 			},
 			kindCluster: "my-cluster",
@@ -356,7 +356,7 @@ func TestBuildDeployPlan_KindMode(t *testing.T) {
 				opt := DeployOptions{
 					RootOptions: &RootOptions{
 						RepoRoot: tempDir,
-						APRoots:  []string{tempDir},
+						Dir:      tempDir,
 						DryRun:   true,
 					},
 					kindCluster: "my-cluster",
@@ -527,7 +527,7 @@ func TestBuildDeployPlan_DryRunClusterKind(t *testing.T) {
 	opt := DeployOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tempDir,
-			APRoots:  []string{tempDir},
+			Dir:      tempDir,
 			DryRun:   true,
 		},
 		Cluster: "kind://foo",
@@ -620,7 +620,7 @@ func TestBuildDeployPlan_DryRunClusterNonKind(t *testing.T) {
 	opt := DeployOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tempDir,
-			APRoots:  []string{tempDir},
+			Dir:      tempDir,
 			DryRun:   true,
 		},
 		Cluster: "my-custom-context",
@@ -707,7 +707,7 @@ func TestDeploy_FixtureRepo_SelectK8s(t *testing.T) {
 	opt := DeployOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tempDir,
-			APRoot:   tempDir,
+			Dir:      tempDir,
 			DryRun:   true,
 		},
 		BuildkitHost: "k8s://autodeploy-system/buildkit",
@@ -755,7 +755,7 @@ func TestDeploy_FixtureRepo_SelectWholeRoot(t *testing.T) {
 	opt := DeployOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tempDir,
-			APRoot:   tempDir,
+			Dir:      tempDir,
 			DryRun:   true,
 		},
 		BuildkitHost: "k8s://autodeploy-system/buildkit",
@@ -805,7 +805,7 @@ func TestDeploy_FixtureRepo_SelectSubK8s(t *testing.T) {
 	opt := DeployOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tempDir,
-			APRoot:   tempDir,
+			Dir:      tempDir,
 			DryRun:   true,
 		},
 		BuildkitHost: "k8s://autodeploy-system/buildkit",
@@ -845,7 +845,7 @@ func TestDeploy_FixtureRepo_SelectFile(t *testing.T) {
 	opt := DeployOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tempDir,
-			APRoot:   tempDir,
+			Dir:      tempDir,
 			DryRun:   true,
 		},
 		BuildkitHost: "k8s://autodeploy-system/buildkit",
@@ -885,7 +885,7 @@ func TestDeploy_FixtureRepo_SelectNoImages(t *testing.T) {
 	opt := DeployOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tempDir,
-			APRoot:   tempDir,
+			Dir:      tempDir,
 			DryRun:   true,
 		},
 		BuildkitHost: "k8s://autodeploy-system/buildkit",
@@ -943,7 +943,7 @@ func TestDeploy_ZeroManifestsMatchError(t *testing.T) {
 	opt := DeployOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tempDir,
-			APRoot:   tempDir,
+			Dir:      tempDir,
 			DryRun:   true,
 		},
 	}
@@ -1003,7 +1003,7 @@ spec:
 	opt := DeployOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tempDir,
-			APRoot:   tempDir,
+			Dir:      tempDir,
 			DryRun:   true,
 		},
 	}
@@ -1026,7 +1026,7 @@ func TestDeploy_NonexistentPath(t *testing.T) {
 	opt := DeployOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tempDir,
-			APRoot:   tempDir,
+			Dir:      tempDir,
 			DryRun:   true,
 		},
 	}
@@ -1043,7 +1043,7 @@ func TestDeploy_NonexistentPath(t *testing.T) {
 func TestDeploy_BuildkitAndBuildx(t *testing.T) {
 	tempDir := setupFixtureRepo(t)
 
-	r, err := (&RootOptions{RepoRoot: tempDir, APRoot: tempDir}).GetSourceTree()
+	r, err := (&RootOptions{RepoRoot: tempDir, Dir: tempDir}).GetSourceTree()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1052,7 +1052,7 @@ func TestDeploy_BuildkitAndBuildx(t *testing.T) {
 	optBuildx := DeployOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tempDir,
-			APRoot:   tempDir,
+			Dir:      tempDir,
 			DryRun:   true,
 		},
 		BuildkitHost: "",
@@ -1087,7 +1087,7 @@ func TestDeploy_BuildkitAndBuildx(t *testing.T) {
 	optBuildctl := DeployOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tempDir,
-			APRoot:   tempDir,
+			Dir:      tempDir,
 			DryRun:   true,
 		},
 		BuildkitHost: customHost,
@@ -1119,9 +1119,10 @@ func TestDeploy_BuildkitAndBuildx(t *testing.T) {
 
 func TestDeploy_CobraCommand_DryRun(t *testing.T) {
 	tempDir := setupFixtureRepo(t)
+	t.Chdir(tempDir)
 
 	rootCmd := BuildRootCommand()
-	rootCmd.SetArgs([]string{"--root=" + tempDir, "deploy", "--dry-run", "--buildkit-host=k8s://autodeploy-system/buildkit", "./k8s"})
+	rootCmd.SetArgs([]string{"deploy", "--dry-run", "--buildkit-host=k8s://autodeploy-system/buildkit", "./k8s"})
 
 	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("rootCmd.Execute() failed: %v", err)
@@ -1157,7 +1158,7 @@ func TestDeploy_DryRun_StdoutOutput(t *testing.T) {
 	optK8s := DeployOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tempDir,
-			APRoot:   tempDir,
+			Dir:      tempDir,
 			DryRun:   true,
 		},
 		BuildkitHost: "k8s://autodeploy-system/buildkit",
@@ -1192,7 +1193,7 @@ func TestDeploy_DryRun_StdoutOutput(t *testing.T) {
 	optDot := DeployOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tempDir,
-			APRoot:   tempDir,
+			Dir:      tempDir,
 			DryRun:   true,
 		},
 		BuildkitHost: "k8s://autodeploy-system/buildkit",
@@ -1227,7 +1228,7 @@ func TestDeploy_DryRun_StdoutOutput(t *testing.T) {
 func TestBuildDeployPlans_Direct(t *testing.T) {
 	tempDir := setupFixtureRepo(t)
 
-	r, err := (&RootOptions{RepoRoot: tempDir, APRoot: tempDir}).GetSourceTree()
+	r, err := (&RootOptions{RepoRoot: tempDir, Dir: tempDir}).GetSourceTree()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1304,7 +1305,7 @@ data:
 	opt := DeployOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tempDir,
-			APRoot:   tempDir,
+			Dir:      tempDir,
 			DryRun:   true,
 		},
 		BuildkitHost: "k8s://autodeploy-system/buildkit",
@@ -1373,7 +1374,7 @@ spec:
 	opt := DeployOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tempDir,
-			APRoot:   tempDir,
+			Dir:      tempDir,
 			DryRun:   true,
 		},
 	}
@@ -1435,7 +1436,7 @@ func TestDeploy_InvalidNamespace(t *testing.T) {
 	opt := DeployOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tempDir,
-			APRoot:   tempDir,
+			Dir:      tempDir,
 			DryRun:   true,
 		},
 		Namespace: "INVALID_NAME",
@@ -1456,7 +1457,7 @@ func TestDeploy_DryRun_WithNamespace(t *testing.T) {
 	opt := DeployOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tempDir,
-			APRoot:   tempDir,
+			Dir:      tempDir,
 			DryRun:   true,
 		},
 		BuildkitHost: "k8s://autodeploy-system/buildkit",
@@ -1487,7 +1488,7 @@ func TestDeploy_DryRun_WithoutNamespace_Unchanged(t *testing.T) {
 	opt := DeployOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tempDir,
-			APRoot:   tempDir,
+			Dir:      tempDir,
 			DryRun:   true,
 		},
 		BuildkitHost: "k8s://autodeploy-system/buildkit",
@@ -1539,7 +1540,7 @@ func TestDeploy_RunDeploy_NonexistentNamespaceFailsEarly(t *testing.T) {
 	opt := DeployOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tempDir,
-			APRoot:   tempDir,
+			Dir:      tempDir,
 			DryRun:   false,
 		},
 		Namespace: "nonexistent-ns",
@@ -1578,7 +1579,7 @@ func TestDeploy_DryRun_ResolvedReferences(t *testing.T) {
 		opt := DeployOptions{
 			RootOptions: &RootOptions{
 				RepoRoot: tempDir,
-				APRoot:   tempDir,
+				Dir:      tempDir,
 				DryRun:   true,
 			},
 			BuildkitHost: "k8s://autodeploy-system/buildkit",
@@ -1604,7 +1605,7 @@ func TestDeploy_DryRun_ResolvedReferences(t *testing.T) {
 		opt := DeployOptions{
 			RootOptions: &RootOptions{
 				RepoRoot: tempDir,
-				APRoot:   tempDir,
+				Dir:      tempDir,
 				DryRun:   true,
 			},
 			BuildkitHost: "k8s://autodeploy-system/buildkit",
@@ -1633,7 +1634,7 @@ func TestDeploy_DryRun_ResolvedReferences(t *testing.T) {
 		opt := DeployOptions{
 			RootOptions: &RootOptions{
 				RepoRoot: tempDir,
-				APRoot:   tempDir,
+				Dir:      tempDir,
 				DryRun:   true,
 			},
 			kindCluster: "test-cluster",

@@ -59,10 +59,9 @@ func RunVersionBump(ctx context.Context, opt VersionBumpOptions) error {
 	if err != nil {
 		return err
 	}
-	for _, apRoot := range opt.APRoots {
-		if err := versionbump.Run(ctx, r, apRoot, opt.GoVersion); err != nil {
-			return err
-		}
+	dir := opt.Dir
+	if dir == "" {
+		dir = opt.RepoRoot
 	}
-	return nil
+	return versionbump.Run(ctx, r, dir, opt.GoVersion)
 }

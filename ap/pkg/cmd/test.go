@@ -60,7 +60,7 @@ func RunTest(ctx context.Context, opt TestOptions) error {
 		return err
 	}
 
-	scopes, err := DiscoverScopes(r, opt.RepoRoot, opt.APRoots)
+	scopes, err := DiscoverScopes(r, opt.RepoRoot, opt.Dir)
 	if err != nil {
 		return err
 	}

@@ -46,8 +46,12 @@ func TestInClusterRegistry(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Copy autodeploy/examples/helloworld into tmpDir so it has .ap/, go.mod, and images/
-	if err := os.CopyFS(tmpDir, os.DirFS(filepath.Join(repoRoot, "autodeploy", "examples", "helloworld"))); err != nil {
+	// Copy autodeploy/examples/helloworld into tmpDir matching repository layout
+	targetDir := filepath.Join(tmpDir, "autodeploy", "examples", "helloworld")
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.CopyFS(targetDir, os.DirFS(filepath.Join(repoRoot, "autodeploy", "examples", "helloworld"))); err != nil {
 		t.Fatalf("failed to copy examples/helloworld to temp dir: %v", err)
 	}
 
@@ -67,12 +71,29 @@ spec:
     command: ["/bin/sh", "-c", "echo hello"]
 `
 
-	if err := os.WriteFile(filepath.Join(tmpDir, "k8s", "pod.yaml"), []byte(manifest), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(targetDir, "k8s", "pod.yaml"), []byte(manifest), 0644); err != nil {
 		t.Fatalf("failed to write pod manifest: %v", err)
 	}
 
+	h.RunCmd("git", "init", tmpDir)
+	h.RunCmd("git", "-C", tmpDir, "config", "user.email", "test@example.com")
+	h.RunCmd("git", "-C", tmpDir, "config", "user.name", "Test")
+	h.RunCmd("git", "-C", tmpDir, "commit", "--allow-empty", "-m", "init")
+
+	apBin := filepath.Join(t.TempDir(), "ap")
+	h.RunCmd("go", "build", "-o", apBin, "./ap")
+
+	origWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(origWd)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+
 	// Run ap deploy (which builds, pushes, and applies in one root)
-	h.RunCmd("go", "run", "./ap", "deploy", "--root="+tmpDir)
+	h.RunCmd(apBin, "deploy", "autodeploy/examples/helloworld", "--cluster=kind-ap-registry-e2e")
 
 	// Verify the pod was created and has the correct image
 	image := h.RunCmd("kubectl", "get", "pod", "test-pod", "-n", "default", "-o", "jsonpath={.spec.containers[0].image}")

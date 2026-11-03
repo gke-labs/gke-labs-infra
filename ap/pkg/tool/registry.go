@@ -36,7 +36,6 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kind"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kubectl"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/protoc"
-	"k8s.io/klog/v2"
 )
 
 // Invocation represents the prepared execution parameters for a tool.
@@ -403,75 +402,21 @@ func Resolve(argv0 string) (*Tool, bool) {
 	return Lookup(base)
 }
 
-// isInside reports whether child is located within parent (or is parent itself).
-func isInside(parent, child string) bool {
-	p, err := filepath.Abs(parent)
-	if err != nil {
-		return false
-	}
-	p, err = filepath.EvalSymlinks(p)
-	if err != nil {
-		return false
-	}
-	c, err := filepath.Abs(child)
-	if err != nil {
-		return false
-	}
-	c, err = filepath.EvalSymlinks(c)
-	if err != nil {
-		return false
-	}
-	rel, err := filepath.Rel(p, c)
-	return err == nil && !strings.HasPrefix(rel, "..")
-}
-
-// FindRoots attempts to discover the repository root and ap root from environment or current working directory.
-func FindRoots() (string, string, error) {
+// FindRoots attempts to discover the repository root from current working directory.
+func FindRoots() (string, error) {
 	startDir, err := os.Getwd()
 	if err != nil {
-		return "", "", err
-	}
-
-	repoRoot := os.Getenv("REPO_ROOT")
-	if repoRoot != "" && !isInside(repoRoot, startDir) {
-		klog.V(2).Infof("ignoring REPO_ROOT %s: working directory %s is outside", repoRoot, startDir)
-		repoRoot = ""
-	}
-
-	envAPRoot := os.Getenv("AP_ROOT")
-	if envAPRoot != "" && !isInside(envAPRoot, startDir) {
-		klog.V(2).Infof("ignoring AP_ROOT %s: working directory %s is outside", envAPRoot, startDir)
-		envAPRoot = ""
-	}
-	apRoot := envAPRoot
-
-	if repoRoot != "" && apRoot != "" {
-		return repoRoot, apRoot, nil
+		return "", err
 	}
 
 	dir := startDir
 	for {
-		if apRoot == "" {
-			hasAP, err := fileutils.FileExists(filepath.Join(dir, ".ap"))
-			if err != nil {
-				return "", "", err
-			}
-			if hasAP {
-				apRoot = dir
-			}
-		}
 		hasGit, err := fileutils.FileExists(filepath.Join(dir, ".git"))
 		if err != nil {
-			return "", "", err
+			return "", err
 		}
 		if hasGit {
-			if repoRoot == "" {
-				repoRoot = dir
-			}
-			if apRoot == "" {
-				apRoot = dir
-			}
-			return repoRoot, apRoot, nil
+			return dir, nil
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -480,25 +425,14 @@ func FindRoots() (string, string, error) {
 		dir = parent
 	}
 
-	if repoRoot == "" {
-		repoRoot = envAPRoot
-	}
-
-	if repoRoot != "" {
-		return repoRoot, apRoot, nil
-	}
-
-	return "", "", fmt.Errorf("could not find git repository root (starting at %s)", startDir)
+	return "", fmt.Errorf("could not find git repository root (starting at %s)", startDir)
 }
 
-// FindRepoRoot attempts to discover the closest repo/ap root for tool configuration.
+// FindRepoRoot attempts to discover the closest repo root for tool configuration.
 func FindRepoRoot() string {
-	repoRoot, apRoot, err := FindRoots()
+	repoRoot, err := FindRoots()
 	if err != nil {
 		return ""
-	}
-	if apRoot != "" {
-		return apRoot
 	}
 	return repoRoot
 }

@@ -70,7 +70,6 @@ func TestSingleWalkPerInvocation(t *testing.T) {
 	// Step 1: Initialize RootOptions and Resolve targets
 	rootOpt := RootOptions{
 		RepoRoot: tempDir,
-		APRoot:   tempDir,
 	}
 
 	if err := rootOpt.Resolve([]string{"//..."}); err != nil {
@@ -88,7 +87,7 @@ func TestSingleWalkPerInvocation(t *testing.T) {
 	}
 
 	// Step 2: Run DiscoverScopes with the shared repo
-	scopes, err := DiscoverScopes(r, rootOpt.RepoRoot, rootOpt.APRoots)
+	scopes, err := DiscoverScopes(r, rootOpt.RepoRoot, rootOpt.Dir)
 	if err != nil {
 		t.Fatalf("DiscoverScopes failed: %v", err)
 	}
@@ -176,7 +175,7 @@ func TestSkipUniformlyInvisibleToAllConsumers(t *testing.T) {
 	ignoredDir := filepath.Join(tempDir, "ignored")
 
 	// 1. DiscoverScopes must not see ignored/.ap
-	scopes, err := DiscoverScopes(r, tempDir, []string{tempDir})
+	scopes, err := DiscoverScopes(r, tempDir, tempDir)
 	if err != nil {
 		t.Fatalf("DiscoverScopes failed: %v", err)
 	}
@@ -186,14 +185,14 @@ func TestSkipUniformlyInvisibleToAllConsumers(t *testing.T) {
 		}
 	}
 
-	// 2. FindAllAPRoots must not see ignored
-	apRoots, err := config.FindAllAPRoots(r, tempDir)
+	// 2. ResolveTargets must not select ignored directory
+	targets, err := config.ResolveTargets(r, tempDir, tempDir, []string{"./..."})
 	if err != nil {
-		t.Fatalf("FindAllAPRoots failed: %v", err)
+		t.Fatalf("ResolveTargets failed: %v", err)
 	}
-	for _, ap := range apRoots {
-		if ap == ignoredDir {
-			t.Fatalf("FindAllAPRoots returned skipped directory %s", ap)
+	for _, target := range targets {
+		if target == ignoredDir {
+			t.Fatalf("ResolveTargets returned skipped directory %s", target)
 		}
 	}
 

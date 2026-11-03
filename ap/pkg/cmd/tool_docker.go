@@ -48,10 +48,7 @@ func RunToolDocker(ctx context.Context, opt ToolDockerOptions) error {
 		return fmt.Errorf("tool docker not registered")
 	}
 
-	repoRoot := opt.APRoot
-	if repoRoot == "" {
-		repoRoot = opt.RepoRoot
-	}
+	repoRoot := opt.RepoRoot
 
 	return t.Run(ctx, tool.RunOptions{
 		RepoRoot: repoRoot,

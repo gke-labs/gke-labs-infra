@@ -56,7 +56,7 @@ lint:
 	opt := LintOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tmpDir,
-			APRoots:  []string{tmpDir},
+			Dir:      tmpDir,
 			DryRun:   true,
 		},
 	}
@@ -120,7 +120,7 @@ func main() {
 	opt := LintOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tmpDir,
-			APRoots:  []string{tmpDir},
+			Dir:      tmpDir,
 		},
 	}
 
@@ -137,7 +137,7 @@ func main() {
 	optWrite := LintOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tmpDir,
-			APRoots:  []string{tmpDir},
+			Dir:      tmpDir,
 		},
 		WriteBaseline: true,
 	}

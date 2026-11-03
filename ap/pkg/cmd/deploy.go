@@ -94,38 +94,26 @@ func (opt *DeployOptions) Resolve(args []string) error {
 		opt.TargetCluster = tc
 	}
 
-	if opt.RootFlag != "" {
-		if err := opt.ResolveRoot(); err != nil {
-			return err
-		}
-	}
-
 	r, err := opt.GetSourceTree()
 	if err != nil {
 		return err
 	}
 
-	currentAPRoot := opt.APRoot
-	if currentAPRoot == "" && len(opt.APRoots) == 1 {
-		currentAPRoot = opt.APRoots[0]
+	currentDir := opt.Dir
+	if currentDir == "" {
+		currentDir = opt.RepoRoot
 	}
 
-	plans, err := buildDeployPlans(r, opt.RepoRoot, currentAPRoot, args)
+	plans, err := buildDeployPlans(r, opt.RepoRoot, currentDir, args)
 	if err != nil {
 		return err
 	}
 	opt.plans = plans
-
-	var roots []string
-	for _, p := range plans {
-		roots = append(roots, p.apRoot)
-	}
-	opt.APRoots = roots
 	return nil
 }
 
 type deployPlan struct {
-	apRoot     string
+	dir        string
 	manifests  []string
 	imageNames []string
 }
@@ -135,84 +123,49 @@ type targetFilter struct {
 	path string
 }
 
-func resolveDeployTargets(r *sourcetree.SourceTree, repoRoot, currentAPRoot string, targets []string) ([]string, map[string]bool, map[string][]targetFilter, error) {
+func resolveDeployTargets(r *sourcetree.SourceTree, repoRoot, currentDir string, targets []string) (string, bool, []targetFilter, error) {
 	if len(targets) == 0 {
 		targets = []string{"."}
 	}
 
-	wholeRoot := make(map[string]bool)
-	filtersByRoot := make(map[string][]targetFilter)
-	var roots []string
-	seenRoot := make(map[string]bool)
-
-	addRoot := func(root string) {
-		if !seenRoot[root] {
-			seenRoot[root] = true
-			roots = append(roots, root)
-		}
+	whole := false
+	var filters []targetFilter
+	baseDir := currentDir
+	if baseDir == "" {
+		baseDir = repoRoot
 	}
 
 	for _, arg := range targets {
 		switch arg {
 		case ".":
-			root := currentAPRoot
-			if root == "" {
-				root = repoRoot
-			}
-			wholeRoot[root] = true
-			addRoot(root)
+			whole = true
 		case "./...":
-			base := currentAPRoot
-			if base == "" {
-				base = repoRoot
-			}
-			all, err := config.FindAllAPRoots(r, base)
-			if err != nil {
-				return nil, nil, nil, err
-			}
-			if len(all) == 0 {
-				all = []string{base}
-			}
-			for _, root := range all {
-				wholeRoot[root] = true
-				addRoot(root)
-			}
+			whole = true
 		case "//...":
-			all, err := config.FindAllAPRoots(r, repoRoot)
-			if err != nil {
-				return nil, nil, nil, err
-			}
-			if len(all) == 0 {
-				all = []string{repoRoot}
-			}
-			for _, root := range all {
-				wholeRoot[root] = true
-				addRoot(root)
-			}
+			baseDir = repoRoot
+			whole = true
 		default:
-			absPath := config.ResolveTargetPath(repoRoot, currentAPRoot, arg)
+			absPath := config.ResolveTargetPath(repoRoot, currentDir, arg)
 			if !r.FileExists(absPath) && !r.DirExists(absPath) && absPath != repoRoot {
-				return nil, nil, nil, fmt.Errorf("target path %q does not exist", arg)
+				return "", false, nil, fmt.Errorf("target path %q does not exist", arg)
 			}
-			apRoot := r.APRootFor(absPath)
-			if apRoot == "" {
-				return nil, nil, nil, fmt.Errorf("target path %q is not inside an AP root", arg)
+			rel, err := filepath.Rel(repoRoot, absPath)
+			if err != nil || strings.HasPrefix(rel, "..") {
+				return "", false, nil, fmt.Errorf("target path %q is not inside repository", arg)
 			}
-			addRoot(apRoot)
-			if absPath == apRoot {
-				wholeRoot[apRoot] = true
+			if absPath == baseDir {
+				whole = true
 			} else {
-				filtersByRoot[apRoot] = append(filtersByRoot[apRoot], targetFilter{arg: arg, path: absPath})
+				filters = append(filters, targetFilter{arg: arg, path: absPath})
 			}
 		}
 	}
 
-	sort.Strings(roots)
-	return roots, wholeRoot, filtersByRoot, nil
+	return baseDir, whole, filters, nil
 }
 
-func selectManifests(r *sourcetree.SourceTree, apRoot string, whole bool, filters []targetFilter) ([]string, error) {
-	allManifests := r.Under(apRoot).FindManifests()
+func selectManifests(r *sourcetree.SourceTree, dir string, whole bool, filters []targetFilter) ([]string, error) {
+	allManifests := r.Under(dir).FindManifests()
 	if whole || len(filters) == 0 {
 		return allManifests, nil
 	}
@@ -239,10 +192,10 @@ func selectManifests(r *sourcetree.SourceTree, apRoot string, whole bool, filter
 	return selectedManifests, nil
 }
 
-func referencedImages(r *sourcetree.SourceTree, apRoot, repoRoot string, manifests []string) ([]string, error) {
-	availableImages, err := images.FindImageNames(r, apRoot)
+func referencedImages(r *sourcetree.SourceTree, repoRoot string, manifests []string) ([]string, error) {
+	availableImages, err := images.FindImageNames(r, repoRoot)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find available images in %s: %w", apRoot, err)
+		return nil, fmt.Errorf("failed to find available images: %w", err)
 	}
 	availableSet := make(map[string]bool, len(availableImages))
 	for _, img := range availableImages {
@@ -261,7 +214,7 @@ func referencedImages(r *sourcetree.SourceTree, apRoot, repoRoot string, manifes
 				if err != nil {
 					relManifest = manifest
 				}
-				return nil, fmt.Errorf("manifest %s references placeholder image %q, but no images/%s/Dockerfile was found in %s", relManifest, img, img, apRoot)
+				return nil, fmt.Errorf("manifest %s references placeholder image %q, but no images/%s/Dockerfile was found in %s", relManifest, img, img, repoRoot)
 			}
 			referencedSet[img] = true
 		}
@@ -275,34 +228,34 @@ func referencedImages(r *sourcetree.SourceTree, apRoot, repoRoot string, manifes
 	return imageNames, nil
 }
 
-func buildDeployPlans(r *sourcetree.SourceTree, repoRoot, currentAPRoot string, targets []string) ([]deployPlan, error) {
-	roots, wholeRoot, filtersByRoot, err := resolveDeployTargets(r, repoRoot, currentAPRoot, targets)
+func buildDeployPlans(r *sourcetree.SourceTree, repoRoot, currentDir string, targets []string) ([]deployPlan, error) {
+	baseDir, whole, filters, err := resolveDeployTargets(r, repoRoot, currentDir, targets)
 	if err != nil {
 		return nil, err
 	}
-	if len(roots) == 0 {
+	if baseDir == "" {
 		return nil, fmt.Errorf("no scopes found for deploy")
 	}
 
-	var plans []deployPlan
-	for _, apRoot := range roots {
-		manifests, err := selectManifests(r, apRoot, wholeRoot[apRoot], filtersByRoot[apRoot])
-		if err != nil {
-			return nil, err
-		}
-
-		imageNames, err := referencedImages(r, apRoot, repoRoot, manifests)
-		if err != nil {
-			return nil, err
-		}
-
-		plans = append(plans, deployPlan{
-			apRoot:     apRoot,
-			manifests:  manifests,
-			imageNames: imageNames,
-		})
+	manifests, err := selectManifests(r, baseDir, whole, filters)
+	if err != nil {
+		return nil, err
 	}
-	return plans, nil
+
+	imageNames, err := referencedImages(r, repoRoot, manifests)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(manifests) == 0 {
+		return nil, nil
+	}
+
+	return []deployPlan{{
+		dir:        baseDir,
+		manifests:  manifests,
+		imageNames: imageNames,
+	}}, nil
 }
 
 // TargetCluster represents the resolved target Kubernetes cluster.
@@ -395,6 +348,7 @@ func BuildDeployPlan(opt DeployOptions, r *sourcetree.SourceTree, buildkitHost s
 }
 
 func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, buildkitHost string, namespace string, targetCluster TargetCluster, naming images.ImageNaming, kubectlBin string) ([]tasks.Task, error) {
+	repoRoot := r.RepoRoot()
 	var allTasks []tasks.Task
 
 	var originalNamespace string
@@ -408,12 +362,12 @@ func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, b
 
 	for _, plan := range plans {
 		group := &tasks.Group{
-			Name: fmt.Sprintf("deploy-%s", filepath.Base(plan.apRoot)),
+			Name: fmt.Sprintf("deploy-%s", filepath.Base(plan.dir)),
 		}
 
-		buildTasks, err := images.BuildTasksForImages(r.Under(plan.apRoot), plan.apRoot, push, buildkitHost, plan.imageNames, naming)
+		buildTasks, err := images.BuildTasksForImages(r, repoRoot, push, buildkitHost, plan.imageNames, naming)
 		if err != nil {
-			return nil, fmt.Errorf("build failed during deploy for %s: %w", plan.apRoot, err)
+			return nil, fmt.Errorf("build failed during deploy for %s: %w", plan.dir, err)
 		}
 		group.Tasks = append(group.Tasks, buildTasks)
 
@@ -423,7 +377,7 @@ func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, b
 				imageRefs = append(imageRefs, naming.Ref(img))
 			}
 			group.Tasks = append(group.Tasks, &KindLoadTask{
-				RepoRoot:    plan.apRoot,
+				RepoRoot:    repoRoot,
 				ClusterName: targetCluster.KindCluster,
 				Images:      imageRefs,
 			})

@@ -47,6 +47,10 @@ func TestToolProtoc_DryRun(t *testing.T) {
 	t.Setenv("AP_CACHE_DIR", tempCache)
 
 	tempDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tempDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(tempDir)
 	apDir := filepath.Join(tempDir, ".ap")
 	if err := os.MkdirAll(apDir, 0755); err != nil {
 		t.Fatal(err)
@@ -69,7 +73,7 @@ func TestToolProtoc_DryRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Setenv("AP_ROOT", tempDir)
+	t.Chdir(tempDir)
 
 	rootCmd := BuildRootCommand()
 	buf := new(bytes.Buffer)
@@ -104,8 +108,10 @@ func TestToolProtoc_ColdVersion_NoRequestToGitHubAPI(t *testing.T) {
 	tempCache := t.TempDir()
 	t.Setenv("AP_CACHE_DIR", tempCache)
 	tempRoot := t.TempDir()
-	t.Setenv("AP_ROOT", tempRoot)
-	t.Setenv("REPO_ROOT", tempRoot)
+	if err := os.MkdirAll(filepath.Join(tempRoot, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(tempRoot)
 
 	bt := &blockTransport{blockedHost: "api.github.com"}
 	client := &http.Client{Transport: bt}
@@ -138,8 +144,10 @@ func TestToolProtoc_RealExecution(t *testing.T) {
 	tempCache := t.TempDir()
 	t.Setenv("AP_CACHE_DIR", tempCache)
 	tempRoot := t.TempDir()
-	t.Setenv("AP_ROOT", tempRoot)
-	t.Setenv("REPO_ROOT", tempRoot)
+	if err := os.MkdirAll(filepath.Join(tempRoot, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(tempRoot)
 
 	rootCmd := BuildRootCommand()
 	buf := new(bytes.Buffer)
@@ -197,6 +205,9 @@ func TestToolUpdateVersions_KubectlOnly(t *testing.T) {
 	defer server.Close()
 
 	tempRepo := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tempRepo, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Join(tempRepo, ".ap"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -207,12 +218,13 @@ func TestToolUpdateVersions_KubectlOnly(t *testing.T) {
 
 	t.Setenv("KUBECTL_RELEASE_FEED_URL", server.URL+"/stable.txt")
 	t.Setenv("KUBECTL_DOWNLOAD_BASE_URL", server.URL)
+	t.Chdir(tempRepo)
 
 	rootCmd := BuildRootCommand()
 	buf := new(bytes.Buffer)
 	rootCmd.SetOut(buf)
 	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"tool", "update-versions", "--kubectl", "--root", tempRepo})
+	rootCmd.SetArgs([]string{"tool", "update-versions", "--kubectl"})
 
 	err := rootCmd.ExecuteContext(t.Context())
 	if err != nil {
@@ -234,6 +246,10 @@ func TestToolKind_DryRun(t *testing.T) {
 	t.Setenv("AP_CACHE_DIR", tempCache)
 
 	tempDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tempDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(tempDir)
 	apDir := filepath.Join(tempDir, ".ap")
 	if err := os.MkdirAll(apDir, 0755); err != nil {
 		t.Fatal(err)
@@ -251,7 +267,7 @@ func TestToolKind_DryRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Setenv("AP_ROOT", tempDir)
+	t.Chdir(tempDir)
 
 	rootCmd := BuildRootCommand()
 	buf := new(bytes.Buffer)
@@ -280,6 +296,10 @@ func TestToolKubectl_DryRun(t *testing.T) {
 	t.Setenv("AP_CACHE_DIR", tempCache)
 
 	tempDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tempDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(tempDir)
 	apDir := filepath.Join(tempDir, ".ap")
 	if err := os.MkdirAll(apDir, 0755); err != nil {
 		t.Fatal(err)
@@ -300,7 +320,7 @@ func TestToolKubectl_DryRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Setenv("AP_ROOT", tempDir)
+	t.Chdir(tempDir)
 
 	rootCmd := BuildRootCommand()
 	buf := new(bytes.Buffer)
@@ -332,6 +352,10 @@ func TestToolDocker_DryRun(t *testing.T) {
 	t.Setenv("AP_CACHE_DIR", tempCache)
 
 	tempDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tempDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(tempDir)
 	apDir := filepath.Join(tempDir, ".ap")
 	if err := os.MkdirAll(apDir, 0755); err != nil {
 		t.Fatal(err)
@@ -358,7 +382,9 @@ func TestToolDocker_DryRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Setenv("AP_ROOT", tempDir)
+	if err := os.MkdirAll(filepath.Join(tempDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
 	t.Chdir(tempDir)
 
 	rootCmd := BuildRootCommand()
@@ -389,6 +415,10 @@ func TestToolDockerBuildx_DryRun(t *testing.T) {
 	t.Setenv("AP_CACHE_DIR", tempCache)
 
 	tempDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tempDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(tempDir)
 	apDir := filepath.Join(tempDir, ".ap")
 	if err := os.MkdirAll(apDir, 0755); err != nil {
 		t.Fatal(err)
@@ -406,7 +436,9 @@ func TestToolDockerBuildx_DryRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Setenv("AP_ROOT", tempDir)
+	if err := os.MkdirAll(filepath.Join(tempDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
 	t.Chdir(tempDir)
 
 	rootCmd := BuildRootCommand()
@@ -437,7 +469,10 @@ func TestToolDocker_DefaultNewestVersion(t *testing.T) {
 	t.Setenv("AP_CACHE_DIR", tempCache)
 
 	tempDir := t.TempDir()
-	t.Setenv("AP_ROOT", tempDir)
+	if err := os.MkdirAll(filepath.Join(tempDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(tempDir)
 
 	// Pre-populate cache for newest docker (29.9.2)
 	dockerBinDir := filepath.Join(tempCache, "tools", "docker", "29.9.2", "bin")
@@ -473,7 +508,10 @@ func TestToolDocker_BuildxRewrite(t *testing.T) {
 	t.Setenv("AP_CACHE_DIR", tempCache)
 
 	tempDir := t.TempDir()
-	t.Setenv("AP_ROOT", tempDir)
+	if err := os.MkdirAll(filepath.Join(tempDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(tempDir)
 
 	// Pre-populate cache for buildx (0.38.1)
 	buildxBinDir := filepath.Join(tempCache, "tools", "docker-buildx", "v0.38.1", "bin")
@@ -579,8 +617,6 @@ func TestToolInstall(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(repoDir, ".ap"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("REPO_ROOT", repoDir)
-	t.Setenv("AP_ROOT", repoDir)
 	t.Chdir(repoDir)
 
 	buf.Reset()
@@ -611,7 +647,6 @@ func TestToolInstall(t *testing.T) {
 	nonRepoDir := t.TempDir()
 	t.Chdir(nonRepoDir)
 	t.Setenv("REPO_ROOT", "")
-	t.Setenv("AP_ROOT", "")
 	cacheDir := t.TempDir()
 	t.Setenv("AP_CACHE_DIR", cacheDir)
 	installedDir, err := tool.Install(tool.InstallOptions{
@@ -639,6 +674,11 @@ func TestToolGo_DryRun(t *testing.T) {
 	t.Setenv("AP_CACHE_DIR", tempCache)
 
 	tempDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tempDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(tempDir)
+
 	goMod := "module example.com/test\n\ntoolchain go1.27.3\n"
 	if err := os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goMod), 0644); err != nil {
 		t.Fatal(err)
@@ -655,8 +695,6 @@ func TestToolGo_DryRun(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(goBinDir, binName), []byte("#!/bin/sh\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
-
-	t.Setenv("AP_ROOT", tempDir)
 
 	rootCmd := BuildRootCommand()
 	buf := new(bytes.Buffer)

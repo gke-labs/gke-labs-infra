@@ -37,8 +37,7 @@ func TestRunFormat_DryRun(t *testing.T) {
 	opt := FormatOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: repoRoot,
-			APRoot:   repoRoot,
-			APRoots:  []string{repoRoot},
+			Dir:      repoRoot,
 			DryRun:   true,
 		},
 	}

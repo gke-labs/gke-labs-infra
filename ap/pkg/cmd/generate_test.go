@@ -82,7 +82,7 @@ func TestAuditGeneratedDryRun(t *testing.T) {
 
 	rootOpt := &RootOptions{
 		RepoRoot: tempDir,
-		APRoot:   tempDir,
+		Dir:      tempDir,
 		DryRun:   true,
 	}
 
@@ -115,7 +115,7 @@ func TestVerifyGenerateDryRun(t *testing.T) {
 
 	rootOpt := &RootOptions{
 		RepoRoot: tempDir,
-		APRoot:   tempDir,
+		Dir:      tempDir,
 		DryRun:   true,
 	}
 
@@ -157,7 +157,7 @@ func TestRunGenerate_UntidyGoMod(t *testing.T) {
 
 	rootOpt := &RootOptions{
 		RepoRoot: tempDir,
-		APRoot:   tempDir,
+		Dir:      tempDir,
 	}
 	opt := GenerateOptions{
 		RootOptions: rootOpt,
@@ -248,7 +248,7 @@ func TestRunGenerate_VerifyReportsUntidyGoMod(t *testing.T) {
 
 	rootOpt := &RootOptions{
 		RepoRoot: tempDir,
-		APRoot:   tempDir,
+		Dir:      tempDir,
 	}
 	opt := GenerateOptions{
 		RootOptions: rootOpt,
@@ -298,7 +298,7 @@ func TestRunGenerate_SecondRunOpensNoUnchangedFiles(t *testing.T) {
 
 	rootOpt1 := &RootOptions{
 		RepoRoot: tempDir,
-		APRoot:   tempDir,
+		Dir:      tempDir,
 	}
 	opt1 := GenerateOptions{RootOptions: rootOpt1}
 	if err := opt1.Resolve(nil); err != nil {
@@ -319,7 +319,7 @@ func TestRunGenerate_SecondRunOpensNoUnchangedFiles(t *testing.T) {
 
 	rootOpt2 := &RootOptions{
 		RepoRoot: tempDir,
-		APRoot:   tempDir,
+		Dir:      tempDir,
 	}
 	opt2 := GenerateOptions{RootOptions: rootOpt2}
 	if err := opt2.Resolve(nil); err != nil {

@@ -72,12 +72,12 @@ func RunBuild(ctx context.Context, opt BuildOptions) error {
 		return err
 	}
 
-	targetDir := opt.RepoRoot
-	if len(opt.APRoots) == 1 && opt.APRoots[0] != "" {
-		targetDir = opt.APRoots[0]
+	targetDir := opt.Dir
+	if targetDir == "" {
+		targetDir = opt.RepoRoot
 	}
 
-	scopes, err := DiscoverScopes(r, opt.RepoRoot, opt.APRoots)
+	scopes, err := DiscoverScopes(r, opt.RepoRoot, opt.Dir)
 	if err != nil {
 		return err
 	}

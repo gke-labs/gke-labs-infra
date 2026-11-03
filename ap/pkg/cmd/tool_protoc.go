@@ -48,10 +48,7 @@ func RunToolProtoc(ctx context.Context, opt ToolProtocOptions) error {
 		return fmt.Errorf("tool protoc not registered")
 	}
 
-	repoRoot := opt.APRoot
-	if repoRoot == "" {
-		repoRoot = opt.RepoRoot
-	}
+	repoRoot := opt.RepoRoot
 
 	return t.Run(ctx, tool.RunOptions{
 		RepoRoot: repoRoot,

@@ -72,15 +72,14 @@ func TestHasImages(t *testing.T) {
 			expected: false,
 		},
 		{
-			name: "nested ap root",
+			name: "nested image in subtree",
 			setup: func(root string) {
-				// Inner root
+				// Subtree image
 				inner := filepath.Join(root, "inner")
-				os.MkdirAll(filepath.Join(inner, ".ap"), 0755)
 				os.MkdirAll(filepath.Join(inner, "images", "foo"), 0755)
 				os.WriteFile(filepath.Join(inner, "images", "foo", "Dockerfile"), []byte("FROM scratch"), 0644)
 			},
-			expected: false, // Because the only Dockerfile is inside another ap root
+			expected: true,
 		},
 	}
 	for _, tt := range tests {
@@ -159,8 +158,7 @@ func TestFindImageNames(t *testing.T) {
 	os.MkdirAll(filepath.Join(tmpDir, "images", "img-a"), 0755)
 	os.WriteFile(filepath.Join(tmpDir, "images", "img-a", "Dockerfile"), []byte("FROM scratch"), 0644)
 
-	// Child AP root image should be excluded
-	os.MkdirAll(filepath.Join(tmpDir, "sub", ".ap"), 0755)
+	// Subtree image should be discovered when searching from root
 	os.MkdirAll(filepath.Join(tmpDir, "sub", "images", "img-c"), 0755)
 	os.WriteFile(filepath.Join(tmpDir, "sub", "images", "img-c", "Dockerfile"), []byte("FROM scratch"), 0644)
 
@@ -174,9 +172,33 @@ func TestFindImageNames(t *testing.T) {
 		t.Fatalf("FindImageNames failed: %v", err)
 	}
 
-	expected := []string{"img-a", "img-b"}
+	expected := []string{"img-a", "img-b", "img-c"}
 	if !reflect.DeepEqual(names, expected) {
 		t.Errorf("FindImageNames() = %v, want %v", names, expected)
+	}
+
+	// Subtree discovery
+	subNames, err := FindImageNames(r, filepath.Join(tmpDir, "sub"))
+	if err != nil {
+		t.Fatalf("FindImageNames on sub failed: %v", err)
+	}
+	expectedSub := []string{"img-c"}
+	if !reflect.DeepEqual(subNames, expectedSub) {
+		t.Errorf("FindImageNames(sub) = %v, want %v", subNames, expectedSub)
+	}
+
+	// Duplicate image name should fail
+	dupDir := t.TempDir()
+	os.MkdirAll(filepath.Join(dupDir, "images", "dup"), 0755)
+	os.WriteFile(filepath.Join(dupDir, "images", "dup", "Dockerfile"), []byte("FROM scratch"), 0644)
+	os.MkdirAll(filepath.Join(dupDir, "sub", "images", "dup"), 0755)
+	os.WriteFile(filepath.Join(dupDir, "sub", "images", "dup", "Dockerfile"), []byte("FROM scratch"), 0644)
+	rDup, err := sourcetree.Open(dupDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := FindImageNames(rDup, dupDir); err == nil {
+		t.Errorf("expected error for duplicate image name, got nil")
 	}
 }
 

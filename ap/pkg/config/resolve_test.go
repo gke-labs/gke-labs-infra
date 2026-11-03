@@ -44,75 +44,63 @@ func TestResolveTargets(t *testing.T) {
 	os.MkdirAll(filepath.Join(repoRoot, "baz"), 0755)
 
 	tests := []struct {
-		name          string
-		args          []string
-		currentAPRoot string
-		expected      []string
+		name       string
+		args       []string
+		currentDir string
+		expected   []string
 	}{
 		{
-			name:          "no args (defaults to .)",
-			args:          []string{},
-			currentAPRoot: repoRoot,
-			expected:      []string{repoRoot},
+			name:       "no args (defaults to .)",
+			args:       []string{},
+			currentDir: repoRoot,
+			expected:   []string{repoRoot},
 		},
 		{
-			name:          "dot",
-			args:          []string{"."},
-			currentAPRoot: filepath.Join(repoRoot, "foo"),
-			expected:      []string{filepath.Join(repoRoot, "foo")},
+			name:       "dot",
+			args:       []string{"."},
+			currentDir: filepath.Join(repoRoot, "foo"),
+			expected:   []string{filepath.Join(repoRoot, "foo")},
 		},
 		{
-			name:          "go syntax recursive from root",
-			args:          []string{"./..."},
-			currentAPRoot: repoRoot,
-			expected: []string{
-				repoRoot,
-				filepath.Join(repoRoot, "foo"),
-				filepath.Join(repoRoot, "foo", "bar"),
-			},
+			name:       "go syntax recursive from root",
+			args:       []string{"./..."},
+			currentDir: repoRoot,
+			expected:   []string{repoRoot},
 		},
 		{
-			name:          "go syntax recursive from subfolder",
-			args:          []string{"./..."},
-			currentAPRoot: filepath.Join(repoRoot, "foo"),
-			expected: []string{
-				filepath.Join(repoRoot, "foo"),
-				filepath.Join(repoRoot, "foo", "bar"),
-			},
+			name:       "go syntax recursive from subfolder",
+			args:       []string{"./..."},
+			currentDir: filepath.Join(repoRoot, "foo"),
+			expected:   []string{filepath.Join(repoRoot, "foo")},
 		},
 		{
-			name:          "bazel syntax recursive",
-			args:          []string{"//..."},
-			currentAPRoot: filepath.Join(repoRoot, "foo", "bar"),
-			expected: []string{
-				repoRoot,
-				filepath.Join(repoRoot, "foo"),
-				filepath.Join(repoRoot, "foo", "bar"),
-			},
+			name:       "bazel syntax recursive",
+			args:       []string{"//..."},
+			currentDir: filepath.Join(repoRoot, "foo", "bar"),
+			expected:   []string{repoRoot},
 		},
 		{
-			name:          "bazel syntax absolute",
-			args:          []string{"//foo"},
-			currentAPRoot: repoRoot,
+			name:       "bazel syntax absolute",
+			args:       []string{"//foo"},
+			currentDir: repoRoot,
 			expected: []string{
 				filepath.Join(repoRoot, "foo"),
 			},
 		},
 		{
-			name:          "go syntax relative",
-			args:          []string{"bar"},
-			currentAPRoot: filepath.Join(repoRoot, "foo"),
+			name:       "go syntax relative",
+			args:       []string{"bar"},
+			currentDir: filepath.Join(repoRoot, "foo"),
 			expected: []string{
 				filepath.Join(repoRoot, "foo", "bar"),
 			},
 		},
 		{
-			name:          "bazel syntax absolute recursive",
-			args:          []string{"//foo/..."},
-			currentAPRoot: repoRoot,
+			name:       "bazel syntax absolute recursive",
+			args:       []string{"//foo/..."},
+			currentDir: repoRoot,
 			expected: []string{
 				filepath.Join(repoRoot, "foo"),
-				filepath.Join(repoRoot, "foo", "bar"),
 			},
 		},
 	}
@@ -123,7 +111,7 @@ func TestResolveTargets(t *testing.T) {
 			if err != nil {
 				t.Fatalf("sourcetree.Open failed: %v", err)
 			}
-			got, err := ResolveTargets(r, repoRoot, tt.currentAPRoot, tt.args)
+			got, err := ResolveTargets(r, repoRoot, tt.currentDir, tt.args)
 			if err != nil {
 				t.Fatalf("ResolveTargets failed: %v", err)
 			}
