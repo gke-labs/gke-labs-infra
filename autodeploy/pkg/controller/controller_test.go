@@ -118,8 +118,8 @@ func TestReconcile(t *testing.T) {
 	if runner.runCount != 1 {
 		t.Errorf("expected 1 ap run, got %d", runner.runCount)
 	}
-	if len(runner.args) != 1 || runner.args[0] != "--root=testdir" {
-		t.Errorf("expected [--root=testdir], got %v", runner.args)
+	if len(runner.args) != 1 || runner.args[0] != "testdir" {
+		t.Errorf("expected [testdir], got %v", runner.args)
 	}
 
 	// Verify status update
