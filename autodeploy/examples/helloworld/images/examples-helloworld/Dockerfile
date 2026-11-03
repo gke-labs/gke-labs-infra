@@ -19,6 +19,7 @@ ARG TARGETARCH
 
 WORKDIR /workspace
 COPY . .
+WORKDIR /workspace/autodeploy/examples/helloworld
 
 # Build helloworld
 RUN --mount=type=cache,target=/root/.cache/go-build \

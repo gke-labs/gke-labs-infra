@@ -19,6 +19,7 @@ ARG TARGETARCH
 
 WORKDIR /workspace
 COPY . .
+WORKDIR /workspace/in-cluster-image-registry
 
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
