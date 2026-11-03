@@ -43,14 +43,15 @@ const (
 )
 
 var (
-	certsDDirectory         = defaultCertsDDirectory
-	containerdConfigPath    = defaultContainerdConfigPath
-	containerdHealthTimeout = 30 * time.Second
-	lastPreWriteContent     string
-	validateConfigFn        = defaultValidateConfig
-	restartContainerdFn     = defaultRestartContainerd
-	checkContainerdActiveFn = defaultCheckContainerdActive
-	dirExistsFn             = defaultDirExists
+	certsDDirectory          = defaultCertsDDirectory
+	containerdConfigPath     = defaultContainerdConfigPath
+	containerdHealthTimeout  = 30 * time.Second
+	lastPreWriteContent      string
+	validateConfigFn         = defaultValidateConfig
+	restartContainerdFn      = defaultRestartContainerd
+	checkContainerdActiveFn  = defaultCheckContainerdActive
+	dirExistsFn              = defaultDirExists
+	getContainerdStartTimeFn = defaultGetContainerdStartTime
 )
 
 func defaultDirExists(path string) bool {
@@ -124,8 +125,23 @@ func reconcile(ctx context.Context, clientset kubernetes.Interface) error {
 		return fmt.Errorf("failed to update hosts config: %w", err)
 	}
 
-	if changed {
-		if err := restartAndVerifyContainerd(containerdConfigPath, lastPreWriteContent); err != nil {
+	restartNeeded := changed
+	if !restartNeeded {
+		newer, err := isConfigFileNewerThanContainerd(containerdConfigPath)
+		if err != nil {
+			return fmt.Errorf("failed to check containerd config freshness: %w", err)
+		}
+		if newer {
+			restartNeeded = true
+		}
+	}
+
+	if restartNeeded {
+		preWrite := ""
+		if changed {
+			preWrite = lastPreWriteContent
+		}
+		if err := restartAndVerifyContainerd(containerdConfigPath, preWrite); err != nil {
 			return fmt.Errorf("failed to restart and verify containerd: %w", err)
 		}
 	}
@@ -498,6 +514,57 @@ func waitForContainerdActive(timeout time.Duration) bool {
 		time.Sleep(1 * time.Second)
 	}
 	return false
+}
+
+func defaultGetContainerdStartTime() (time.Time, error) {
+	cmd := exec.Command("nsenter", "-t", "1", "-m", "-u", "-i", "-n", "systemctl", "show", "containerd", "-p", "ExecMainStartTimestampUSec")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to get containerd start time: %w (output: %s)", err, string(output))
+	}
+	return parseContainerdStartTime(string(output))
+}
+
+func parseContainerdStartTime(output string) (time.Time, error) {
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if val, ok := strings.CutPrefix(line, "ExecMainStartTimestampUSec="); ok {
+			val = strings.TrimSpace(val)
+			usec, err := strconv.ParseUint(val, 10, 64)
+			if err == nil && usec > 0 && usec < (1<<63) {
+				return time.UnixMicro(int64(usec)), nil
+			}
+		}
+	}
+	return time.Time{}, fmt.Errorf("no valid containerd start timestamp found in systemctl output: %q", output)
+}
+
+func isConfigFileNewerThanContainerd(configPath string) (bool, error) {
+	stat, err := os.Stat(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to stat %s: %w", configPath, err)
+	}
+
+	mtime := stat.ModTime()
+	startTime, err := getContainerdStartTimeFn()
+	if err != nil {
+		return false, fmt.Errorf("failed to get containerd start time: %w", err)
+	}
+
+	if startTime.IsZero() {
+		return false, nil
+	}
+
+	if mtime.After(startTime) {
+		klog.Infof("Containerd config %s mtime (%v) is newer than containerd start time (%v); restarting containerd", configPath, mtime, startTime)
+		return true, nil
+	}
+
+	return false, nil
 }
 
 func rollbackConfig(path string, preWriteContent string) error {

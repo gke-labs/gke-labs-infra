@@ -279,6 +279,9 @@ func init() {
 	checkContainerdActiveFn = func() bool {
 		return true
 	}
+	getContainerdStartTimeFn = func() (time.Time, error) {
+		return time.Now().Add(1 * time.Hour), nil
+	}
 }
 
 func validateTOMLOrContainerd(t *testing.T, content string) {
@@ -1016,5 +1019,209 @@ func TestReconcile_ConfigPathHandling(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestReconcile_RestartWhenConfigNewerThanContainerd(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+	certsDir := filepath.Join(tmpDir, "certs.d")
+
+	origConfigPath := containerdConfigPath
+	containerdConfigPath = configPath
+	defer func() {
+		containerdConfigPath = origConfigPath
+	}()
+
+	origCertsDir := certsDDirectory
+	certsDDirectory = certsDir
+	defer func() {
+		certsDDirectory = origCertsDir
+	}()
+
+	origRestart := restartContainerdFn
+	origGetStartTime := getContainerdStartTimeFn
+	defer func() {
+		restartContainerdFn = origRestart
+		getContainerdStartTimeFn = origGetStartTime
+	}()
+
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      serviceName,
+			Namespace: namespace,
+		},
+		Spec: corev1.ServiceSpec{
+			ClusterIP: "10.96.0.10",
+		},
+	}
+	clientset := fake.NewSimpleClientset(svc)
+	ctx := t.Context()
+
+	t0 := time.Date(2026, 11, 3, 14, 0, 0, 0, time.UTC)
+
+	// 1. File mtime after a fake start time -> restart requested.
+	// Write already-configured config so updateContainerdConfig returns changed = false.
+	configuredConfig := strings.ReplaceAll(fixtureV4Configured, "/etc/containerd/certs.d", certsDir)
+	if err := os.WriteFile(configPath, []byte(configuredConfig), 0644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+	mtimeAfter := t0.Add(10 * time.Minute)
+	if err := os.Chtimes(configPath, mtimeAfter, mtimeAfter); err != nil {
+		t.Fatalf("failed to set mtime: %v", err)
+	}
+
+	restartCount := 0
+	restartContainerdFn = func() error {
+		restartCount++
+		return nil
+	}
+	fakeStartTime := t0
+	getContainerdStartTimeFn = func() (time.Time, error) {
+		return fakeStartTime, nil
+	}
+
+	if err := reconcile(ctx, clientset); err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+	if restartCount != 1 {
+		t.Errorf("expected 1 restart when mtime is after start time, got %d", restartCount)
+	}
+
+	// Condition clears itself: after restart, containerd start time is newer than mtime -> no restart.
+	fakeStartTime = mtimeAfter.Add(10 * time.Minute)
+	if err := reconcile(ctx, clientset); err != nil {
+		t.Fatalf("second reconcile failed: %v", err)
+	}
+	if restartCount != 1 {
+		t.Errorf("expected restart count to remain 1 when start time updated after mtime, got %d", restartCount)
+	}
+
+	// 2. File mtime before fake start time -> no restart.
+	mtimeBefore := t0.Add(-10 * time.Minute)
+	if err := os.Chtimes(configPath, mtimeBefore, mtimeBefore); err != nil {
+		t.Fatalf("failed to set mtime: %v", err)
+	}
+	fakeStartTime = t0
+	restartCount = 0
+
+	if err := reconcile(ctx, clientset); err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+	if restartCount != 0 {
+		t.Errorf("expected 0 restarts when mtime is before start time, got %d", restartCount)
+	}
+
+	// 3. Agent edit + stale start time -> exactly one restart.
+	// Write unconfigured config (empty config_path) so updateContainerdConfig edits the file.
+	if err := os.WriteFile(configPath, []byte(fixtureV4), 0644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+	fakeStartTime = t0 // stale start time
+	restartCount = 0
+
+	if err := reconcile(ctx, clientset); err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+	if restartCount != 1 {
+		t.Errorf("expected exactly 1 restart on agent edit + stale start time, got %d", restartCount)
+	}
+}
+
+func TestParseContainerdStartTime(t *testing.T) {
+	expectedMicroTime := time.UnixMicro(1762181229123456)
+
+	tests := []struct {
+		name        string
+		output      string
+		expected    time.Time
+		expectError bool
+	}{
+		{
+			name:     "valid ExecMainStartTimestampUSec",
+			output:   "ExecMainStartTimestampUSec=1762181229123456\n",
+			expected: expectedMicroTime,
+		},
+		{
+			name:        "missing ExecMainStartTimestampUSec",
+			output:      "",
+			expectError: true,
+		},
+		{
+			name:        "zero ExecMainStartTimestampUSec",
+			output:      "ExecMainStartTimestampUSec=0\n",
+			expectError: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseContainerdStartTime(tc.output)
+			if tc.expectError {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !got.Equal(tc.expected) {
+				t.Errorf("got %v, want %v", got, tc.expected)
+			}
+		})
+	}
+}
+
+func TestIsConfigFileNewerThanContainerd(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+
+	origGetStartTime := getContainerdStartTimeFn
+	defer func() {
+		getContainerdStartTimeFn = origGetStartTime
+	}()
+
+	// 1. File does not exist -> returns false, nil
+	newer, err := isConfigFileNewerThanContainerd(filepath.Join(tmpDir, "nonexistent.toml"))
+	if err != nil {
+		t.Fatalf("unexpected error for nonexistent file: %v", err)
+	}
+	if newer {
+		t.Errorf("expected false for nonexistent file, got true")
+	}
+
+	// 2. File exists and mtime > start time -> returns true, nil
+	if err := os.WriteFile(configPath, []byte("content"), 0644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+	t0 := time.Date(2026, 11, 3, 14, 0, 0, 0, time.UTC)
+	mtime := t0.Add(5 * time.Minute)
+	if err := os.Chtimes(configPath, mtime, mtime); err != nil {
+		t.Fatalf("failed to set mtime: %v", err)
+	}
+	getContainerdStartTimeFn = func() (time.Time, error) {
+		return t0, nil
+	}
+
+	newer, err = isConfigFileNewerThanContainerd(configPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !newer {
+		t.Errorf("expected newer=true, got false")
+	}
+
+	// 3. File exists and mtime <= start time -> returns false, nil
+	getContainerdStartTimeFn = func() (time.Time, error) {
+		return mtime.Add(5 * time.Minute), nil
+	}
+
+	newer, err = isConfigFileNewerThanContainerd(configPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if newer {
+		t.Errorf("expected newer=false, got true")
 	}
 }
