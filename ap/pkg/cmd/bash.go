@@ -22,7 +22,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool"
 	"github.com/spf13/cobra"
@@ -89,19 +88,21 @@ func RunScript(ctx context.Context, script string, scriptArgs []string) error {
 		}
 	}
 
-	binary, err := exec.LookPath("bash")
+	bash, err := resolveBash()
 	if err != nil {
-		return fmt.Errorf("failed to find bash on PATH: %w", err)
+		return err
 	}
 
-	checkBashVersion(binary)
+	if bash.Major > 0 && bash.Major < 4 {
+		klog.Warningf("bash at %s is %s; scripts run in CI with bash 5. Install a newer bash (e.g. brew install bash) and make sure it is first on PATH.", bash.Path, bash.Version)
+	}
 
 	if err := os.Chdir(repoRoot); err != nil {
 		return fmt.Errorf("failed to change directory to repo root %s: %w", repoRoot, err)
 	}
 
 	inv := &tool.Invocation{
-		Binary: binary,
+		Binary: bash.Path,
 		Args:   append([]string{absScript}, scriptArgs...),
 		Env:    env,
 	}
@@ -109,27 +110,39 @@ func RunScript(ctx context.Context, script string, scriptArgs []string) error {
 	return tool.ExecProcess(inv)
 }
 
-var checkBashOnce sync.Once
+type bashTool struct {
+	Path    string
+	Version string
+	Major   int
+}
 
-// checkBashVersion verifies that the resolved bash binary is version 4 or newer.
-// If it is older than 4, it emits a warning. The check runs once per process.
-func checkBashVersion(binary string) {
-	checkBashOnce.Do(func() {
-		cmd := exec.Command(binary, "--version")
-		out, err := cmd.Output()
-		if err != nil {
-			klog.V(2).Infof("failed to run %s --version: %v", binary, err)
-			return
-		}
-		ver, major, err := parseBashVersion(string(out))
-		if err != nil {
-			klog.V(2).Infof("failed to parse bash version from %s: %v", binary, err)
-			return
-		}
-		if major < 4 {
-			klog.Warningf("bash at %s is %s; scripts run in CI with bash 5. Install a newer bash (e.g. brew install bash) and make sure it is first on PATH.", binary, ver)
-		}
-	})
+// resolveBash locates bash on PATH and attempts to inspect its version.
+func resolveBash() (*bashTool, error) {
+	binary, err := exec.LookPath("bash")
+	if err != nil {
+		return nil, fmt.Errorf("failed to find bash on PATH: %w", err)
+	}
+
+	bt := &bashTool{
+		Path: binary,
+	}
+
+	cmd := exec.Command(binary, "--version")
+	out, err := cmd.Output()
+	if err != nil {
+		klog.V(2).Infof("failed to run %s --version: %v", binary, err)
+		return bt, nil
+	}
+
+	ver, major, err := parseBashVersion(string(out))
+	if err != nil {
+		klog.V(2).Infof("failed to parse bash version from %s: %v", binary, err)
+		return bt, nil
+	}
+
+	bt.Version = ver
+	bt.Major = major
+	return bt, nil
 }
 
 // parseBashVersion extracts the version string and major version number from
