@@ -60,7 +60,7 @@ func Run(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files [
 		}()
 	}
 
-	cfg, err := config.Effective(r, repoRoot)
+	cfg, err := config.Effective(repoRoot, repoRoot)
 	if err != nil {
 		return err
 	}
@@ -85,14 +85,31 @@ func runGofmt(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, fi
 		return err
 	}
 
+	moduleConfigs := make(map[string]*config.Config)
+	for _, modDir := range r.Modules() {
+		modCfg, err := config.Effective(repoRoot, modDir)
+		if err != nil {
+			return err
+		}
+		moduleConfigs[modDir] = modCfg
+	}
+	if _, ok := moduleConfigs[repoRoot]; !ok {
+		rootCfg, err := config.Effective(repoRoot, repoRoot)
+		if err != nil {
+			return err
+		}
+		moduleConfigs[repoRoot] = rootCfg
+	}
+
 	var filesToFormat []string
 	for _, f := range expandedFiles {
 		if strings.HasSuffix(f, ".go") {
-			fileCfg, err := config.Effective(r, filepath.Dir(f))
-			if err != nil {
-				return err
+			file := r.File(f)
+			modDir := repoRoot
+			if file != nil && file.Module() != "" {
+				modDir = file.Module()
 			}
-			if !fileCfg.IsGofmtEnabled() {
+			if modCfg := moduleConfigs[modDir]; modCfg != nil && !modCfg.IsGofmtEnabled() {
 				continue
 			}
 			filesToFormat = append(filesToFormat, f)
@@ -187,7 +204,7 @@ func runGoModTidy(ctx context.Context, r *sourcetree.SourceTree, repoRoot string
 			continue
 		}
 
-		modCfg, err := config.Effective(r, modDir)
+		modCfg, err := config.Effective(repoRoot, modDir)
 		if err != nil {
 			return err
 		}

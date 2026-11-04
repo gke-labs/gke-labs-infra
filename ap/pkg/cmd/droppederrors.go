@@ -78,10 +78,11 @@ func RunDroppedErrors(ctx context.Context, cmd *cobra.Command, opt DroppedErrors
 		return fmt.Errorf("failed to get current working directory: %w", err)
 	}
 
-	repoRoot := ""
-	if opt.RootOptions != nil {
-		repoRoot = opt.RootOptions.RepoRoot
+	if opt.RootOptions == nil {
+		opt.RootOptions = &RootOptions{}
 	}
+
+	repoRoot := opt.RootOptions.RepoRoot
 	if repoRoot == "" {
 		rRoot, err := findRoots()
 		if err != nil {
@@ -93,13 +94,13 @@ func RunDroppedErrors(ctx context.Context, cmd *cobra.Command, opt DroppedErrors
 	}
 
 	targetDir := repoRoot
-	if opt.RootOptions != nil && opt.RootOptions.Dir != "" {
+	if opt.RootOptions.Dir != "" {
 		targetDir = opt.RootOptions.Dir
 	}
 
 	var cfg *config.Config
 	if targetDir != "" {
-		c, err := config.Effective(nil, targetDir)
+		c, err := config.Effective(repoRoot, targetDir)
 		if err != nil && !os.IsNotExist(err) {
 			return err
 		}

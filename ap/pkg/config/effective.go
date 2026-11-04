@@ -15,226 +15,220 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
-	"sigs.k8s.io/yaml"
 )
 
 // Effective returns the effective configuration for dir, taking into account
-// the base configuration at the repository root and any enclosing subtree .ap/ap.yaml
-// overrides beneath it. Resolution is per directory and memoized on r.
-func Effective(r *sourcetree.SourceTree, dir string) (*Config, error) {
+// the base configuration at repoRoot and any enclosing subtree .ap/ap.yaml
+// overrides walking from dir up to repoRoot.
+func Effective(repoRoot, dir string) (*Config, error) {
+	cleanRepoRoot := filepath.Clean(repoRoot)
 	cleanDir := filepath.Clean(dir)
-	// If path points to a file, resolve to its enclosing directory
-	if r != nil && r.FileExists(cleanDir) {
-		cleanDir = filepath.Dir(cleanDir)
-	} else if fi, err := os.Stat(cleanDir); err == nil && !fi.IsDir() {
-		cleanDir = filepath.Dir(cleanDir)
-	}
-
-	repoRoot := findRepoRoot(r, cleanDir)
 	if !filepath.IsAbs(cleanDir) {
-		cleanDir = filepath.Clean(filepath.Join(repoRoot, cleanDir))
+		cleanDir = filepath.Clean(filepath.Join(cleanRepoRoot, cleanDir))
 	}
 
-	return resolveEffective(r, repoRoot, cleanDir)
-}
-
-// ForDir returns the effective configuration for dir.
-// It is an alias for Effective.
-func ForDir(r *sourcetree.SourceTree, dir string) (*Config, error) {
-	return Effective(r, dir)
-}
-
-func resolveEffective(r *sourcetree.SourceTree, repoRoot, cleanDir string) (*Config, error) {
-	cacheKey := "effective-config:" + cleanDir
-	if r != nil {
-		if cached, ok := r.GetCached(cacheKey); ok {
-			if cfg, ok := cached.(*Config); ok {
-				return cfg, nil
-			}
-		}
-	}
-
-	// Base case: repository root or a path outside the repository root
-	if cleanDir == repoRoot || !isSubpath(repoRoot, cleanDir) {
-		baseCfg, err := Load(repoRoot)
-		if err != nil {
-			return nil, err
-		}
-		if r != nil {
-			r.SetCached(cacheKey, baseCfg)
-		}
-		return baseCfg, nil
-	}
-
-	// Recursive step: resolve parent directory's effective configuration
-	parentDir := filepath.Dir(cleanDir)
-	parentCfg, err := resolveEffective(r, repoRoot, parentDir)
+	base, err := Load(cleanRepoRoot)
 	if err != nil {
 		return nil, err
 	}
-
-	subtreeFile := filepath.Join(cleanDir, ".ap", "ap.yaml")
-	data, exists, err := readFileIfExists(r, subtreeFile)
-	if err != nil {
-		return nil, fmt.Errorf("error reading %s: %w", subtreeFile, err)
+	effective := base.clone()
+	if effective == nil {
+		effective = &Config{}
 	}
 
-	if !exists {
-		if r != nil {
-			r.SetCached(cacheKey, parentCfg)
+	// Collect enclosing subtree .ap/ap.yaml files from dir up to repoRoot
+	var subtreeFiles []string
+	for curr := cleanDir; curr != cleanRepoRoot && strings.HasPrefix(curr, cleanRepoRoot); curr = filepath.Dir(curr) {
+		apFile := filepath.Join(curr, ".ap", "ap.yaml")
+		if fi, err := os.Stat(apFile); err == nil && !fi.IsDir() {
+			subtreeFiles = append(subtreeFiles, apFile)
+		} else if err != nil && !os.IsNotExist(err) {
+			return nil, fmt.Errorf("error checking %s: %w", apFile, err)
 		}
-		return parentCfg, nil
 	}
 
-	// Subtree .ap/ap.yaml exists: strictly validate it first
-	var check Config
-	if err := UnmarshalStrict(data, &check); err != nil {
-		return nil, fmt.Errorf("error parsing %s: %w", subtreeFile, err)
+	// Reverse to apply top-down (outermost ancestor first, nearest last)
+	for i, j := 0, len(subtreeFiles)-1; i < j; i, j = i+1, j-1 {
+		subtreeFiles[i], subtreeFiles[j] = subtreeFiles[j], subtreeFiles[i]
 	}
 
-	var subtreeRaw any
-	if err := yaml.Unmarshal(data, &subtreeRaw); err != nil {
-		return nil, fmt.Errorf("error parsing %s: %w", subtreeFile, err)
-	}
-	subtreeMap, _ := toMap(subtreeRaw)
-	if len(subtreeMap) == 0 {
-		if r != nil {
-			r.SetCached(cacheKey, parentCfg)
+	for _, apFile := range subtreeFiles {
+		data, err := os.ReadFile(apFile)
+		if err != nil {
+			return nil, fmt.Errorf("error reading %s: %w", apFile, err)
 		}
-		return parentCfg, nil
-	}
-
-	parentBytes, err := json.Marshal(parentCfg)
-	if err != nil {
-		return nil, fmt.Errorf("error serializing parent config: %w", err)
-	}
-	var parentRaw any
-	if err := json.Unmarshal(parentBytes, &parentRaw); err != nil {
-		return nil, fmt.Errorf("error parsing parent config map: %w", err)
-	}
-	parentMap, _ := toMap(parentRaw)
-
-	mergedMap := mergeMaps(parentMap, subtreeMap)
-
-	mergedBytes, err := json.Marshal(mergedMap)
-	if err != nil {
-		return nil, fmt.Errorf("error serializing merged config: %w", err)
-	}
-
-	var effective Config
-	if err := json.Unmarshal(mergedBytes, &effective); err != nil {
-		return nil, fmt.Errorf("error unmarshaling merged config: %w", err)
+		var override Config
+		if err := UnmarshalStrict(data, &override); err != nil {
+			return nil, fmt.Errorf("error parsing %s: %w", apFile, err)
+		}
+		effective.apply(&override)
 	}
 
 	if err := effective.Validate(); err != nil {
 		return nil, err
 	}
 
-	if r != nil {
-		r.SetCached(cacheKey, &effective)
-	}
-	return &effective, nil
+	return effective, nil
 }
 
-func mergeMaps(base, override map[string]any) map[string]any {
-	out := make(map[string]any, len(base)+len(override))
-	for k, v := range base {
-		out[k] = v
+func (c *Config) clone() *Config {
+	if c == nil {
+		return nil
 	}
-	for k, v := range override {
-		baseVal, exists := out[k]
-		if !exists {
-			out[k] = v
+	out := *c
+	if c.Gofmt != nil {
+		g := *c.Gofmt
+		out.Gofmt = &g
+	}
+	if c.Govet != nil {
+		g := *c.Govet
+		out.Govet = &g
+	}
+	if c.Govulncheck != nil {
+		g := *c.Govulncheck
+		out.Govulncheck = &g
+	}
+	if c.Tidy != nil {
+		t := *c.Tidy
+		out.Tidy = &t
+	}
+	if c.Skip != nil {
+		out.Skip = append([]string(nil), c.Skip...)
+	}
+	if c.Lint != nil {
+		out.Lint = c.Lint.clone()
+	}
+	return &out
+}
+
+func (l *LintConfig) clone() *LintConfig {
+	if l == nil {
+		return nil
+	}
+	out := *l
+	if l.GOOS != nil {
+		out.GOOS = append([]string(nil), l.GOOS...)
+	}
+	if l.linters != nil {
+		out.linters = make(map[string]LinterConfig, len(l.linters))
+		for k, v := range l.linters {
+			out.linters[k] = cloneLinter(v)
+		}
+	}
+	return &out
+}
+
+func cloneLinter(v LinterConfig) LinterConfig {
+	switch c := v.(type) {
+	case *CommonLinterConfig:
+		val := *c
+		return &val
+	case *DroppedErrorsConfig:
+		val := *c
+		if c.Exclude != nil {
+			val.Exclude = append([]string(nil), c.Exclude...)
+		}
+		return &val
+	default:
+		return v
+	}
+}
+
+func (c *Config) apply(o *Config) {
+	if o == nil {
+		return
+	}
+	if o.Gofmt != nil {
+		c.Gofmt = o.Gofmt
+	}
+	if o.Govet != nil {
+		c.Govet = o.Govet
+	}
+	if o.Govulncheck != nil {
+		c.Govulncheck = o.Govulncheck
+	}
+	if o.Tidy != nil {
+		c.Tidy = o.Tidy
+	}
+	if o.Skip != nil {
+		c.Skip = o.Skip
+	}
+	if o.Toolchain != "" {
+		c.Toolchain = o.Toolchain
+	}
+	if o.Lint != nil {
+		if c.Lint == nil {
+			c.Lint = &LintConfig{}
+		}
+		c.Lint.apply(o.Lint)
+	}
+}
+
+func (l *LintConfig) apply(o *LintConfig) {
+	if o == nil {
+		return
+	}
+	if o.SkipGenerated != nil {
+		l.SkipGenerated = o.SkipGenerated
+	}
+	if o.SkipTests != nil {
+		l.SkipTests = o.SkipTests
+	}
+	if o.GOOS != nil {
+		l.GOOS = o.GOOS
+	}
+	for name, cfg := range o.linters {
+		if cfg == nil {
 			continue
 		}
-		baseMap, baseIsMap := toMap(baseVal)
-		overrideMap, overrideIsMap := toMap(v)
-		if baseIsMap && overrideIsMap {
-			out[k] = mergeMaps(baseMap, overrideMap)
+		if l.linters == nil {
+			l.linters = make(map[string]LinterConfig)
+		}
+		if existing, ok := l.linters[name]; ok && existing != nil {
+			l.linters[name] = applyLinter(existing, cfg)
 		} else {
-			out[k] = v
+			l.linters[name] = cfg
 		}
 	}
-	return out
 }
 
-func readFileIfExists(r *sourcetree.SourceTree, path string) ([]byte, bool, error) {
-	if r != nil {
-		if f := r.File(path); f != nil {
-			b, err := os.ReadFile(f.Path)
-			if err != nil {
-				return nil, false, err
+func applyLinter(dst, src LinterConfig) LinterConfig {
+	switch d := dst.(type) {
+	case *CommonLinterConfig:
+		if s, ok := src.(*CommonLinterConfig); ok {
+			applyCommon(d, s)
+			return d
+		}
+	case *DroppedErrorsConfig:
+		if s, ok := src.(*DroppedErrorsConfig); ok {
+			applyCommon(&d.CommonLinterConfig, &s.CommonLinterConfig)
+			if s.Exclude != nil {
+				d.Exclude = s.Exclude
 			}
-			return b, true, nil
+			if s.UseDefaultExcludes != nil {
+				d.UseDefaultExcludes = s.UseDefaultExcludes
+			}
+			return d
 		}
 	}
-	fi, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, false, nil
-		}
-		return nil, false, err
-	}
-	if fi.IsDir() {
-		return nil, false, nil
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, false, err
-	}
-	return b, true, nil
+	return src
 }
 
-func findRepoRoot(r *sourcetree.SourceTree, dir string) string {
-	if r != nil {
-		if root := r.RepoRoot(); root != "" {
-			return root
-		}
-		if root := r.Root(); root != "" {
-			return root
-		}
+func applyCommon(d, s *CommonLinterConfig) {
+	if s.Mode != "" {
+		d.Mode = s.Mode
 	}
-
-	absDir, err := filepath.Abs(dir)
-	if err != nil {
-		absDir = dir
+	if s.SkipGenerated != nil {
+		d.SkipGenerated = s.SkipGenerated
 	}
-	curr := absDir
-	var apRoot string
-	for {
-		if _, err := os.Stat(filepath.Join(curr, ".git")); err == nil {
-			return curr
-		} else if !os.IsNotExist(err) {
-			break
-		}
-		if fi, err := os.Stat(filepath.Join(curr, ".ap", "go.yaml")); err == nil && !fi.IsDir() {
-			apRoot = curr
-		} else if err != nil && !os.IsNotExist(err) {
-			break
-		}
-		parent := filepath.Dir(curr)
-		if parent == curr {
-			break
-		}
-		curr = parent
+	if s.SkipTests != nil {
+		d.SkipTests = s.SkipTests
 	}
-	if apRoot != "" {
-		return apRoot
+	if s.Baseline != "" {
+		d.Baseline = s.Baseline
 	}
-	return absDir
-}
-
-func isSubpath(parent, child string) bool {
-	rel, err := filepath.Rel(parent, child)
-	if err != nil {
-		return false
-	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }

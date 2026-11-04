@@ -20,8 +20,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 )
 
 func TestEffective_Merge(t *testing.T) {
@@ -185,75 +183,14 @@ skip:
 				}
 			}
 
-			r, err := sourcetree.Open(repoRoot)
-			if err != nil {
-				t.Fatalf("failed to open sourcetree: %v", err)
-			}
-
 			targetDir := filepath.Join(repoRoot, tc.targetRelPath)
-			cfg, err := Effective(r, targetDir)
+			cfg, err := Effective(repoRoot, targetDir)
 			if err != nil {
 				t.Fatalf("Effective failed: %v", err)
 			}
 
 			tc.check(t, cfg)
-
-			// Also verify without sourcetree (r = nil)
-			cfgNil, err := Effective(nil, targetDir)
-			if err != nil {
-				t.Fatalf("Effective(nil) failed: %v", err)
-			}
-			tc.check(t, cfgNil)
 		})
-	}
-}
-
-func TestEffective_Memoization(t *testing.T) {
-	repoRoot := t.TempDir()
-	apDir := filepath.Join(repoRoot, ".ap")
-	if err := os.MkdirAll(apDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte("govet:\n  enabled: true\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	subDir := filepath.Join(repoRoot, "sub")
-	subApDir := filepath.Join(subDir, ".ap")
-	if err := os.MkdirAll(subApDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(subApDir, "ap.yaml"), []byte("govulncheck:\n  enabled: false\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	r, err := sourcetree.Open(repoRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	cfg1, err := Effective(r, subDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	cfg2, err := Effective(r, subDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if cfg1 != cfg2 {
-		t.Errorf("expected memoized config pointer equality, got %p vs %p", cfg1, cfg2)
-	}
-
-	// Subview should also share memoized config
-	subView := r.Under(subDir)
-	cfg3, err := Effective(subView, subDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg1 != cfg3 {
-		t.Errorf("expected subview to share memoized config, got %p vs %p", cfg1, cfg3)
 	}
 }
 
@@ -276,7 +213,7 @@ func TestEffective_UnknownKeyRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := Effective(nil, subDir)
+	_, err := Effective(repoRoot, subDir)
 	if err == nil {
 		t.Fatal("expected error parsing subtree ap.yaml with unknown key")
 	}
@@ -322,7 +259,7 @@ lint:
 		t.Fatal(err)
 	}
 
-	cfg, err := Effective(nil, subDir)
+	cfg, err := Effective(repoRoot, subDir)
 	if err != nil {
 		t.Fatal(err)
 	}

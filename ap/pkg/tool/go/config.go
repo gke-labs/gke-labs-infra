@@ -135,25 +135,16 @@ func ParseGoMod(path string) (toolchainVer, goVer string, err error) {
 }
 
 func loadGoConfig(startDir, repoRoot string) (*config.Config, error) {
-	if startDir != "" {
-		cfg, err := config.Effective(nil, startDir)
-		if err != nil {
-			return nil, err
-		}
-		if cfg != nil && strings.TrimSpace(cfg.Toolchain) != "" {
-			return cfg, nil
-		}
+	target := startDir
+	if target == "" {
+		target = repoRoot
 	}
-
-	if repoRoot != "" && repoRoot != startDir {
-		cfg, err := config.Effective(nil, repoRoot)
-		if err != nil {
-			return nil, err
-		}
-		if cfg != nil {
-			return cfg, nil
-		}
+	root := repoRoot
+	if root == "" {
+		root = target
 	}
-
-	return nil, nil
+	if root == "" {
+		return nil, nil
+	}
+	return config.Effective(root, target)
 }
