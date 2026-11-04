@@ -158,7 +158,7 @@ func EnsureDocker(ctx context.Context, version string) (string, error) {
 	installDir := filepath.Join(cacheRoot, "tools", "docker", resolvedVer)
 	binPath := filepath.Join(installDir, "bin", binName)
 	if fileutils.IsExecutable(binPath) {
-		klog.Infof("Using docker %s", resolvedVer)
+		klog.V(2).Infof("Using docker %s", resolvedVer)
 		return binPath, nil
 	}
 
@@ -245,7 +245,7 @@ func EnsureDockerBuildx(ctx context.Context, version string) (string, error) {
 	installDir := filepath.Join(cacheRoot, "tools", "docker-buildx", "v"+normVer)
 	binPath := filepath.Join(installDir, "bin", binName)
 	if fileutils.IsExecutable(binPath) {
-		klog.Infof("Using docker-buildx v%s", normVer)
+		klog.V(2).Infof("Using docker-buildx v%s", normVer)
 		return binPath, nil
 	}
 

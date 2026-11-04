@@ -144,6 +144,14 @@ func TestEnsureProtoc_Cached(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	var logBuf bytes.Buffer
+	klog.SetOutput(&logBuf)
+	klog.LogToStderr(false)
+	defer func() {
+		klog.SetOutput(os.Stderr)
+		klog.LogToStderr(true)
+	}()
+
 	bin, inc, err := EnsureProtoc(t.Context(), version)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -153,6 +161,9 @@ func TestEnsureProtoc_Cached(t *testing.T) {
 	}
 	if inc != includeDir {
 		t.Errorf("expected inc %s, got %s", includeDir, inc)
+	}
+	if logBuf.Len() > 0 {
+		t.Errorf("expected no log output at default verbosity when cached, got: %q", logBuf.String())
 	}
 }
 
@@ -227,12 +238,23 @@ func TestEnsurePlugin_Cached(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	var logBuf bytes.Buffer
+	klog.SetOutput(&logBuf)
+	klog.LogToStderr(false)
+	defer func() {
+		klog.SetOutput(os.Stderr)
+		klog.LogToStderr(true)
+	}()
+
 	dir, err := EnsurePlugin(t.Context(), pluginName, version, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if dir != binDir {
 		t.Errorf("expected binDir %s, got %s", binDir, dir)
+	}
+	if logBuf.Len() > 0 {
+		t.Errorf("expected no log output at default verbosity when cached, got: %q", logBuf.String())
 	}
 }
 

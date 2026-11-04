@@ -131,7 +131,7 @@ func EnsureProtoc(ctx context.Context, version string) (protocBin string, includ
 		installDir := filepath.Join(cacheRoot, "tools", "protoc", normalizedVer)
 		binPath := filepath.Join(installDir, "bin", binName)
 		if fileutils.IsExecutable(binPath) {
-			klog.Infof("Using protoc %s", normalizedVer)
+			klog.V(2).Infof("Using protoc %s", normalizedVer)
 			return binPath, filepath.Join(installDir, "include"), nil
 		}
 	}
@@ -156,7 +156,7 @@ func EnsureProtoc(ctx context.Context, version string) (protocBin string, includ
 	installDir := filepath.Join(cacheRoot, "tools", "protoc", resolvedVer)
 	binPath := filepath.Join(installDir, "bin", binName)
 	if fileutils.IsExecutable(binPath) {
-		klog.Infof("Using protoc %s", resolvedVer)
+		klog.V(2).Infof("Using protoc %s", resolvedVer)
 		return binPath, filepath.Join(installDir, "include"), nil
 	}
 
@@ -287,7 +287,7 @@ func installProtocZip(zipPath, installDir, binName, resolvedVer string) (protocB
 		return "", "", fmt.Errorf("failed to chmod protoc binary %s: %w", protocBin, err)
 	}
 
-	klog.Infof("Using protoc %s", resolvedVer)
+	klog.Infof("Installed protoc %s to %s", resolvedVer, protocBin)
 	return protocBin, filepath.Join(installDir, "include"), nil
 }
 
@@ -355,7 +355,7 @@ func EnsurePlugin(ctx context.Context, pluginName, requestedVer string, cfgPlugi
 		targetBinDir := filepath.Join(cacheRoot, "tools", "plugins", normalizedName, ver, "bin")
 		targetBin := filepath.Join(targetBinDir, binName)
 		if fileutils.IsExecutable(targetBin) {
-			klog.Infof("Using %s %s", normalizedName, ver)
+			klog.V(2).Infof("Using %s %s", normalizedName, ver)
 			return targetBinDir, nil
 		}
 
@@ -377,7 +377,7 @@ func EnsurePlugin(ctx context.Context, pluginName, requestedVer string, cfgPlugi
 			return "", fmt.Errorf("failed to chmod plugin binary %s: %w", targetBin, err)
 		}
 
-		klog.Infof("Using %s %s", normalizedName, ver)
+		klog.Infof("Installed %s %s to %s", normalizedName, ver, targetBin)
 		return targetBinDir, nil
 	}
 
@@ -426,7 +426,7 @@ func EnsurePlugin(ctx context.Context, pluginName, requestedVer string, cfgPlugi
 		return "", fmt.Errorf("failed to chmod plugin binary %s: %w", targetBin, err)
 	}
 
-	klog.Infof("Using %s %s", normalizedName, resolvedVer)
+	klog.Infof("Installed %s %s to %s", normalizedName, resolvedVer, targetBin)
 	return targetBinDir, nil
 }
 

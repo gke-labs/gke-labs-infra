@@ -31,6 +31,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
+	"k8s.io/klog/v2"
 )
 
 type roundTripperFunc func(req *http.Request) (*http.Response, error)
@@ -157,12 +158,23 @@ func TestOfflineResolution_FailingClient(t *testing.T) {
 	}
 	ctx := scoped.WithHTTPClient(t.Context(), failingClient)
 
+	var logBuf bytes.Buffer
+	klog.SetOutput(&logBuf)
+	klog.LogToStderr(false)
+	defer func() {
+		klog.SetOutput(os.Stderr)
+		klog.LogToStderr(true)
+	}()
+
 	gotBin, err := EnsureGo(ctx, "go1.27.3")
 	if err != nil {
 		t.Fatalf("unexpected error resolving cached Go offline: %v", err)
 	}
 	if gotBin != expectedBin {
 		t.Errorf("got bin %q, want %q", gotBin, expectedBin)
+	}
+	if logBuf.Len() > 0 {
+		t.Errorf("expected no log output at default verbosity when cached, got: %q", logBuf.String())
 	}
 }
 

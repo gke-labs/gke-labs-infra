@@ -75,7 +75,7 @@ func EnsureKind(ctx context.Context, version string) (string, error) {
 		installDir := filepath.Join(cacheRoot, "tools", "kind", tag)
 		binPath := filepath.Join(installDir, "bin", binName)
 		if fileutils.IsExecutable(binPath) {
-			klog.Infof("Using kind %s", tag)
+			klog.V(2).Infof("Using kind %s", tag)
 			return binPath, nil
 		}
 	}
@@ -89,7 +89,7 @@ func EnsureKind(ctx context.Context, version string) (string, error) {
 	installDir := filepath.Join(cacheRoot, "tools", "kind", tag)
 	binPath := filepath.Join(installDir, "bin", binName)
 	if fileutils.IsExecutable(binPath) {
-		klog.Infof("Using kind %s", tag)
+		klog.V(2).Infof("Using kind %s", tag)
 		return binPath, nil
 	}
 

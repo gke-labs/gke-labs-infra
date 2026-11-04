@@ -86,7 +86,7 @@ func EnsureGo(ctx context.Context, version string) (string, error) {
 	binPath := filepath.Join(installDir, "bin", binName)
 
 	if fileutils.IsExecutable(binPath) {
-		klog.Infof("Using Go %s from %s", resolvedVer, binPath)
+		klog.V(2).Infof("Using Go %s from %s", resolvedVer, binPath)
 		return binPath, nil
 	}
 
