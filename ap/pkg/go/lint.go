@@ -396,15 +396,16 @@ func LintTasks(r *sourcetree.SourceTree, root string) (tasks.Task, error) {
 	if repoRoot == "" {
 		repoRoot = root
 	}
-	cfg, err := config.Load(repoRoot)
-	if err != nil {
-		return nil, err
-	}
 
 	modules := r.Under(root).Modules()
 
 	var moduleTasks []tasks.Task
 	for _, dir := range modules {
+		cfg, err := config.Effective(repoRoot, dir)
+		if err != nil {
+			return nil, err
+		}
+
 		hasGo, err := hasGoFiles(r, dir)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check for Go files in %s: %w", dir, err)

@@ -177,7 +177,7 @@ func NewTask(tree *sourcetree.SourceTree, dir, repoRoot string) (tasks.Task, err
 		return nil, nil
 	}
 
-	cfg, err := config.Load(repoRoot)
+	cfg, err := config.Effective(repoRoot, dir)
 	if err != nil {
 		return nil, err
 	}

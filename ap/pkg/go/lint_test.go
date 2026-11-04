@@ -17,6 +17,7 @@ package golang
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1155,5 +1156,96 @@ func main() {
 	// Should pass because remaining finding f1 is in baseline
 	if err := task4.Run(ctx, scope); err != nil {
 		t.Fatalf("expected check to pass after fixing f2: %v", err)
+	}
+}
+
+func TestLintTasks_SubtreeOverrides(t *testing.T) {
+	repoRoot := t.TempDir()
+	apDir := filepath.Join(repoRoot, ".ap")
+	if err := os.MkdirAll(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	baseYAML := `
+govet:
+  enabled: true
+govulncheck:
+  enabled: true
+`
+	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(baseYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Root module
+	if err := os.WriteFile(filepath.Join(repoRoot, "go.mod"), []byte("module rootmod\n\ngo 1.27\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Subtree module with govulncheck disabled in .ap/ap.yaml
+	subDir := filepath.Join(repoRoot, "sub")
+	if err := os.MkdirAll(filepath.Join(subDir, ".ap"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, ".ap", "ap.yaml"), []byte("govulncheck:\n  enabled: false\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "go.mod"), []byte("module submod\n\ngo 1.27\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "sub.go"), []byte("package sub\n\nfunc Sub() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := sourcetree.Open(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tasksGroup, err := LintTasks(r, repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	outer, ok := tasksGroup.(*tasks.Group)
+	if !ok {
+		t.Fatalf("expected outer group *tasks.Group, got %T", tasksGroup)
+	}
+
+	hasGovulncheck := func(g *tasks.Group) bool {
+		for _, subTask := range g.Tasks {
+			if _, ok := subTask.(*GovulncheckTask); ok {
+				return true
+			}
+		}
+		return false
+	}
+
+	var rootGroup, subGroup *tasks.Group
+	for _, task := range outer.Tasks {
+		g, ok := task.(*tasks.Group)
+		if !ok {
+			continue
+		}
+		if g.Name == "go-lint-root" || g.Name == fmt.Sprintf("go-lint-%s", filepath.Base(repoRoot)) {
+			rootGroup = g
+		} else if g.Name == "go-lint-sub" {
+			subGroup = g
+		}
+	}
+
+	if rootGroup == nil {
+		t.Fatalf("expected root module group, got tasks: %+v", outer.Tasks)
+	}
+	if subGroup == nil {
+		t.Fatalf("expected sub module group, got tasks: %+v", outer.Tasks)
+	}
+
+	if !hasGovulncheck(rootGroup) {
+		t.Errorf("expected root module to have govulncheck enabled")
+	}
+	if hasGovulncheck(subGroup) {
+		t.Errorf("expected sub module to have govulncheck disabled via subtree override")
 	}
 }

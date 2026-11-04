@@ -188,7 +188,8 @@ func TestRunDroppedErrors_OutsideGitRepo(t *testing.T) {
 	t.Chdir(tmpDir)
 
 	opt := DroppedErrorsOptions{
-		Mode: "error",
+		RootOptions: &RootOptions{},
+		Mode:        "error",
 	}
 	// Should NOT fail with "could not find git repository root"
 	if err := RunDroppedErrors(t.Context(), nil, opt, nil); err != nil {

@@ -12,6 +12,14 @@ The repository root (the directory containing `.git`) is the only root. Configur
 
 Commands operate on a subtree of the repository: either the positional target where one is provided (e.g. `ap e2e autodeploy`, `ap deploy <dir>`), the subtree of the current working directory, or the whole repository when run from the root.
 
+### Subtree Configuration Overrides
+
+A `.ap/` directory in a subtree can override configuration options for files beneath it. The effective configuration for a path is the base configuration at `<repo>/.ap/` with keys overridden by the nearest enclosing subtree `.ap/ap.yaml`, walking up to the root. Only keys present in a subtree file override; absent keys inherit, and lists such as `skip` replace rather than merge. Overrides apply to per-module and per-directory settings (`gofmt`, `govet`, `govulncheck`, `tidy`, `skip`, `lint` analyzer modes and baselines, and `toolchain`), while tool version files (`protoc.yaml`, `docker.yaml`, `kind.yaml`, `go.yaml`, `kubectl.yaml`) remain root-only. A subtree `.ap/` directory does not change discovery, build context, image naming, or generated presubmits. For example, to disable `govulncheck` in a subtree, create a `.ap/ap.yaml` in that subtree:
+```yaml
+govulncheck:
+  enabled: false
+```
+
 ### Environment Variables
 
 You can configure `ap` behavior by setting the following environment variables:
