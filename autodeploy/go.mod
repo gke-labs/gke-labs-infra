@@ -7,9 +7,9 @@ toolchain go1.27.3
 require (
 	github.com/gke-labs/gke-labs-infra v0.0.0-00010101000000-000000000000
 	github.com/go-git/go-git/v5 v5.19.3
-	k8s.io/api v0.37.1
-	k8s.io/apimachinery v0.37.1
-	k8s.io/client-go v0.37.1
+	k8s.io/api v0.37.2
+	k8s.io/apimachinery v0.37.2
+	k8s.io/client-go v0.37.2
 	k8s.io/klog/v2 v2.140.0
 	sigs.k8s.io/controller-runtime v0.25.2
 )
