@@ -147,7 +147,7 @@ func normalizeCmd(token string) string {
 
 // Task checks task scripts in dev/tasks for non-portable constructs.
 type Task struct {
-	APRoot        string
+	Dir           string
 	RepoRoot      string
 	Scripts       []string
 	Mode          codestyle.Mode
@@ -167,9 +167,9 @@ func (t *Task) SetWriteBaseline(wb bool) {
 	t.WriteBaseline = wb
 }
 
-// NewTask creates a new portability task for the given AP root if task scripts exist.
-func NewTask(tree *sourcetree.SourceTree, apRoot, repoRoot string) (tasks.Task, error) {
-	scriptTasks, err := tasks.FindTaskScripts(tree, apRoot)
+// NewTask creates a new portability task for the given directory if task scripts exist.
+func NewTask(tree *sourcetree.SourceTree, dir, repoRoot string) (tasks.Task, error) {
+	scriptTasks, err := tasks.FindTaskScripts(tree, dir)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +177,7 @@ func NewTask(tree *sourcetree.SourceTree, apRoot, repoRoot string) (tasks.Task, 
 		return nil, nil
 	}
 
-	cfg, err := config.Load(apRoot)
+	cfg, err := config.Load(repoRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +204,7 @@ func NewTask(tree *sourcetree.SourceTree, apRoot, repoRoot string) (tasks.Task, 
 	}
 
 	return &Task{
-		APRoot:       apRoot,
+		Dir:          dir,
 		RepoRoot:     repoRoot,
 		Scripts:      paths,
 		Mode:         mode,
@@ -225,8 +225,8 @@ func (t *Task) Run(ctx context.Context, scope *tasks.APScope) error {
 			}
 			allCheckedFiles[filepath.ToSlash(rel)] = true
 		}
-		if t.APRoot != "" {
-			rel, err := filepath.Rel(t.APRoot, path)
+		if t.Dir != "" {
+			rel, err := filepath.Rel(t.Dir, path)
 			if err != nil {
 				return fmt.Errorf("failed to get relative path for %s: %w", path, err)
 			}
@@ -255,7 +255,7 @@ func (t *Task) Run(ctx context.Context, scope *tasks.APScope) error {
 	_, err := baseline.Apply(allFindings, baseline.ApplyOptions{
 		Name:            "portability",
 		RepoRoot:        t.RepoRoot,
-		Dir:             t.APRoot,
+		Dir:             t.Dir,
 		ConfiguredPath:  t.BaselinePath,
 		WriteBaseline:   t.WriteBaseline,
 		AllCheckedFiles: allCheckedFiles,

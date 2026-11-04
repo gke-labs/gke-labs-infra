@@ -48,10 +48,7 @@ func RunToolKubectl(ctx context.Context, opt ToolKubectlOptions) error {
 		return fmt.Errorf("tool kubectl not registered")
 	}
 
-	repoRoot := opt.APRoot
-	if repoRoot == "" {
-		repoRoot = opt.RepoRoot
-	}
+	repoRoot := opt.RepoRoot
 
 	return t.Run(ctx, tool.RunOptions{
 		RepoRoot: repoRoot,

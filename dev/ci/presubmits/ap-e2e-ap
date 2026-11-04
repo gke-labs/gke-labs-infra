@@ -23,4 +23,4 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}"
 
 # Run e2e tests
-go run ./ap e2e .
+go run ./ap e2e ap

@@ -91,7 +91,7 @@ func RunGenerate(ctx context.Context, opt GenerateOptions) error {
 
 	var allTasks []tasks.Task
 
-	scopes, err := DiscoverScopes(r, opt.RepoRoot, opt.APRoots)
+	scopes, err := DiscoverScopes(r, opt.RepoRoot, opt.Dir)
 	if err != nil {
 		return err
 	}
@@ -101,10 +101,8 @@ func RunGenerate(ctx context.Context, opt GenerateOptions) error {
 	}
 	allTasks = append(allTasks, generateTasks)
 
-	// Format tasks are also root-sensitive
 	for _, scope := range scopes {
-		apRoot := scope.Dir
-		formatTasks, err := format.FormatTasks(scope.SourceTree, apRoot)
+		formatTasks, err := format.FormatTasks(scope.SourceTree, scope.Dir)
 		if err != nil {
 			return err
 		}

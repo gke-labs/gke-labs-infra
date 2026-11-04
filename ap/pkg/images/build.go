@@ -433,6 +433,7 @@ func FindImageNames(r *sourcetree.SourceTree, root string) ([]string, error) {
 		return nil, err
 	}
 
+	seen := make(map[string]string)
 	var names []string
 	for _, dockerfile := range dockerfiles {
 		relPath, err := filepath.Rel(root, dockerfile)
@@ -442,6 +443,10 @@ func FindImageNames(r *sourcetree.SourceTree, root string) ([]string, error) {
 
 		name := getImageName(relPath)
 		if name != "" {
+			if existing, ok := seen[name]; ok {
+				return nil, fmt.Errorf("duplicate image %q found in %s and %s", name, existing, dockerfile)
+			}
+			seen[name] = dockerfile
 			names = append(names, name)
 		}
 	}
@@ -451,6 +456,10 @@ func FindImageNames(r *sourcetree.SourceTree, root string) ([]string, error) {
 
 // BuildTasksForImages returns a task group for building only the specified docker images.
 func BuildTasksForImages(r *sourcetree.SourceTree, root string, push bool, buildkitHost string, imageNames []string, naming ImageNaming) (tasks.Task, error) {
+	if _, err := FindImageNames(r, root); err != nil {
+		return nil, err
+	}
+
 	dockerfiles, err := findDockerfiles(r, root)
 	if err != nil {
 		return nil, err
@@ -461,26 +470,32 @@ func BuildTasksForImages(r *sourcetree.SourceTree, root string, push bool, build
 		filter[name] = true
 	}
 
+	repoRoot := r.RepoRoot()
+	if repoRoot == "" {
+		repoRoot = root
+	}
+
 	var buildTasks []tasks.Task
 	for _, dockerfile := range dockerfiles {
-		relPath, err := filepath.Rel(root, dockerfile)
+		relToRoot, err := filepath.Rel(root, dockerfile)
 		if err != nil {
 			continue
 		}
 
-		name := getImageName(relPath)
-		if name == "" {
+		name := getImageName(relToRoot)
+		if name == "" || !filter[name] {
 			continue
 		}
 
-		if !filter[name] {
+		relToRepo, err := filepath.Rel(repoRoot, dockerfile)
+		if err != nil {
 			continue
 		}
 
 		buildTasks = append(buildTasks, &DockerBuildTask{
 			ImageName:    name,
-			Dockerfile:   relPath,
-			Root:         root,
+			Dockerfile:   relToRepo,
+			Root:         repoRoot,
 			Push:         push,
 			BuildkitHost: buildkitHost,
 			Naming:       naming,
@@ -562,7 +577,7 @@ func getImageName(relPath string) string {
 
 	// Look for images/<name>/Dockerfile structure
 	for i, part := range parts {
-		if part == "images" && i+2 < len(parts) && parts[len(parts)-1] == "Dockerfile" {
+		if part == "images" && i+2 < len(parts) && parts[i+2] == "Dockerfile" {
 			return parts[i+1]
 		}
 	}

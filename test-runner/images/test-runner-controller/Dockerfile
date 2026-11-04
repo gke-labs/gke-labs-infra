@@ -19,6 +19,7 @@ ARG TARGETARCH
 
 WORKDIR /workspace
 COPY . .
+WORKDIR /workspace/test-runner
 
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /usr/local/bin/test-runner-controller ./cmd/test-runner-controller
 

@@ -36,7 +36,7 @@ func TestRunBuild_NoImagesOrScriptsFails(t *testing.T) {
 	opt := BuildOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tempDir,
-			APRoots:  []string{tempDir},
+			Dir:      tempDir,
 			DryRun:   true,
 		},
 	}
@@ -62,7 +62,7 @@ func TestRunBuild_NoScopesFails(t *testing.T) {
 	opt := BuildOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tempDir,
-			APRoots:  []string{},
+			Dir:      filepath.Join(tempDir, "nonexistent"),
 			DryRun:   true,
 		},
 	}
@@ -97,7 +97,7 @@ func TestRunBuild_WithImagesSucceeds(t *testing.T) {
 	opt := BuildOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tempDir,
-			APRoots:  []string{tempDir},
+			Dir:      tempDir,
 			DryRun:   true,
 		},
 	}
@@ -129,7 +129,7 @@ func TestRunBuild_WithBuildScriptNoImagesSucceeds(t *testing.T) {
 	opt := BuildOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tempDir,
-			APRoots:  []string{tempDir},
+			Dir:      tempDir,
 			DryRun:   true,
 		},
 	}

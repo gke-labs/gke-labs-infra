@@ -99,7 +99,7 @@ func (r *PackageReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 		var args []string
 		if pkg.Spec.Directory != "" {
-			args = append(args, "--root="+pkg.Spec.Directory)
+			args = append(args, pkg.Spec.Directory)
 		}
 
 		if err := runner.DeployFlow(ctx, &pkg, commit, args...); err != nil {

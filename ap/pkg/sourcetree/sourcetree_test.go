@@ -93,24 +93,13 @@ func TestRepoSingleWalkAndCache(t *testing.T) {
 	}
 }
 
-func TestAPRootsAndModules(t *testing.T) {
+func TestModules(t *testing.T) {
 	ResetCache()
 	dir := setupTestRepo(t)
 
 	r, err := Open(dir, WithSkip("skipped/**"))
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
-	}
-
-	expectedAPRoots := []string{
-		dir,
-		filepath.Join(dir, "sub"),
-	}
-	gotAPRoots := r.APRoots()
-	sort.Strings(expectedAPRoots)
-	sort.Strings(gotAPRoots)
-	if !reflect.DeepEqual(gotAPRoots, expectedAPRoots) {
-		t.Errorf("APRoots() = %v, want %v", gotAPRoots, expectedAPRoots)
 	}
 
 	expectedModules := []string{
@@ -143,12 +132,6 @@ func TestSkipUniformlyApplied(t *testing.T) {
 	for _, d := range r.Dirs() {
 		if filepath.Base(d) == "skipped" {
 			t.Fatalf("skipped dir leaked into tree: %s", d)
-		}
-	}
-
-	for _, ap := range r.APRoots() {
-		if filepath.Base(ap) == "skipped" {
-			t.Fatalf("skipped AP root leaked into APRoots(): %s", ap)
 		}
 	}
 
@@ -220,9 +203,12 @@ func TestFindDockerfilesAndManifests(t *testing.T) {
 		t.Fatalf("Open failed: %v", err)
 	}
 
-	// For root: only images/app/Dockerfile (sub/images/subapp/Dockerfile belongs to sub AP root)
+	// For root: discovers all Dockerfiles under root
 	rootDockerfiles := r.FindDockerfiles()
-	expectedRootDockerfiles := []string{filepath.Join(dir, "images", "app", "Dockerfile")}
+	expectedRootDockerfiles := []string{
+		filepath.Join(dir, "images", "app", "Dockerfile"),
+		filepath.Join(dir, "sub", "images", "subapp", "Dockerfile"),
+	}
 	if !reflect.DeepEqual(rootDockerfiles, expectedRootDockerfiles) {
 		t.Errorf("FindDockerfiles() = %v, want %v", rootDockerfiles, expectedRootDockerfiles)
 	}
@@ -234,11 +220,12 @@ func TestFindDockerfilesAndManifests(t *testing.T) {
 		t.Errorf("sub FindDockerfiles() = %v, want %v", subDockerfiles, expectedSubDockerfiles)
 	}
 
-	// Manifests for root (excluding sub)
+	// Manifests for root (all manifests under k8s in root)
 	rootManifests := r.FindManifests()
 	expectedRootManifests := []string{
 		filepath.Join(dir, "k8s", "crds", "crd.yml"),
 		filepath.Join(dir, "k8s", "manifest.yaml"),
+		filepath.Join(dir, "sub", "k8s", "sub.yaml"),
 	}
 	if !reflect.DeepEqual(rootManifests, expectedRootManifests) {
 		t.Errorf("FindManifests() = %v, want %v", rootManifests, expectedRootManifests)

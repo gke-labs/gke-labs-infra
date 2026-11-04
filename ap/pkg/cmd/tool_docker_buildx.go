@@ -48,10 +48,7 @@ func RunToolDockerBuildx(ctx context.Context, opt ToolDockerBuildxOptions) error
 		return fmt.Errorf("tool docker-buildx not registered")
 	}
 
-	repoRoot := opt.APRoot
-	if repoRoot == "" {
-		repoRoot = opt.RepoRoot
-	}
+	repoRoot := opt.RepoRoot
 
 	return t.Run(ctx, tool.RunOptions{
 		RepoRoot: repoRoot,

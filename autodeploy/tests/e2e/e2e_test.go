@@ -50,8 +50,8 @@ func TestAutodeploy(t *testing.T) {
 
 	// Build all components
 	runCmd(t, repoRoot, "go", "run", "./ap", "build")
-	runCmd(t, repoRoot, "go", "run", "./ap", "deploy", "--root=autodeploy", "--skip-push")
-	runCmd(t, repoRoot, "go", "run", "./ap", "deploy", "--root=in-cluster-image-registry", "--skip-push")
+	runCmd(t, repoRoot, "go", "run", "./ap", "deploy", "autodeploy", "--skip-push")
+	runCmd(t, repoRoot, "go", "run", "./ap", "deploy", "in-cluster-image-registry", "--skip-push")
 
 	if _, err := kind.EnsureKindForRepo(t.Context(), repoRoot); err != nil {
 		t.Fatalf("failed to prepare kind tool: %v", err)

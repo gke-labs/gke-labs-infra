@@ -479,28 +479,20 @@ func copyFile(src, dst string, mode os.FileMode) (retErr error) {
 }
 
 func discoverScratchScopes(r *sourcetree.SourceTree, scratchDir string) ([]*tasks.APScope, error) {
-	apRoots := r.APRoots()
-	if len(apRoots) == 0 {
-		apRoots = []string{scratchDir}
+	scope := tasks.NewScope(scratchDir, scratchDir, r.Under(scratchDir))
+	buildScripts, err := tasks.FindTaskScripts(scope.SourceTree, scratchDir, tasks.WithPrefix("build-"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to find build scripts: %w", err)
 	}
-	var scopes []*tasks.APScope
-	for _, apRoot := range apRoots {
-		scope := tasks.NewScope(scratchDir, apRoot, r.Under(apRoot))
-		buildScripts, err := tasks.FindTaskScripts(scope.SourceTree, apRoot, tasks.WithPrefix("build-"))
-		if err != nil {
-			return nil, fmt.Errorf("failed to find build scripts: %w", err)
-		}
-		scope.BuildTasks = append(scope.BuildTasks, buildScripts...)
+	scope.BuildTasks = append(scope.BuildTasks, buildScripts...)
 
-		e2eScripts, err := tasks.FindTaskScripts(scope.SourceTree, apRoot, tasks.WithPrefix("test-e2e"))
-		if err != nil {
-			return nil, fmt.Errorf("failed to find e2e scripts: %w", err)
-		}
-		scope.E2ETasks = append(scope.E2ETasks, e2eScripts...)
-
-		scopes = append(scopes, scope)
+	e2eScripts, err := tasks.FindTaskScripts(scope.SourceTree, scratchDir, tasks.WithPrefix("test-e2e"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to find e2e scripts: %w", err)
 	}
-	return scopes, nil
+	scope.E2ETasks = append(scope.E2ETasks, e2eScripts...)
+
+	return []*tasks.APScope{scope}, nil
 }
 
 func identifyGenerators(ctx context.Context, repoRoot string, scopes []*tasks.APScope) map[string]string {
@@ -512,38 +504,45 @@ func identifyGenerators(ctx context.Context, repoRoot string, scopes []*tasks.AP
 	outputs[filepath.Join(presubmitsDir, "ap-lint")] = "ap-lint"
 	outputs[filepath.Join(presubmitsDir, "ap-build")] = "ap-build"
 	outputs[filepath.Join(repoRoot, ".github", "workflows", "ci-presubmits.yaml")] = "github-actions"
-	for _, sc := range scopes {
-		suffix := getSuffix(repoRoot, sc.Dir)
-		outputs[filepath.Join(presubmitsDir, "ap-e2e"+suffix)] = "ap-e2e"
+
+	entries, err := os.ReadDir(presubmitsDir)
+	if err != nil && !os.IsNotExist(err) {
+		klog.Warningf("failed to read presubmits dir %s: %v", presubmitsDir, err)
+	} else if err == nil {
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), "ap-e2e") {
+				outputs[filepath.Join(presubmitsDir, e.Name())] = "ap-e2e"
+			}
+		}
 	}
 
 	var legacyGenerators []string
 	for _, sc := range scopes {
-		tasksDir := filepath.Join(sc.Dir, "dev", "tasks")
-		entries, err := os.ReadDir(tasksDir)
+		taskScripts, err := tasks.FindTaskScripts(sc.SourceTree, sc.Dir, tasks.WithPrefix("generate-"))
 		if err != nil {
 			continue
 		}
-		for _, e := range entries {
-			if strings.HasPrefix(e.Name(), "generate-") && e.Name() != "generate-github-actions" {
-				genName := strings.TrimPrefix(e.Name(), "generate-")
-				legacyGenerators = append(legacyGenerators, genName)
-				scriptPath := filepath.Join(tasksDir, e.Name())
-				cmdCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-				cmd := exec.CommandContext(cmdCtx, scriptPath, "--print-outputs")
-				cmd.Dir = sc.Dir
-				out, err := cmd.Output()
-				cancel()
-				if err != nil {
-					continue
-				}
-				lines := strings.Split(string(out), "\n")
-				for _, line := range lines {
-					line = strings.TrimSpace(line)
-					if line != "" && !strings.HasPrefix(line, "#") {
-						p := filepath.Clean(filepath.Join(sc.Dir, line))
-						outputs[p] = genName
-					}
+		for _, ts := range taskScripts {
+			script, ok := ts.(*tasks.TaskScript)
+			if !ok || script.Name == "generate-github-actions" {
+				continue
+			}
+			genName := strings.TrimPrefix(script.Name, "generate-")
+			legacyGenerators = append(legacyGenerators, genName)
+			cmdCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			cmd := exec.CommandContext(cmdCtx, script.Path, "--print-outputs")
+			cmd.Dir = script.Root
+			out, err := cmd.Output()
+			cancel()
+			if err != nil {
+				continue
+			}
+			lines := strings.Split(string(out), "\n")
+			for _, line := range lines {
+				line = strings.TrimSpace(line)
+				if line != "" && !strings.HasPrefix(line, "#") {
+					p := filepath.Clean(filepath.Join(script.Root, line))
+					outputs[p] = genName
 				}
 			}
 		}

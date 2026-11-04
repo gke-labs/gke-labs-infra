@@ -48,10 +48,7 @@ func RunToolKind(ctx context.Context, opt ToolKindOptions) error {
 		return fmt.Errorf("tool kind not registered")
 	}
 
-	repoRoot := opt.APRoot
-	if repoRoot == "" {
-		repoRoot = opt.RepoRoot
-	}
+	repoRoot := opt.RepoRoot
 
 	return t.Run(ctx, tool.RunOptions{
 		RepoRoot: repoRoot,

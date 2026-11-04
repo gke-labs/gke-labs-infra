@@ -38,6 +38,9 @@ func TestDeploy_KindRollout(t *testing.T) {
 		t.Fatalf("failed to change to repo root: %v", err)
 	}
 
+	apBin := filepath.Join(t.TempDir(), "ap")
+	h.RunCmd("go", "build", "-o", apBin, "./ap")
+
 	tmpDir, err := os.MkdirTemp("", "ap-deploy-kind-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
@@ -48,6 +51,15 @@ func TestDeploy_KindRollout(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(tmpDir, ".ap"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	origWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(origWd)
+	if err := os.Chdir(tmpDir); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(tmpDir, ".ap", "ap.yaml"), []byte(fmt.Sprintf("imagePrefix: %s\n", imagePrefix)), 0644); err != nil {
@@ -106,7 +118,7 @@ spec:
 	t.Setenv("IMAGE_TAG", "")
 	t.Setenv("IMAGE_PREFIX", imagePrefix)
 
-	h.RunCmd("go", "run", "./ap", "deploy", "--root="+tmpDir)
+	h.RunCmd(apBin, "deploy", "--cluster=kind-ap-deploy-kind-e2e")
 	h.RunCmd("kubectl", "rollout", "status", "deployment/my-app", "-n", ns, "--timeout=60s")
 
 	appliedImage1 := strings.TrimSpace(h.RunCmd("kubectl", "get", "deployment", "my-app", "-n", ns, "-o", "jsonpath={.spec.template.spec.containers[0].image}"))
@@ -122,7 +134,7 @@ spec:
 		t.Fatal(err)
 	}
 
-	h.RunCmd("go", "run", "./ap", "deploy", "--root="+tmpDir)
+	h.RunCmd(apBin, "deploy", "--cluster=kind-ap-deploy-kind-e2e")
 	h.RunCmd("kubectl", "rollout", "status", "deployment/my-app", "-n", ns, "--timeout=60s")
 
 	appliedImage2 := strings.TrimSpace(h.RunCmd("kubectl", "get", "deployment", "my-app", "-n", ns, "-o", "jsonpath={.spec.template.spec.containers[0].image}"))
@@ -140,7 +152,7 @@ spec:
 
 	// 3. Explicit IMAGE_TAG=v1.0 -> exact tag as given (no unique hex suffix)
 	t.Setenv("IMAGE_TAG", "v1.0")
-	h.RunCmd("go", "run", "./ap", "deploy", "--root="+tmpDir)
+	h.RunCmd(apBin, "deploy", "--cluster=kind-ap-deploy-kind-e2e")
 	h.RunCmd("kubectl", "rollout", "status", "deployment/my-app", "-n", ns, "--timeout=60s")
 
 	appliedImage3 := strings.TrimSpace(h.RunCmd("kubectl", "get", "deployment", "my-app", "-n", ns, "-o", "jsonpath={.spec.template.spec.containers[0].image}"))

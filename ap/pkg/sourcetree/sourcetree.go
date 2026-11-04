@@ -122,7 +122,6 @@ type SourceTree struct {
 	filesByDir   map[string][]*File // directory path -> files directly within it
 	hasTestsDirs map[string]bool    // directory path -> true if dir or any descendant has a test file
 
-	apRoots []string // sorted
 	modules []string // sorted
 
 	ignoreList *IgnoreList
@@ -182,14 +181,9 @@ func loadSourceTree(root string, opts ...Option) (*SourceTree, error) {
 	var (
 		files   []*File
 		dirs    []string
-		apRoots []string
 		modules []string
 	)
 
-	// Check if root itself has .ap or go.mod
-	if fi, err := os.Stat(filepath.Join(root, ".ap")); err == nil && fi.IsDir() {
-		apRoots = append(apRoots, root)
-	}
 	if fi, err := os.Stat(filepath.Join(root, "go.mod")); err == nil && !fi.IsDir() {
 		modules = append(modules, root)
 	}
@@ -218,10 +212,6 @@ func loadSourceTree(root string, opts ...Option) (*SourceTree, error) {
 			}
 
 			dirs = append(dirs, path)
-			if d.Name() == ".ap" {
-				parent := filepath.Dir(path)
-				apRoots = append(apRoots, parent)
-			}
 			return nil
 		}
 
@@ -244,18 +234,12 @@ func loadSourceTree(root string, opts ...Option) (*SourceTree, error) {
 	if err != nil {
 		if os.IsNotExist(err) {
 			// Directory does not exist on disk, return empty repo
-			return newSourceTree(root, root, nil, nil, nil, nil, ignoreList, nil, ""), nil
+			return newSourceTree(root, root, nil, nil, nil, ignoreList, nil, ""), nil
 		}
 		return nil, fmt.Errorf("failed to walk repository %s: %w", root, err)
 	}
 
-	apRoots = uniqueSorted(apRoots)
 	modules = uniqueSorted(modules)
-
-	// Fallback: if no .ap root was discovered anywhere, treat root as the default AP root
-	if len(apRoots) == 0 {
-		apRoots = []string{root}
-	}
 
 	cacheDir := opt.cacheDir
 	if cacheDir == "" {
@@ -292,16 +276,15 @@ func loadSourceTree(root string, opts ...Option) (*SourceTree, error) {
 		hashIndex = rf
 	}
 
-	// Classify each file's enclosing APRoot and Module
+	// Classify each file's enclosing Module
 	for _, f := range files {
-		f.apRoot = closestAncestor(f.Path, apRoots)
 		f.module = closestAncestor(f.Path, modules)
 	}
 
-	return newSourceTree(root, root, files, dirs, apRoots, modules, ignoreList, hashIndex, hashPath), nil
+	return newSourceTree(root, root, files, dirs, modules, ignoreList, hashIndex, hashPath), nil
 }
 
-func newSourceTree(root, repoRoot string, files []*File, dirs, apRoots, modules []string, ignoreList *IgnoreList, hashIndex *recordfile.File, hashPath string) *SourceTree {
+func newSourceTree(root, repoRoot string, files []*File, dirs, modules []string, ignoreList *IgnoreList, hashIndex *recordfile.File, hashPath string) *SourceTree {
 	filesByPath := make(map[string]*File, len(files))
 	filesByDir := make(map[string][]*File)
 	hasTestsDirs := make(map[string]bool)
@@ -349,7 +332,6 @@ func newSourceTree(root, repoRoot string, files []*File, dirs, apRoots, modules 
 		dirsSet:      dirsSet,
 		filesByDir:   filesByDir,
 		hasTestsDirs: hasTestsDirs,
-		apRoots:      apRoots,
 		modules:      modules,
 		ignoreList:   ignoreList,
 		hashIndex:    hashIndex,
@@ -494,7 +476,6 @@ func (r *SourceTree) trackFileLocked(clean string) *File {
 		Path:      clean,
 		RelPath:   relPath,
 		Name:      filepath.Base(clean),
-		apRoot:    closestAncestor(clean, r.apRoots),
 		module:    closestAncestor(clean, r.modules),
 		info:      fi,
 		infoValid: true,
@@ -527,13 +508,6 @@ func (r *SourceTree) trackFileLocked(clean string) *File {
 
 	if f.Name == "go.mod" {
 		r.modules = uniqueSorted(append(r.modules, parentDir))
-	}
-	if f.Name == ".ap" || filepath.Base(parentDir) == ".ap" {
-		apCandidate := parentDir
-		if f.Name != ".ap" {
-			apCandidate = filepath.Dir(parentDir)
-		}
-		r.apRoots = uniqueSorted(append(r.apRoots, apCandidate))
 	}
 
 	return f
@@ -783,7 +757,6 @@ func (r *SourceTree) InvalidateTree(dir string) error {
 				Path:    path,
 				RelPath: relPath,
 				Name:    d.Name(),
-				apRoot:  closestAncestor(path, r.apRoots),
 				module:  closestAncestor(path, r.modules),
 			}
 			r.files = append(r.files, f)
@@ -795,9 +768,6 @@ func (r *SourceTree) InvalidateTree(dir string) error {
 
 			if d.Name() == "go.mod" {
 				r.modules = uniqueSorted(append(r.modules, parentDir))
-			}
-			if d.Name() == ".ap" {
-				r.apRoots = uniqueSorted(append(r.apRoots, parentDir))
 			}
 		}
 	}
@@ -910,19 +880,6 @@ func (r *SourceTree) Modules() []string {
 	return res
 }
 
-// APRoots returns all AP root directory paths in this view (sorted).
-func (r *SourceTree) APRoots() []string {
-	res := make([]string, len(r.apRoots))
-	copy(res, r.apRoots)
-	return res
-}
-
-// APRootFor returns the closest enclosing AP root for the given path.
-func (r *SourceTree) APRootFor(path string) string {
-	clean := filepath.Clean(path)
-	return closestAncestor(clean, r.apRoots)
-}
-
 // ModuleFor returns the closest enclosing Go module root for the given path.
 func (r *SourceTree) ModuleFor(path string) string {
 	clean := filepath.Clean(path)
@@ -958,16 +915,6 @@ func (r *SourceTree) Under(dir string) *SourceTree {
 		subFiles = append(subFiles, r.filesByDir[d]...)
 	}
 
-	var subAPRoots []string
-	for _, root := range r.apRoots {
-		if root == cleanDir || strings.HasPrefix(root, prefix) {
-			subAPRoots = append(subAPRoots, root)
-		}
-	}
-	if len(subAPRoots) == 0 {
-		subAPRoots = []string{cleanDir}
-	}
-
 	var subModules []string
 	for _, m := range r.modules {
 		if m == cleanDir || strings.HasPrefix(m, prefix) {
@@ -975,7 +922,7 @@ func (r *SourceTree) Under(dir string) *SourceTree {
 		}
 	}
 
-	return newSourceTree(cleanDir, r.repoRoot, subFiles, subDirs, subAPRoots, subModules, r.ignoreList, r.hashIndex, r.hashPath)
+	return newSourceTree(cleanDir, r.repoRoot, subFiles, subDirs, subModules, r.ignoreList, r.hashIndex, r.hashPath)
 }
 
 // Save persists pending record entries (such as hashes.bin) atomically.
@@ -1044,12 +991,11 @@ func (r *SourceTree) HasGoFiles(dir ...string) bool {
 	return false
 }
 
-// FindDockerfiles returns all Dockerfile paths under this view that belong to this AP root
-// (excluding those belonging to child AP roots).
+// FindDockerfiles returns all Dockerfile paths under this view.
 func (r *SourceTree) FindDockerfiles() []string {
 	var dockerfiles []string
 	for _, f := range r.files {
-		if f.Name == "Dockerfile" && f.APRoot() == r.root {
+		if f.Name == "Dockerfile" {
 			dockerfiles = append(dockerfiles, f.Path)
 		}
 	}
@@ -1057,14 +1003,10 @@ func (r *SourceTree) FindDockerfiles() []string {
 	return dockerfiles
 }
 
-// FindManifests returns all Kubernetes manifest paths under k8s directories that belong to this AP root
-// (excluding those belonging to child AP roots).
+// FindManifests returns all Kubernetes manifest paths under k8s directories that belong to this view.
 func (r *SourceTree) FindManifests() []string {
 	var manifests []string
 	for _, f := range r.files {
-		if f.APRoot() != r.root {
-			continue
-		}
 		relToView, err := filepath.Rel(r.root, f.Path)
 		if err != nil {
 			continue

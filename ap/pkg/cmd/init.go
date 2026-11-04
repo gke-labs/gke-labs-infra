@@ -200,8 +200,7 @@ func RunInit(ctx context.Context, opt InitOptions) error {
 		genOpt := GenerateOptions{
 			RootOptions: &RootOptions{
 				RepoRoot: repoRoot,
-				APRoot:   targetDir,
-				APRoots:  []string{targetDir},
+				Dir:      targetDir,
 				DryRun:   opt.DryRun,
 			},
 		}

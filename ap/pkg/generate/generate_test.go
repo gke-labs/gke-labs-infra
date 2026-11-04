@@ -74,7 +74,7 @@ func TestGetApCommand(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			got, err := GetApCommand(root, root)
+			got, err := GetApCommand(root)
 			if err != nil {
 				t.Fatalf("GetApCommand: %v", err)
 			}

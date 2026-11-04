@@ -6,34 +6,28 @@
 
 `ap` is configured via files in the `.ap/` directory. By default, it looks for this directory in the current directory and walks up the tree until it finds one.
 
-### AP Roots
+### Repository Root and Subtrees
 
-An "ap root" is any directory containing a `.ap/` sub-directory. `ap` supports having multiple ap roots within a single repository, which is useful for monorepos or projects with distinct components.
+The repository root (the directory containing `.git`) is the only root. Configuration is read from `<repo>/.ap/`.
 
-When you run `ap`, it identifies the closest ap root by walking up from your current working directory. All commands then operate relative to that ap root.
+Commands operate on a subtree of the repository: either the positional target where one is provided (e.g. `ap e2e autodeploy`, `ap deploy <dir>`), the subtree of the current working directory, or the whole repository when run from the root.
 
 ### Environment Variables
 
-You can configure `ap` behavior and override root discovery by setting the following environment variables:
-- `AP_ROOT`: Explicitly sets the path to the ap root (only applies when the working directory is inside it).
-- `REPO_ROOT`: Explicitly sets the path to the git repository root (only applies when the working directory is inside it).
+You can configure `ap` behavior by setting the following environment variables:
 - `AP_CACHE_DIR`: Explicitly sets the root cache directory (defaults to `~/.cache/ap` or the OS equivalent; holds tools/protoc, plugins, and codestyle analysis cache).
 
 ## Generation
 
 The `ap generate` command runs all generation tasks across the repository:
-- Legacy generator scripts located at `dev/tasks/generate-*` within each AP root.
+- Legacy generator scripts located at `dev/tasks/generate-*` under the selected subtree.
 - `go generate ./...` in modules containing `//go:generate` directives.
 - Built-in generators for presubmit scripts (`ap-test`, `ap-lint`, `ap-build`, `ap-e2e`, `ap-verify-generate`, and optional `ap-audit-generated`) and the unified GitHub Actions workflow at `.github/workflows/ci-presubmits.yaml`.
 - Code formatting and file header stamping across sources (equivalent to running `ap format`).
 
-### Multiple Roots and CI
+### Presubmits and CI
 
-The `ap generate` command is aware of all ap roots in the repository. It will:
-1.  Discover all directories containing a `.ap/` folder.
-2.  Generate CI presubmit scripts (e.g., `ap-test`, `ap-lint`) in `dev/ci/presubmits/` relative to each ap root.
-3.  If multiple roots are found, it appends a suffix to the generated script names (e.g., `ap-test-subdir`) to avoid collisions.
-4.  Create a unified GitHub Actions workflow at `.github/workflows/ci-presubmits.yaml` that includes jobs for all scripts across all ap roots.
+The `ap generate` command generates CI presubmit scripts (e.g., `ap-test`, `ap-lint`, `ap-build`, `ap-e2e`) in `dev/ci/presubmits/` and creates a unified GitHub Actions workflow at `.github/workflows/ci-presubmits.yaml`. A task script's job suffix comes from the script's directory relative to the repository root (e.g. `autodeploy/dev/tasks/test-e2e` -> `ap-e2e-autodeploy`).
 
 ### Presubmit Artifacts
 
@@ -267,7 +261,7 @@ ap <command>
 
 Commands:
 - `init`: Initialize `.ap/` configuration for a repository
-- `ls`: List AP roots and their discovered tasks
+- `ls`: List discovered tasks under the selected subtree
 - `test`: Run tests
 - `e2e`: Run e2e tests
 - `lint`: Run linting tasks: go vet, govulncheck, and the ap analyzers (`unused` [error], `testcontext` [warn], `replaceEmptyInterfaceWithAny` [warn], `testonlyimports` [error], `droppederrors` [error], `closewriter` [error], `deferinloop` [error])

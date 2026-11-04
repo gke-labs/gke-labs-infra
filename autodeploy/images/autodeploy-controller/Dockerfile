@@ -19,6 +19,7 @@ ARG TARGETARCH
 
 WORKDIR /workspace
 COPY . .
+WORKDIR /workspace/autodeploy
 
 # Build autodeploy
 RUN --mount=type=cache,target=/root/.cache/go-build \

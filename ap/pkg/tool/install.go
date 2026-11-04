@@ -48,7 +48,7 @@ func RepoInstallDir(repoRoot string) string {
 }
 
 func findGitRoot() string {
-	repoRoot, _, err := FindRoots()
+	repoRoot, err := FindRoots()
 	if err != nil {
 		return ""
 	}

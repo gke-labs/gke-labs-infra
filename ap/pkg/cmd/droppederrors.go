@@ -79,47 +79,21 @@ func RunDroppedErrors(ctx context.Context, cmd *cobra.Command, opt DroppedErrors
 	}
 
 	repoRoot := ""
-	apRoot := ""
 	if opt.RootOptions != nil {
 		repoRoot = opt.RootOptions.RepoRoot
-		apRoot = opt.RootOptions.APRoot
-	}
-	if repoRoot == "" || apRoot == "" {
-		rRoot, aRoot, err := findRoots()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: %v; falling back to current directory\n", err)
-			if repoRoot == "" {
-				repoRoot = cwd
-			}
-			if apRoot == "" {
-				apRoot = cwd
-			}
-		} else {
-			if repoRoot == "" {
-				repoRoot = rRoot
-			}
-			if apRoot == "" {
-				apRoot = aRoot
-			}
-		}
-	}
-
-	if apRoot == "" {
-		apRoot = cwd
 	}
 	if repoRoot == "" {
-		repoRoot = apRoot
+		rRoot, err := findRoots()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: %v; falling back to current directory\n", err)
+			repoRoot = cwd
+		} else {
+			repoRoot = rRoot
+		}
 	}
 
 	var cfg *config.Config
-	if apRoot != "" {
-		c, err := config.Load(apRoot)
-		if err != nil && !os.IsNotExist(err) {
-			return err
-		}
-		cfg = c
-	}
-	if cfg == nil && repoRoot != "" {
+	if repoRoot != "" {
 		c, err := config.Load(repoRoot)
 		if err != nil && !os.IsNotExist(err) {
 			return err

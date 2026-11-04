@@ -60,7 +60,7 @@ func RunFormat(ctx context.Context, opt FormatOptions) error {
 		return err
 	}
 
-	t, err := format.FormatTasks(r, opt.RepoRoot, opt.APRoots...)
+	t, err := format.FormatTasks(r, opt.Dir)
 	if err != nil {
 		return err
 	}
