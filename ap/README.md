@@ -29,6 +29,8 @@ The `ap generate` command runs all generation tasks across the repository:
 
 The `ap generate` command generates CI presubmit scripts (e.g., `ap-test`, `ap-lint`, `ap-build`, `ap-e2e`) in `dev/ci/presubmits/` and creates a unified GitHub Actions workflow at `.github/workflows/ci-presubmits.yaml`. A task script's job suffix comes from the script's directory relative to the repository root (e.g. `autodeploy/dev/tasks/test-e2e` -> `ap-e2e-autodeploy`).
 
+The generated workflow defines a concurrency group so that a new push to a pull request cancels superseded presubmit runs, while pushes to `main` and merge queue runs are never cancelled.
+
 ### Presubmit Artifacts
 
 Presubmit scripts may write anything to `$ARTIFACTS` (set to `/tmp/artifacts` in generated GitHub Actions jobs), and it is uploaded as `artifacts-<job>` upon job completion (even on failure). If no files are written, the upload step completes without producing warnings or errors.
