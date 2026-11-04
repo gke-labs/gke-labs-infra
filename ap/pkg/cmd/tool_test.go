@@ -359,6 +359,7 @@ func TestToolDocker_DryRun(t *testing.T) {
 	}
 
 	t.Setenv("AP_ROOT", tempDir)
+	t.Chdir(tempDir)
 
 	rootCmd := BuildRootCommand()
 	buf := new(bytes.Buffer)
@@ -406,6 +407,7 @@ func TestToolDockerBuildx_DryRun(t *testing.T) {
 	}
 
 	t.Setenv("AP_ROOT", tempDir)
+	t.Chdir(tempDir)
 
 	rootCmd := BuildRootCommand()
 	buf := new(bytes.Buffer)
@@ -579,6 +581,7 @@ func TestToolInstall(t *testing.T) {
 	}
 	t.Setenv("REPO_ROOT", repoDir)
 	t.Setenv("AP_ROOT", repoDir)
+	t.Chdir(repoDir)
 
 	buf.Reset()
 	rootCmd = BuildRootCommand()

@@ -72,9 +72,17 @@ func RunBuild(ctx context.Context, opt BuildOptions) error {
 		return err
 	}
 
+	targetDir := opt.RepoRoot
+	if len(opt.APRoots) == 1 && opt.APRoots[0] != "" {
+		targetDir = opt.APRoots[0]
+	}
+
 	scopes, err := DiscoverScopes(r, opt.RepoRoot, opt.APRoots)
 	if err != nil {
 		return err
+	}
+	if len(scopes) == 0 {
+		return fmt.Errorf("no scopes found under %s", targetDir)
 	}
 
 	cfg, err := config.Load(opt.RepoRoot)
@@ -93,7 +101,7 @@ func RunBuild(ctx context.Context, opt BuildOptions) error {
 		if err != nil {
 			return err
 		}
-		if imageTasks != nil {
+		if imageTasks != nil && len(imageTasks.GetChildren()) > 0 {
 			group.Tasks = append(group.Tasks, imageTasks)
 		}
 
@@ -102,6 +110,10 @@ func RunBuild(ctx context.Context, opt BuildOptions) error {
 		if len(group.Tasks) > 0 {
 			allTasks = append(allTasks, group)
 		}
+	}
+
+	if len(allTasks) == 0 {
+		return fmt.Errorf("nothing to build under %s: no images/*/Dockerfile and no dev/tasks/build-* scripts", targetDir)
 	}
 
 	return tasks.Run(ctx, tasks.NewScope(opt.RepoRoot, opt.RepoRoot, r), allTasks, tasks.RunOptions{DryRun: opt.DryRun})
