@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"k8s.io/klog/v2"
@@ -98,6 +99,10 @@ func HasGoTests(r *sourcetree.SourceTree, dir string) (bool, error) {
 
 // TestTasks returns a task group for running go tests in discovered modules.
 func TestTasks(r *sourcetree.SourceTree, root string) (tasks.Task, error) {
+	if _, err := config.Effective(r, root); err != nil {
+		return nil, err
+	}
+
 	modules := r.Under(root).Modules()
 
 	buildDir := filepath.Join(root, ".build", "test-results", "go")

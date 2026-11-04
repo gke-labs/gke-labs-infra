@@ -96,6 +96,29 @@ func (l *LintConfig) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON marshals shared lint config and dynamic per-linter configurations.
+func (l *LintConfig) MarshalJSON() ([]byte, error) {
+	if l == nil {
+		return []byte("null"), nil
+	}
+	m := make(map[string]any)
+	if l.SkipGenerated != nil {
+		m["skipGenerated"] = l.SkipGenerated
+	}
+	if l.SkipTests != nil {
+		m["skipTests"] = l.SkipTests
+	}
+	if l.GOOS != nil {
+		m["goos"] = l.GOOS
+	}
+	for key, cfg := range l.linters {
+		if cfg != nil {
+			m[key] = cfg
+		}
+	}
+	return json.Marshal(m)
+}
+
 // LinterConfig represents common configuration options for a linter.
 type LinterConfig interface {
 	IsEnabled() bool

@@ -128,6 +128,24 @@ type SourceTree struct {
 
 	hashIndex *recordfile.File
 	hashPath  string
+
+	memo *sync.Map
+}
+
+// GetCached retrieves a memoized value by key from the source tree.
+func (r *SourceTree) GetCached(key string) (any, bool) {
+	if r == nil || r.memo == nil {
+		return nil, false
+	}
+	return r.memo.Load(key)
+}
+
+// SetCached stores a memoized value by key in the source tree.
+func (r *SourceTree) SetCached(key string, val any) {
+	if r == nil || r.memo == nil {
+		return
+	}
+	r.memo.Store(key, val)
 }
 
 // Open opens an in-memory snapshot of the repository. If root has already been opened,
@@ -234,7 +252,7 @@ func loadSourceTree(root string, opts ...Option) (*SourceTree, error) {
 	if err != nil {
 		if os.IsNotExist(err) {
 			// Directory does not exist on disk, return empty repo
-			return newSourceTree(root, root, nil, nil, nil, ignoreList, nil, ""), nil
+			return newSourceTree(root, root, nil, nil, nil, ignoreList, nil, "", nil), nil
 		}
 		return nil, fmt.Errorf("failed to walk repository %s: %w", root, err)
 	}
@@ -281,10 +299,14 @@ func loadSourceTree(root string, opts ...Option) (*SourceTree, error) {
 		f.module = closestAncestor(f.Path, modules)
 	}
 
-	return newSourceTree(root, root, files, dirs, modules, ignoreList, hashIndex, hashPath), nil
+	return newSourceTree(root, root, files, dirs, modules, ignoreList, hashIndex, hashPath, nil), nil
 }
 
-func newSourceTree(root, repoRoot string, files []*File, dirs, modules []string, ignoreList *IgnoreList, hashIndex *recordfile.File, hashPath string) *SourceTree {
+func newSourceTree(root, repoRoot string, files []*File, dirs, modules []string, ignoreList *IgnoreList, hashIndex *recordfile.File, hashPath string, memo *sync.Map) *SourceTree {
+	if memo == nil {
+		memo = &sync.Map{}
+	}
+
 	filesByPath := make(map[string]*File, len(files))
 	filesByDir := make(map[string][]*File)
 	hasTestsDirs := make(map[string]bool)
@@ -336,6 +358,7 @@ func newSourceTree(root, repoRoot string, files []*File, dirs, modules []string,
 		ignoreList:   ignoreList,
 		hashIndex:    hashIndex,
 		hashPath:     hashPath,
+		memo:         memo,
 	}
 	for _, f := range files {
 		f.tree = r
@@ -799,6 +822,13 @@ func (r *SourceTree) InvalidateTree(dir string) error {
 	// 4. Recompute test directories
 	r.recomputeHasTestsDirs()
 
+	if r.memo != nil {
+		r.memo.Range(func(key, value any) bool {
+			r.memo.Delete(key)
+			return true
+		})
+	}
+
 	return nil
 }
 
@@ -922,7 +952,7 @@ func (r *SourceTree) Under(dir string) *SourceTree {
 		}
 	}
 
-	return newSourceTree(cleanDir, r.repoRoot, subFiles, subDirs, subModules, r.ignoreList, r.hashIndex, r.hashPath)
+	return newSourceTree(cleanDir, r.repoRoot, subFiles, subDirs, subModules, r.ignoreList, r.hashIndex, r.hashPath, r.memo)
 }
 
 // Save persists pending record entries (such as hashes.bin) atomically.

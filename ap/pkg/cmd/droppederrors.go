@@ -92,9 +92,14 @@ func RunDroppedErrors(ctx context.Context, cmd *cobra.Command, opt DroppedErrors
 		}
 	}
 
+	targetDir := repoRoot
+	if opt.RootOptions != nil && opt.RootOptions.Dir != "" {
+		targetDir = opt.RootOptions.Dir
+	}
+
 	var cfg *config.Config
-	if repoRoot != "" {
-		c, err := config.Load(repoRoot)
+	if targetDir != "" {
+		c, err := config.Effective(nil, targetDir)
 		if err != nil && !os.IsNotExist(err) {
 			return err
 		}

@@ -60,21 +60,17 @@ func Run(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files [
 		}()
 	}
 
-	cfg, err := config.Load(repoRoot)
+	cfg, err := config.Effective(r, repoRoot)
 	if err != nil {
 		return err
 	}
 
-	if cfg.IsGofmtEnabled() {
-		if err := runGofmt(ctx, r, repoRoot, files, cfg.Skip, cm); err != nil {
-			return err
-		}
+	if err := runGofmt(ctx, r, repoRoot, files, cfg.Skip, cm); err != nil {
+		return err
 	}
 
-	if cfg.IsTidyEnabled() {
-		if err := runGoModTidy(ctx, r, repoRoot, files, cfg.Skip, cm); err != nil {
-			return err
-		}
+	if err := runGoModTidy(ctx, r, repoRoot, files, cfg.Skip, cm); err != nil {
+		return err
 	}
 
 	return nil
@@ -92,6 +88,13 @@ func runGofmt(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, fi
 	var filesToFormat []string
 	for _, f := range expandedFiles {
 		if strings.HasSuffix(f, ".go") {
+			fileCfg, err := config.Effective(r, filepath.Dir(f))
+			if err != nil {
+				return err
+			}
+			if !fileCfg.IsGofmtEnabled() {
+				continue
+			}
 			filesToFormat = append(filesToFormat, f)
 		}
 	}
@@ -181,6 +184,14 @@ func runGoModTidy(ctx context.Context, r *sourcetree.SourceTree, repoRoot string
 
 	for _, modDir := range r.Modules() {
 		if !inScopeModules[modDir] {
+			continue
+		}
+
+		modCfg, err := config.Effective(r, modDir)
+		if err != nil {
+			return err
+		}
+		if !modCfg.IsTidyEnabled() {
 			continue
 		}
 

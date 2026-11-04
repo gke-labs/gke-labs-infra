@@ -392,12 +392,7 @@ func determineTargetGOOS(r *sourcetree.SourceTree, dir string, skipGlobs []strin
 
 // LintTasks returns a task group for running go linting in discovered modules.
 func LintTasks(r *sourcetree.SourceTree, root string) (tasks.Task, error) {
-	repoRoot := r.RepoRoot()
-	if repoRoot == "" {
-		repoRoot = root
-	}
-	cfg, err := config.Load(repoRoot)
-	if err != nil {
+	if _, err := config.Effective(r, root); err != nil {
 		return nil, err
 	}
 
@@ -405,6 +400,11 @@ func LintTasks(r *sourcetree.SourceTree, root string) (tasks.Task, error) {
 
 	var moduleTasks []tasks.Task
 	for _, dir := range modules {
+		cfg, err := config.Effective(r, dir)
+		if err != nil {
+			return nil, err
+		}
+
 		hasGo, err := hasGoFiles(r, dir)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check for Go files in %s: %w", dir, err)
