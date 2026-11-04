@@ -78,10 +78,6 @@ func RunDroppedErrors(ctx context.Context, cmd *cobra.Command, opt DroppedErrors
 		return fmt.Errorf("failed to get current working directory: %w", err)
 	}
 
-	if opt.RootOptions == nil {
-		opt.RootOptions = &RootOptions{}
-	}
-
 	repoRoot := opt.RootOptions.RepoRoot
 	if repoRoot == "" {
 		rRoot, err := findRoots()
@@ -188,9 +184,6 @@ func RunDroppedErrors(ctx context.Context, cmd *cobra.Command, opt DroppedErrors
 		BaselinePath:  opt.Baseline,
 	}
 
-	if opt.RootOptions == nil {
-		opt.RootOptions = &RootOptions{}
-	}
 	if opt.RepoRoot == "" {
 		opt.RepoRoot = repoRoot
 	}

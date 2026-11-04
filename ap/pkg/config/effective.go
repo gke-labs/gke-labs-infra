@@ -36,9 +36,6 @@ func Effective(repoRoot, dir string) (*Config, error) {
 		return nil, err
 	}
 	effective := base.clone()
-	if effective == nil {
-		effective = &Config{}
-	}
 
 	// Collect enclosing subtree .ap/ap.yaml files from dir up to repoRoot
 	var subtreeFiles []string
@@ -139,9 +136,6 @@ func cloneLinter(v LinterConfig) LinterConfig {
 }
 
 func (c *Config) apply(o *Config) {
-	if o == nil {
-		return
-	}
 	if o.Gofmt != nil {
 		c.Gofmt = o.Gofmt
 	}
@@ -169,9 +163,6 @@ func (c *Config) apply(o *Config) {
 }
 
 func (l *LintConfig) apply(o *LintConfig) {
-	if o == nil {
-		return
-	}
 	if o.SkipGenerated != nil {
 		l.SkipGenerated = o.SkipGenerated
 	}
