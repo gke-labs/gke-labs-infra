@@ -69,14 +69,7 @@ func (t *GoTestTask) GetChildren() []tasks.Task {
 }
 
 func (t *GoTestTask) SourcePath() string {
-	if filepath.IsAbs(t.Dir) {
-		return t.Dir
-	}
-	abs, err := filepath.Abs(t.Dir)
-	if err != nil {
-		return t.Dir
-	}
-	return abs
+	return t.Dir
 }
 
 var _ tasks.Sourced = (*GoTestTask)(nil)
@@ -111,14 +104,7 @@ func (t *GoE2eTask) GetChildren() []tasks.Task {
 }
 
 func (t *GoE2eTask) SourcePath() string {
-	if filepath.IsAbs(t.Dir) {
-		return t.Dir
-	}
-	abs, err := filepath.Abs(t.Dir)
-	if err != nil {
-		return t.Dir
-	}
-	return abs
+	return t.Dir
 }
 
 var _ tasks.Sourced = (*GoE2eTask)(nil)

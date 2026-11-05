@@ -83,14 +83,7 @@ func (t *LegacyScriptTask) GetChildren() []tasks.Task {
 }
 
 func (t *LegacyScriptTask) SourcePath() string {
-	if filepath.IsAbs(t.Path) {
-		return t.Path
-	}
-	abs, err := filepath.Abs(t.Path)
-	if err != nil {
-		return t.Path
-	}
-	return abs
+	return t.Path
 }
 
 var _ tasks.Sourced = (*LegacyScriptTask)(nil)
@@ -125,14 +118,7 @@ func (t *GoGenerateTask) GetChildren() []tasks.Task {
 }
 
 func (t *GoGenerateTask) SourcePath() string {
-	if filepath.IsAbs(t.Dir) {
-		return t.Dir
-	}
-	abs, err := filepath.Abs(t.Dir)
-	if err != nil {
-		return t.Dir
-	}
-	return abs
+	return t.Dir
 }
 
 var _ tasks.Sourced = (*GoGenerateTask)(nil)

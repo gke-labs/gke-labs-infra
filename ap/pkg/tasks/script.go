@@ -59,14 +59,7 @@ func (t *TaskScript) GetChildren() []Task {
 }
 
 func (t *TaskScript) SourcePath() string {
-	if filepath.IsAbs(t.Path) {
-		return t.Path
-	}
-	abs, err := filepath.Abs(t.Path)
-	if err != nil {
-		return t.Path
-	}
-	return abs
+	return t.Path
 }
 
 var _ Sourced = (*TaskScript)(nil)

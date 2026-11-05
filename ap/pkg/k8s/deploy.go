@@ -549,14 +549,7 @@ func (t *KubectlApplyTask) GetChildren() []tasks.Task {
 }
 
 func (t *KubectlApplyTask) SourcePath() string {
-	if filepath.IsAbs(t.ManifestPath) {
-		return t.ManifestPath
-	}
-	abs, err := filepath.Abs(t.ManifestPath)
-	if err != nil {
-		return t.ManifestPath
-	}
-	return abs
+	return t.ManifestPath
 }
 
 var _ tasks.Sourced = (*KubectlApplyTask)(nil)

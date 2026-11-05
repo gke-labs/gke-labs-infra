@@ -425,17 +425,7 @@ func (t *DockerBuildTask) GetChildren() []tasks.Task {
 }
 
 func (t *DockerBuildTask) SourcePath() string {
-	if filepath.IsAbs(t.Dockerfile) {
-		return t.Dockerfile
-	}
-	if t.Root != "" {
-		return filepath.Join(t.Root, t.Dockerfile)
-	}
-	abs, err := filepath.Abs(t.Dockerfile)
-	if err != nil {
-		return t.Dockerfile
-	}
-	return abs
+	return filepath.Join(t.Root, t.Dockerfile)
 }
 
 var _ tasks.Sourced = (*DockerBuildTask)(nil)

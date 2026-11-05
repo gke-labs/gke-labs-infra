@@ -55,19 +55,6 @@ func filterTask(t Task, targets []string) Task {
 		return nil
 	}
 
-	if g, ok := t.(*Group); ok {
-		var matchedChildren []Task
-		for _, child := range g.Tasks {
-			if filteredChild := filterTask(child, targets); filteredChild != nil {
-				matchedChildren = append(matchedChildren, filteredChild)
-			}
-		}
-		if len(matchedChildren) == 0 {
-			return nil
-		}
-		return g.WithChildren(matchedChildren)
-	}
-
 	if p, ok := t.(Parent); ok {
 		var matchedChildren []Task
 		for _, child := range p.GetChildren() {
@@ -92,5 +79,5 @@ func pathEqualsOrUnder(target, sourcePath string) bool {
 	if err != nil {
 		return false
 	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
