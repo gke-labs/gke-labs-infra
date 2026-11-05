@@ -126,10 +126,8 @@ func (s *TaskContext) WithTool(name, binPath string) *TaskContext {
 func (s *TaskContext) Tool(ctx context.Context, name string) (string, error) {
 	toolResolveMu.Lock()
 	defer toolResolveMu.Unlock()
-	if s.tools != nil {
-		if bin, ok := s.tools[name]; ok {
-			return bin, nil
-		}
+	if bin, ok := s.tools[name]; ok {
+		return bin, nil
 	}
 	t, ok := tool.Lookup(name)
 	if !ok {
@@ -142,9 +140,6 @@ func (s *TaskContext) Tool(ctx context.Context, name string) (string, error) {
 	bin, err := t.Ensure(ctx, root)
 	if err != nil {
 		return "", err
-	}
-	if s.tools == nil {
-		s.tools = make(map[string]string)
 	}
 	s.tools[name] = bin
 	return bin, nil

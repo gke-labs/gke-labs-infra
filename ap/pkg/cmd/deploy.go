@@ -29,7 +29,6 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/kindload"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool"
 	"github.com/spf13/cobra"
 )
 
@@ -400,11 +399,13 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		return err
 	}
 
-	t, ok := tool.Lookup("kubectl")
-	if !ok {
-		return fmt.Errorf("tool kubectl not found")
+	r, err := opt.GetSourceTree()
+	if err != nil {
+		return err
 	}
-	kubectlBin, err := t.Ensure(ctx, opt.RepoRoot)
+
+	scope := tasks.NewTaskContext(opt.RepoRoot, opt.RepoRoot, r)
+	kubectlBin, err := scope.Tool(ctx, "kubectl")
 	if err != nil {
 		return fmt.Errorf("failed to ensure kubectl: %w", err)
 	}
@@ -437,11 +438,6 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		return err
 	}
 
-	r, err := opt.GetSourceTree()
-	if err != nil {
-		return err
-	}
-
 	cfg, err := config.Load(opt.RepoRoot)
 	if err != nil {
 		return err
@@ -453,6 +449,5 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		return err
 	}
 
-	scope := tasks.NewTaskContext(opt.RepoRoot, opt.RepoRoot, r).WithTool("kubectl", kubectlBin)
 	return tasks.Run(ctx, scope, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
 }

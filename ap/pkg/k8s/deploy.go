@@ -407,9 +407,6 @@ type KubectlApplyTask struct {
 }
 
 func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
-	if scope == nil {
-		return fmt.Errorf("task context is required")
-	}
 	kubectlBin, err := scope.Tool(ctx, "kubectl")
 	if err != nil {
 		return fmt.Errorf("failed to ensure kubectl: %w", err)

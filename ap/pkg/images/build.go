@@ -104,9 +104,6 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.TaskContext) err
 		buildxBin = t.DockerBin
 	}
 	if buildxBin == "" {
-		if scope == nil {
-			return fmt.Errorf("task context is required")
-		}
 		var err error
 		buildxBin, err = scope.Tool(ctx, "docker-buildx")
 		if err != nil {
@@ -116,12 +113,9 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.TaskContext) err
 
 	dockerBin := t.DockerBin
 	if dockerBin == "" {
-		if scope != nil {
-			if d, err := scope.Tool(ctx, "docker"); err == nil && d != "" {
-				dockerBin = d
-			}
-		}
-		if dockerBin == "" {
+		if d, err := scope.Tool(ctx, "docker"); err == nil && d != "" {
+			dockerBin = d
+		} else {
 			dockerBin = "docker"
 		}
 	}

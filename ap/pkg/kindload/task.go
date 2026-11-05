@@ -41,9 +41,6 @@ func (t *KindLoadTask) Run(ctx context.Context, scope *tasks.TaskContext) error 
 	for _, ref := range t.Images {
 		imagesToLoad = append(imagesToLoad, ref.String())
 	}
-	if scope == nil {
-		return fmt.Errorf("task context is required")
-	}
 	kindBin, err := scope.Tool(ctx, "kind")
 	if err != nil {
 		return fmt.Errorf("failed to ensure kind tool: %w", err)

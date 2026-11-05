@@ -76,9 +76,6 @@ func (t *PortForwardTask) Run(ctx context.Context, scope *tasks.TaskContext) (re
 		localPort = freePort
 	}
 
-	if scope == nil {
-		return fmt.Errorf("task context is required")
-	}
 	kubectlBin, err := scope.Tool(ctx, "kubectl")
 	if err != nil {
 		return fmt.Errorf("failed to ensure kubectl: %w", err)
