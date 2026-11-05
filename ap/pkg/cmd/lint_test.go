@@ -219,3 +219,87 @@ func main() {
 		t.Errorf("expected output to report stale baseline entry, got:\n%s", output)
 	}
 }
+
+func TestRunLint_SubtreeOverride(t *testing.T) {
+	repoRoot := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repoRoot, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	rootApDir := filepath.Join(repoRoot, ".ap")
+	if err := os.Mkdir(rootApDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rootApDir, "go.yaml"), []byte("govulncheck:\n  enabled: true\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "go.mod"), []byte("module example.com/root\n\ngo 1.27\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	subDir := filepath.Join(repoRoot, "sub")
+	if err := os.MkdirAll(filepath.Join(subDir, ".ap"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, ".ap", "ap.yaml"), []byte("version: latest\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, ".ap", "go.yaml"), []byte("govulncheck:\n  enabled: false\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "go.mod"), []byte("module example.com/root/sub\n\ngo 1.27\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "sub.go"), []byte("package sub\n\nfunc Sub() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Chdir(repoRoot)
+
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+
+	opt := LintOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: repoRoot,
+			Dir:      repoRoot,
+			DryRun:   true,
+		},
+	}
+	err = RunLint(t.Context(), opt)
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	if _, copyErr := io.Copy(&buf, r); copyErr != nil {
+		t.Fatal(copyErr)
+	}
+	output := buf.String()
+
+	if err != nil {
+		t.Fatalf("expected ap lint --dry-run to succeed, got: %v", err)
+	}
+
+	subIdx := strings.Index(output, "go-lint-sub")
+	if subIdx == -1 {
+		t.Fatalf("expected output to contain go-lint-sub, got:\n%s", output)
+	}
+	rootSection := output[:subIdx]
+	subSection := output[subIdx:]
+	if nextSectionIdx := strings.Index(subSection, "\n  portability"); nextSectionIdx != -1 {
+		subSection = subSection[:nextSectionIdx]
+	}
+	if !strings.Contains(rootSection, "govulncheck") {
+		t.Errorf("expected root module to have govulncheck, got:\n%s", rootSection)
+	}
+	if strings.Contains(subSection, "govulncheck") {
+		t.Errorf("expected sub module not to have govulncheck, got:\n%s", subSection)
+	}
+}

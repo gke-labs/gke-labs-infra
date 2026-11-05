@@ -22,7 +22,7 @@ import (
 )
 
 // Effective returns the effective configuration for dir, taking into account
-// the base configuration at repoRoot and any enclosing subtree .ap/ap.yaml
+// the base configuration at repoRoot and any enclosing subtree .ap/go.yaml
 // overrides walking from dir up to repoRoot.
 func Effective(repoRoot, dir string) (*Config, error) {
 	cleanRepoRoot := filepath.Clean(repoRoot)
@@ -37,14 +37,14 @@ func Effective(repoRoot, dir string) (*Config, error) {
 	}
 	effective := base.clone()
 
-	// Collect enclosing subtree .ap/ap.yaml files from dir up to repoRoot
+	// Collect enclosing subtree .ap/go.yaml files from dir up to repoRoot
 	var subtreeFiles []string
 	for curr := cleanDir; curr != cleanRepoRoot && strings.HasPrefix(curr, cleanRepoRoot); curr = filepath.Dir(curr) {
-		apFile := filepath.Join(curr, ".ap", "ap.yaml")
-		if fi, err := os.Stat(apFile); err == nil && !fi.IsDir() {
-			subtreeFiles = append(subtreeFiles, apFile)
+		goFile := filepath.Join(curr, ".ap", "go.yaml")
+		if fi, err := os.Stat(goFile); err == nil && !fi.IsDir() {
+			subtreeFiles = append(subtreeFiles, goFile)
 		} else if err != nil && !os.IsNotExist(err) {
-			return nil, fmt.Errorf("error checking %s: %w", apFile, err)
+			return nil, fmt.Errorf("error checking %s: %w", goFile, err)
 		}
 	}
 
@@ -53,14 +53,14 @@ func Effective(repoRoot, dir string) (*Config, error) {
 		subtreeFiles[i], subtreeFiles[j] = subtreeFiles[j], subtreeFiles[i]
 	}
 
-	for _, apFile := range subtreeFiles {
-		data, err := os.ReadFile(apFile)
+	for _, goFile := range subtreeFiles {
+		data, err := os.ReadFile(goFile)
 		if err != nil {
-			return nil, fmt.Errorf("error reading %s: %w", apFile, err)
+			return nil, fmt.Errorf("error reading %s: %w", goFile, err)
 		}
 		var override Config
 		if err := UnmarshalStrict(data, &override); err != nil {
-			return nil, fmt.Errorf("error parsing %s: %w", apFile, err)
+			return nil, fmt.Errorf("error parsing %s: %w", goFile, err)
 		}
 		effective.apply(&override)
 	}

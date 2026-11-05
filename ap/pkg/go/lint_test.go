@@ -1183,12 +1183,15 @@ govulncheck:
 		t.Fatal(err)
 	}
 
-	// Subtree module with govulncheck disabled in .ap/ap.yaml
+	// Subtree module with govulncheck disabled in .ap/go.yaml and version: latest in .ap/ap.yaml
 	subDir := filepath.Join(repoRoot, "sub")
 	if err := os.MkdirAll(filepath.Join(subDir, ".ap"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(subDir, ".ap", "ap.yaml"), []byte("govulncheck:\n  enabled: false\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(subDir, ".ap", "ap.yaml"), []byte("version: latest\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, ".ap", "go.yaml"), []byte("govulncheck:\n  enabled: false\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(subDir, "go.mod"), []byte("module submod\n\ngo 1.27\n"), 0644); err != nil {
