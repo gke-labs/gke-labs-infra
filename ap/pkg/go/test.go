@@ -50,7 +50,11 @@ type GoTestTask struct {
 
 func (t *GoTestTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	klog.Infof("Running go test in %s", t.Dir)
-	if err := RunGoTest(ctx, t.Dir, t.ResultFile, RunGoTestOptions{}); err != nil {
+	opts := RunGoTestOptions{
+		Stdout: scope.GetStdout(),
+		Stderr: scope.GetStderr(),
+	}
+	if err := RunGoTest(ctx, t.Dir, t.ResultFile, opts); err != nil {
 		return fmt.Errorf("go test failed in %s: %w", t.Dir, err)
 	}
 	return nil
@@ -74,8 +78,10 @@ type GoE2eTask struct {
 func (t *GoE2eTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	klog.Infof("Running go e2e test in %s", t.Dir)
 	opts := RunGoTestOptions{
-		Env:  []string{"RUN_E2E=1"},
-		Args: []string{"-v", "-count=1", "-timeout", "30m", "./tests/e2e/..."},
+		Env:    []string{"RUN_E2E=1"},
+		Args:   []string{"-v", "-count=1", "-timeout", "30m", "./tests/e2e/..."},
+		Stdout: scope.GetStdout(),
+		Stderr: scope.GetStderr(),
 	}
 	if err := RunGoTest(ctx, t.Dir, t.ResultFile, opts); err != nil {
 		return fmt.Errorf("go e2e test failed in %s: %w", t.Dir, err)
@@ -149,8 +155,16 @@ func Test(ctx context.Context, r *sourcetree.SourceTree, root string) error {
 
 // RunGoTestOptions holds options for running go tests.
 type RunGoTestOptions struct {
-	Env  []string
-	Args []string
+	Env    []string
+	Args   []string
+	Stdout io.Writer
+	Stderr io.Writer
+}
+
+func writef(w io.Writer, format string, args ...any) {
+	if _, err := fmt.Fprintf(w, format, args...); err != nil {
+		klog.V(2).Infof("failed to write test output: %v", err)
+	}
 }
 
 // RunGoTest runs go tests in the given directory.
@@ -180,7 +194,7 @@ func RunGoTest(ctx context.Context, dir string, resultFile string, opts RunGoTes
 	if err != nil {
 		return err
 	}
-	cmd.Stderr = os.Stderr
+	cmd.Stderr = opts.Stderr
 
 	if err := cmd.Start(); err != nil {
 		return err
@@ -205,15 +219,15 @@ func RunGoTest(ctx context.Context, dir string, resultFile string, opts RunGoTes
 		switch event.Action {
 		case "pass":
 			if event.Test != "" {
-				fmt.Printf("%s--- PASS: %s (%.2fs)\n", indent, event.Test, event.Elapsed)
+				writef(opts.Stdout, "%s--- PASS: %s (%.2fs)\n", indent, event.Test, event.Elapsed)
 			}
 		case "fail":
 			if event.Test != "" {
-				fmt.Printf("%s--- FAIL: %s (%.2fs)\n", indent, event.Test, event.Elapsed)
+				writef(opts.Stdout, "%s--- FAIL: %s (%.2fs)\n", indent, event.Test, event.Elapsed)
 			}
 		case "skip":
 			if event.Test != "" {
-				fmt.Printf("%s--- SKIP: %s (%.2fs)\n", indent, event.Test, event.Elapsed)
+				writef(opts.Stdout, "%s--- SKIP: %s (%.2fs)\n", indent, event.Test, event.Elapsed)
 			}
 		case "output":
 			out := event.Output
@@ -226,9 +240,9 @@ func RunGoTest(ctx context.Context, dir string, resultFile string, opts RunGoTes
 					continue
 				}
 			}
-			fmt.Print(out)
+			writef(opts.Stdout, "%s", out)
 		case "build-output":
-			fmt.Print(event.Output)
+			writef(opts.Stdout, "%s", event.Output)
 		case "run", "pause", "cont", "bench", "start", "build-fail":
 			// Ignore these for pretty printing
 		default:

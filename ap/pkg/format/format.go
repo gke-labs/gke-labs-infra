@@ -17,7 +17,6 @@ package format
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -41,7 +40,7 @@ func (t *CodestyleTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	if err := fileheaders.Run(ctx, r, t.Root, t.Files); err != nil {
 		return fmt.Errorf("fileheaders failed in %s: %w", t.Root, err)
 	}
-	if err := gostyle.Run(ctx, r, t.Root, t.Files); err != nil {
+	if err := gostyle.Run(ctx, r, t.Root, t.Files, scope.GetStdout(), scope.GetStderr()); err != nil {
 		return fmt.Errorf("gostyle failed in %s: %w", t.Root, err)
 	}
 	return nil
@@ -70,8 +69,8 @@ func (t *LegacyFormatScriptTask) Run(ctx context.Context, scope *tasks.APScope) 
 		return fmt.Errorf("failed to prepare script environment for %s: %w", t.Name, err)
 	}
 	cmd.Env = env
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = scope.GetStdout()
+	cmd.Stderr = scope.GetStderr()
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to run %s: %w", t.Name, err)
 	}

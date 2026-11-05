@@ -248,7 +248,7 @@ func (h *Harness) DockerBuild(tag, dockerfile, context string) {
 // LoadImages loads docker images into the specified kind cluster using the given kind binary.
 // It retries on failure with exponential backoff.
 func LoadImages(ctx context.Context, kindBin, cluster string, images []string) error {
-	return kindload.LoadImages(ctx, kindBin, cluster, images)
+	return kindload.LoadImages(ctx, kindBin, cluster, images, os.Stdout, os.Stderr)
 }
 
 // KindLoad loads a docker image into the kind cluster.

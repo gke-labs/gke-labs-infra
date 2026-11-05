@@ -17,7 +17,10 @@ package tasks
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
+
+	"k8s.io/klog/v2"
 )
 
 // Task is the interface that all tasks must implement.
@@ -45,10 +48,12 @@ func (t *FuncTask) GetChildren() []Task {
 	return nil
 }
 
-// PrintTree prints the task tree to stdout.
-func PrintTree(t Task, indent int) {
-	fmt.Printf("%s%s\n", strings.Repeat("  ", indent), t.GetName())
+// PrintTree prints the task tree to the specified writer.
+func PrintTree(w io.Writer, t Task, indent int) {
+	if _, err := fmt.Fprintf(w, "%s%s\n", strings.Repeat("  ", indent), t.GetName()); err != nil {
+		klog.V(2).Infof("failed to write task tree: %v", err)
+	}
 	for _, child := range t.GetChildren() {
-		PrintTree(child, indent+1)
+		PrintTree(w, child, indent+1)
 	}
 }

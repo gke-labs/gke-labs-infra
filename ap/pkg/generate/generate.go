@@ -63,8 +63,8 @@ func (t *LegacyScriptTask) Run(ctx context.Context, scope *tasks.APScope) error 
 		return fmt.Errorf("failed to prepare script environment for %s: %w", t.Name, err)
 	}
 	cmd.Env = env
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = scope.GetStdout()
+	cmd.Stderr = scope.GetStderr()
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to run %s: %w", t.Name, err)
 	}
@@ -91,8 +91,8 @@ func (t *GoGenerateTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	klog.Infof("Running go generate in %s", t.Dir)
 	cmd := exec.CommandContext(ctx, "go", "generate", "./...")
 	cmd.Dir = t.Dir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = scope.GetStdout()
+	cmd.Stderr = scope.GetStderr()
 	cmd.Env = append(os.Environ(), "GOTOOLCHAIN=auto")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("go generate failed in %s: %w", t.Dir, err)

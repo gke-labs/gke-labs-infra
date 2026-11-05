@@ -56,7 +56,7 @@ func (t *KindLoadTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	if err != nil {
 		return fmt.Errorf("failed to ensure kind tool: %w", err)
 	}
-	return LoadImages(ctx, kindBin, t.ClusterName, imagesToLoad)
+	return LoadImages(ctx, kindBin, t.ClusterName, imagesToLoad, scope.GetStdout(), scope.GetStderr())
 }
 
 func (t *KindLoadTask) GetName() string {
