@@ -18,8 +18,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
-	"os"
 	"sync"
 	"time"
 
@@ -88,12 +86,8 @@ var runnerMu sync.Mutex
 
 func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
 	buf := &syncBuffer{}
-	var taskScope *TaskContext
-	var out io.Writer = os.Stdout
-	if scope != nil {
-		taskScope = scope.WithOutput(buf, buf)
-		out = scope.Stdout()
-	}
+	taskScope := scope.WithOutput(buf, buf)
+	out := scope.Stdout()
 
 	start := time.Now()
 	err := runTaskWithRetry(ctx, taskScope, task)

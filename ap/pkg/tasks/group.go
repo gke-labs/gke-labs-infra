@@ -20,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -86,16 +85,16 @@ func (g *Group) runSequential(ctx context.Context, scope *TaskContext) error {
 		}
 	}
 	if len(errs) > 0 {
-		if len(g.Tasks) > 1 {
-			var out io.Writer = os.Stdout
-			if scope != nil {
-				out = scope.Stdout()
-			}
-			writef(out, "%s: %d of %d failed: %s\n", g.Name, len(failedNames), len(g.Tasks), strings.Join(failedNames, ", "))
-		}
+		g.writeFailureSummary(scope, failedNames)
 		return errors.Join(errs...)
 	}
 	return nil
+}
+
+func (g *Group) writeFailureSummary(scope *TaskContext, failedNames []string) {
+	if len(failedNames) > 0 && len(g.Tasks) > 1 {
+		writef(scope.Stdout(), "%s: %d of %d failed: %s\n", g.Name, len(failedNames), len(g.Tasks), strings.Join(failedNames, ", "))
+	}
 }
 
 func (g *Group) runParallel(ctx context.Context, scope *TaskContext) error {
@@ -189,15 +188,7 @@ func (g *Group) runParallel(ctx context.Context, scope *TaskContext) error {
 		}
 	}
 
-	if len(failedNames) > 0 {
-		if len(g.Tasks) > 1 {
-			var out io.Writer = os.Stdout
-			if scope != nil {
-				out = scope.Stdout()
-			}
-			writef(out, "%s: %d of %d failed: %s\n", g.Name, len(failedNames), len(g.Tasks), strings.Join(failedNames, ", "))
-		}
-	}
+	g.writeFailureSummary(scope, failedNames)
 
 	if !g.ContinueOnError {
 		return firstErr
