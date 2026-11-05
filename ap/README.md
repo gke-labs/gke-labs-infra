@@ -10,7 +10,7 @@
 
 The repository root (the directory containing `.git`) is the only root. Configuration is read from `<repo>/.ap/`.
 
-Commands operate on a subtree of the repository: either the positional target where one is provided (e.g. `ap e2e autodeploy`, `ap deploy <dir>`), the subtree of the current working directory, or the whole repository when run from the root.
+Commands operate on a subtree of the repository: either the positional target where one is provided (e.g. `ap e2e autodeploy`, `ap deploy <dir>`), the subtree of the current working directory, or the whole repository when run from the root. For `ap build`, positional targets can also be image directories (`<parent>/images/<name>`); see `build` below.
 
 ### Subtree Configuration Overrides
 
@@ -275,7 +275,7 @@ Commands:
 - `test`: Run tests
 - `e2e`: Run e2e tests
 - `lint`: Run linting tasks: go vet, govulncheck, and the ap analyzers (`unused` [error], `testcontext` [warn], `replaceEmptyInterfaceWithAny` [warn], `testonlyimports` [error], `droppederrors` [error], `closewriter` [error], `deferinloop` [error])
-- `build`: Build artifacts
+- `build`: Build artifacts. Positional targets can be subtree directories (building all images and build tasks beneath them) or specific image directories (`<parent>/images/<name>` containing a `Dockerfile`, building exactly that image with the repository root as the build context). Multiple targets build the union of specified images and subtrees.
 - `deploy`: Deploy artifacts
 - `generate`: Run generation tasks (runs legacy `dev/tasks/generate-*` scripts, `go generate ./...` in modules that contain `//go:generate` directives, and built-in presubmit/workflow generators; supports `--verify` to prove generators restore perturbed outputs, `--audit-generated` to find generated files lacking headers, and `--strict`)
 - `format`: Run formatting tasks

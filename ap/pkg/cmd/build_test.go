@@ -191,3 +191,122 @@ func TestNestedApBuild_BuildsNestedRepoImages(t *testing.T) {
 		t.Errorf("expected dry-run output NOT to contain 'image-a', got:\n%s", output)
 	}
 }
+
+func TestRunBuild_ImageDirectoryTargets(t *testing.T) {
+	tempDir := t.TempDir()
+
+	if err := os.MkdirAll(filepath.Join(tempDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir, ".ap"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, img := range []string{"a", "b", "wal-buffer", "objectfs-controller"} {
+		dir := filepath.Join(tempDir, "images", img)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM alpine\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	subDir := filepath.Join(tempDir, "sub", "images", "c")
+	if err := os.MkdirAll(subDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "Dockerfile"), []byte("FROM alpine\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	notAnImageDir := filepath.Join(tempDir, "not-an-image")
+	if err := os.MkdirAll(notAnImageDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Chdir(tempDir)
+	t.Setenv("REPO_ROOT", tempDir)
+	t.Setenv("AP_ROOT", "")
+
+	t.Run("single image directory target plans only that image", func(t *testing.T) {
+		var execErr error
+		output := captureStdout(t, func() {
+			rootCmd := BuildRootCommand()
+			rootCmd.SetArgs([]string{"--dry-run", "build", "images/a"})
+			execErr = rootCmd.ExecuteContext(t.Context())
+		})
+		if execErr != nil {
+			t.Fatalf("ap build images/a failed: %v", execErr)
+		}
+		if !strings.Contains(output, "docker-build-a") {
+			t.Errorf("expected output to contain docker-build-a, got:\n%s", output)
+		}
+		for _, excluded := range []string{"docker-build-b", "docker-build-c", "docker-build-wal-buffer", "docker-build-objectfs-controller"} {
+			if strings.Contains(output, excluded) {
+				t.Errorf("expected output NOT to contain %s, got:\n%s", excluded, output)
+			}
+		}
+	})
+
+	t.Run("mixing image target and subtree target plans union", func(t *testing.T) {
+		var execErr error
+		output := captureStdout(t, func() {
+			rootCmd := BuildRootCommand()
+			rootCmd.SetArgs([]string{"--dry-run", "build", "images/a", "sub/"})
+			execErr = rootCmd.ExecuteContext(t.Context())
+		})
+		if execErr != nil {
+			t.Fatalf("ap build images/a sub/ failed: %v", execErr)
+		}
+		if !strings.Contains(output, "docker-build-a") {
+			t.Errorf("expected output to contain docker-build-a, got:\n%s", output)
+		}
+		if !strings.Contains(output, "docker-build-c") {
+			t.Errorf("expected output to contain docker-build-c, got:\n%s", output)
+		}
+		for _, excluded := range []string{"docker-build-b", "docker-build-wal-buffer", "docker-build-objectfs-controller"} {
+			if strings.Contains(output, excluded) {
+				t.Errorf("expected output NOT to contain %s, got:\n%s", excluded, output)
+			}
+		}
+	})
+
+	t.Run("target that is not an image directory still errors", func(t *testing.T) {
+		var execErr error
+		captureStdout(t, func() {
+			rootCmd := BuildRootCommand()
+			rootCmd.SetArgs([]string{"--dry-run", "build", "not-an-image"})
+			execErr = rootCmd.ExecuteContext(t.Context())
+		})
+		if execErr == nil {
+			t.Fatal("expected build of non-image directory without tasks to error, got nil")
+		}
+		if !strings.Contains(execErr.Error(), "nothing to build under") {
+			t.Errorf("expected error to contain 'nothing to build under', got: %v", execErr)
+		}
+	})
+
+	t.Run("multiple image directory targets build exactly those images", func(t *testing.T) {
+		var execErr error
+		output := captureStdout(t, func() {
+			rootCmd := BuildRootCommand()
+			rootCmd.SetArgs([]string{"--dry-run", "build", "images/wal-buffer", "images/objectfs-controller"})
+			execErr = rootCmd.ExecuteContext(t.Context())
+		})
+		if execErr != nil {
+			t.Fatalf("ap build failed: %v", execErr)
+		}
+		if !strings.Contains(output, "docker-build-wal-buffer") {
+			t.Errorf("expected output to contain docker-build-wal-buffer, got:\n%s", output)
+		}
+		if !strings.Contains(output, "docker-build-objectfs-controller") {
+			t.Errorf("expected output to contain docker-build-objectfs-controller, got:\n%s", output)
+		}
+		for _, excluded := range []string{"docker-build-a", "docker-build-b", "docker-build-c"} {
+			if strings.Contains(output, excluded) {
+				t.Errorf("expected output NOT to contain %s, got:\n%s", excluded, output)
+			}
+		}
+	})
+}
