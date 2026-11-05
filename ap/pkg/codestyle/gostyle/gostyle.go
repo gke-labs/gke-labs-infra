@@ -19,6 +19,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -45,7 +46,8 @@ var tidyRunner = func(ctx context.Context, r *sourcetree.SourceTree, dir string)
 	return nil
 }
 
-func Run(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files []string) error {
+// Run runs gostyle formatting and mod tidy, directing command output to the provided writers.
+func Run(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files []string, stdout, stderr io.Writer) error {
 	log := klog.FromContext(ctx)
 
 	// Initialize cache
@@ -65,7 +67,7 @@ func Run(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files [
 		return err
 	}
 
-	if err := runGofmt(ctx, r, repoRoot, files, cfg.Skip, cm); err != nil {
+	if err := runGofmt(ctx, r, repoRoot, files, cfg.Skip, cm, stdout, stderr); err != nil {
 		return err
 	}
 
@@ -76,7 +78,7 @@ func Run(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files [
 	return nil
 }
 
-func runGofmt(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files []string, skip []string, cm *cache.Manager) error {
+func runGofmt(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files []string, skip []string, cm *cache.Manager, stdout, stderr io.Writer) error {
 	log := klog.FromContext(ctx)
 
 	ignoreList := walker.NewIgnoreList(append([]string{"vendor", ".git"}, skip...))
@@ -155,8 +157,8 @@ func runGofmt(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, fi
 
 		args := append([]string{"-w"}, chunk...)
 		cmd := exec.CommandContext(ctx, "gofmt", args...)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+		cmd.Stdout = stdout
+		cmd.Stderr = stderr
 
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("gofmt failed: %w", err)

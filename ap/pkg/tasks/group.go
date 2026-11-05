@@ -269,8 +269,9 @@ type RunOptions struct {
 // Run executes a list of tasks.
 func Run(ctx context.Context, scope *APScope, ts []Task, opts RunOptions) error {
 	if opts.DryRun {
+		out := scope.GetStdout()
 		for _, task := range ts {
-			PrintTree(task, 0)
+			PrintTree(out, task, 0)
 		}
 		return nil
 	}

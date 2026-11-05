@@ -17,6 +17,7 @@ package kindload
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -40,7 +41,7 @@ var DefaultBackoffs = []time.Duration{
 var KindLoadRetryPolicy tasks.RetryPolicy = tasks.Backoff(DefaultBackoffs)
 
 // LoadImages loads docker images into the specified kind cluster using the given kind binary.
-func LoadImages(ctx context.Context, kindBin, cluster string, images []string) error {
+func LoadImages(ctx context.Context, kindBin, cluster string, images []string, stdout, stderr io.Writer) error {
 	if kindBin == "" {
 		return fmt.Errorf("kindBin is required")
 	}
@@ -54,8 +55,8 @@ func LoadImages(ctx context.Context, kindBin, cluster string, images []string) e
 	}
 
 	cmd := exec.CommandContext(ctx, kindBin, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	cmd.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(kindBin))
 	if dockerBin, err := toolDocker.EnsureDocker(ctx, ""); err == nil && dockerBin != "" {
 		cmd.Env = fileutils.PrependPath(cmd.Env, filepath.Dir(dockerBin))

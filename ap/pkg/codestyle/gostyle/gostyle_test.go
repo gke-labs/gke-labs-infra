@@ -16,6 +16,7 @@ package gostyle
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,7 +40,7 @@ func TestRun_NoConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = Run(ctx, r, tmpDir, nil)
+	err = Run(ctx, r, tmpDir, nil, io.Discard, io.Discard)
 	if err != nil {
 		t.Errorf("Expected success from Run (no config), got error: %v", err)
 	}
@@ -80,7 +81,7 @@ gofmt:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := Run(ctx, r, tmpDir, nil); err != nil {
+	if err := Run(ctx, r, tmpDir, nil, io.Discard, io.Discard); err != nil {
 		t.Fatalf("Run failed: %v", err)
 	}
 
@@ -116,7 +117,7 @@ func TestRun_GoModTidy_UntidyModuleMadeTidy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Run(ctx, r, tmpDir, nil); err != nil {
+	if err := Run(ctx, r, tmpDir, nil, io.Discard, io.Discard); err != nil {
 		t.Fatalf("Run failed: %v", err)
 	}
 
@@ -167,7 +168,7 @@ func TestRun_GoModTidy_MultiModuleWithGoWork(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Run(ctx, r, tmpDir, nil); err != nil {
+	if err := Run(ctx, r, tmpDir, nil, io.Discard, io.Discard); err != nil {
 		t.Fatalf("Run failed: %v", err)
 	}
 
@@ -220,7 +221,7 @@ func TestRun_GoModTidy_ChangeCache(t *testing.T) {
 	}
 
 	// First run: should execute tidy
-	if err := Run(ctx, r, tmpDir, nil); err != nil {
+	if err := Run(ctx, r, tmpDir, nil, io.Discard, io.Discard); err != nil {
 		t.Fatalf("first Run failed: %v", err)
 	}
 	if runCount != 1 {
@@ -228,7 +229,7 @@ func TestRun_GoModTidy_ChangeCache(t *testing.T) {
 	}
 
 	// Second run with no changes: should skip tidy due to cache
-	if err := Run(ctx, r, tmpDir, nil); err != nil {
+	if err := Run(ctx, r, tmpDir, nil, io.Discard, io.Discard); err != nil {
 		t.Fatalf("second Run failed: %v", err)
 	}
 	if runCount != 1 {
@@ -239,7 +240,7 @@ func TestRun_GoModTidy_ChangeCache(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(tmpDir, "README.md"), []byte("# Notes\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := Run(ctx, r, tmpDir, nil); err != nil {
+	if err := Run(ctx, r, tmpDir, nil, io.Discard, io.Discard); err != nil {
 		t.Fatalf("third Run (after README change) failed: %v", err)
 	}
 	if runCount != 1 {
@@ -250,7 +251,7 @@ func TestRun_GoModTidy_ChangeCache(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(tmpDir, "main.go"), []byte("package main\n\nfunc main() { /* edited */ }\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := Run(ctx, r, tmpDir, nil); err != nil {
+	if err := Run(ctx, r, tmpDir, nil, io.Discard, io.Discard); err != nil {
 		t.Fatalf("fourth Run (after Go file change) failed: %v", err)
 	}
 	if runCount != 2 {
@@ -280,7 +281,7 @@ func TestRun_GoModTidy_NetworkFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = Run(ctx, r, tmpDir, nil)
+	err = Run(ctx, r, tmpDir, nil, io.Discard, io.Discard)
 	if err == nil {
 		t.Fatal("expected Run to fail on unresolved dependency with GOPROXY=off, got nil")
 	}
@@ -313,7 +314,7 @@ func TestRun_GoModTidy_DisabledInConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Run(ctx, r, tmpDir, nil); err != nil {
+	if err := Run(ctx, r, tmpDir, nil, io.Discard, io.Discard); err != nil {
 		t.Fatalf("Run failed: %v", err)
 	}
 
@@ -354,7 +355,7 @@ func TestRun_GoModTidy_SkipPattern(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Run(ctx, r, tmpDir, nil); err != nil {
+	if err := Run(ctx, r, tmpDir, nil, io.Discard, io.Discard); err != nil {
 		t.Fatalf("Run failed: %v", err)
 	}
 

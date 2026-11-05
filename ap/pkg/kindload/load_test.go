@@ -15,6 +15,7 @@
 package kindload
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,7 +23,7 @@ import (
 )
 
 func TestLoadImages_RequiresKindBin(t *testing.T) {
-	err := LoadImages(t.Context(), "", "ap-cluster", []string{"test-image:latest"})
+	err := LoadImages(t.Context(), "", "ap-cluster", []string{"test-image:latest"}, io.Discard, io.Discard)
 	if err == nil {
 		t.Fatal("expected error when kindBin is empty, got nil")
 	}
@@ -30,18 +31,18 @@ func TestLoadImages_RequiresKindBin(t *testing.T) {
 		t.Fatalf("expected error to contain 'kindBin is required', got: %v", err)
 	}
 
-	err = LoadImages(t.Context(), "", "ap-cluster", nil)
+	err = LoadImages(t.Context(), "", "ap-cluster", nil, io.Discard, io.Discard)
 	if err == nil {
 		t.Fatal("expected error when kindBin is empty and images is nil, got nil")
 	}
 }
 
 func TestLoadImages_EmptyImages(t *testing.T) {
-	err := LoadImages(t.Context(), "kind", "ap-cluster", nil)
+	err := LoadImages(t.Context(), "kind", "ap-cluster", nil, io.Discard, io.Discard)
 	if err != nil {
 		t.Fatalf("expected nil when images is empty, got: %v", err)
 	}
-	err = LoadImages(t.Context(), "kind", "ap-cluster", []string{})
+	err = LoadImages(t.Context(), "kind", "ap-cluster", []string{}, io.Discard, io.Discard)
 	if err != nil {
 		t.Fatalf("expected nil when images is empty, got: %v", err)
 	}
@@ -55,7 +56,7 @@ func TestLoadImages_CommandFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := LoadImages(t.Context(), fakeBin, "test-cluster", []string{"test-image:latest"})
+	err := LoadImages(t.Context(), fakeBin, "test-cluster", []string{"test-image:latest"}, io.Discard, io.Discard)
 	if err == nil {
 		t.Fatal("expected error when kind fails, got nil")
 	}

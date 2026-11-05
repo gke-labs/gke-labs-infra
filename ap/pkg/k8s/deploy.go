@@ -486,8 +486,8 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error 
 	applyArgs = append(applyArgs, "apply", "-f", "-")
 	cmd := exec.CommandContext(ctx, kubectlBin, applyArgs...)
 	cmd.Stdin = bytes.NewBufferString(replaced)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = scope.GetStdout()
+	cmd.Stderr = scope.GetStderr()
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("kubectl apply failed for %s: %w", relPath, err)
@@ -506,8 +506,8 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error 
 			}
 			waitArgs = append(waitArgs, "wait", "--for=condition=Established", "customresourcedefinition/"+name, "--timeout=60s")
 			waitCmd := exec.CommandContext(ctx, kubectlBin, waitArgs...)
-			waitCmd.Stdout = os.Stdout
-			waitCmd.Stderr = os.Stderr
+			waitCmd.Stdout = scope.GetStdout()
+			waitCmd.Stderr = scope.GetStderr()
 			if err := waitCmd.Run(); err != nil {
 				return fmt.Errorf("failed to wait for CRD %s: %w", name, err)
 			}
