@@ -15,8 +15,11 @@
 package cmd
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
@@ -28,6 +31,7 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
+	"k8s.io/klog/v2"
 )
 
 func TestSingleWalkPerInvocation(t *testing.T) {
@@ -276,4 +280,107 @@ func TestSkipUniformlyInvisibleToAllConsumers(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestDiscoverScopes_SkipsGoE2eWhenScriptExists(t *testing.T) {
+	sourcetree.ResetCache()
+	tempDir := t.TempDir()
+
+	files := map[string]string{
+		".git/config":           "",
+		"dev/tasks/test-e2e":    "#!/bin/bash\n",
+		"tests/e2e/e2e_test.go": "package e2e\n\nimport \"testing\"\n\nfunc TestE2E(t *testing.T) {}\n",
+	}
+
+	for rel, content := range files {
+		full := filepath.Join(tempDir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+			t.Fatalf("MkdirAll failed: %v", err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0755); err != nil {
+			t.Fatalf("WriteFile failed: %v", err)
+		}
+	}
+
+	var logBuf bytes.Buffer
+	klog.SetOutput(&logBuf)
+	klog.LogToStderr(false)
+	defer func() {
+		klog.SetOutput(os.Stderr)
+		klog.LogToStderr(true)
+	}()
+
+	rootOpt := RootOptions{RepoRoot: tempDir}
+	if err := rootOpt.Resolve([]string{"//..."}); err != nil {
+		t.Fatalf("Resolve failed: %v", err)
+	}
+	r, err := rootOpt.GetSourceTree()
+	if err != nil {
+		t.Fatalf("GetSourceTree failed: %v", err)
+	}
+
+	scopes, err := DiscoverScopes(r, rootOpt.RepoRoot, rootOpt.Dir)
+	if err != nil {
+		t.Fatalf("DiscoverScopes failed: %v", err)
+	}
+
+	// Verify no GoE2eTask was added
+	for _, s := range scopes {
+		for _, task := range s.E2ETasks {
+			if _, ok := task.(*golang.GoE2eTask); ok {
+				t.Fatalf("expected no GoE2eTask, found %T", task)
+			}
+		}
+	}
+
+	scriptPath := filepath.Join(tempDir, "dev", "tasks", "test-e2e")
+	expectedLog := fmt.Sprintf("skipping go e2e tests in %s: %s owns e2e for this root", tempDir, scriptPath)
+	if !strings.Contains(logBuf.String(), expectedLog) {
+		t.Fatalf("expected log output to contain %q, got: %s", expectedLog, logBuf.String())
+	}
+
+	t.Run("no log when no go tests", func(t *testing.T) {
+		sourcetree.ResetCache()
+		tempDir2 := t.TempDir()
+
+		files2 := map[string]string{
+			".git/config":        "",
+			"dev/tasks/test-e2e": "#!/bin/bash\n",
+			"tests/e2e/test.txt": "not a go file",
+		}
+		for rel, content := range files2 {
+			full := filepath.Join(tempDir2, rel)
+			if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+				t.Fatalf("MkdirAll failed: %v", err)
+			}
+			if err := os.WriteFile(full, []byte(content), 0755); err != nil {
+				t.Fatalf("WriteFile failed: %v", err)
+			}
+		}
+
+		var logBuf bytes.Buffer
+		klog.SetOutput(&logBuf)
+		klog.LogToStderr(false)
+		defer func() {
+			klog.SetOutput(os.Stderr)
+			klog.LogToStderr(true)
+		}()
+
+		rootOpt := RootOptions{RepoRoot: tempDir2}
+		if err := rootOpt.Resolve([]string{"//..."}); err != nil {
+			t.Fatalf("Resolve failed: %v", err)
+		}
+		r, err := rootOpt.GetSourceTree()
+		if err != nil {
+			t.Fatalf("GetSourceTree failed: %v", err)
+		}
+
+		if _, err := DiscoverScopes(r, rootOpt.RepoRoot, rootOpt.Dir); err != nil {
+			t.Fatalf("DiscoverScopes failed: %v", err)
+		}
+
+		if strings.Contains(logBuf.String(), "skipping go e2e tests") {
+			t.Fatalf("unexpected skipping log output when tests/e2e has no Go tests: %s", logBuf.String())
+		}
+	})
 }

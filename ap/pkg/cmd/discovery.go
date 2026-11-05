@@ -25,6 +25,7 @@ import (
 	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
+	"k8s.io/klog/v2"
 )
 
 // DiscoverScopes discovers all tasks under the given directory subtree.
@@ -76,10 +77,12 @@ func DiscoverScopes(r *sourcetree.SourceTree, repoRoot, dir string) ([]*tasks.AP
 	}
 
 	// Discover go e2e tasks
-	scriptRoots := make(map[string]bool)
+	scriptRoots := make(map[string]string)
 	for _, st := range e2eScripts {
 		if ts, ok := st.(*tasks.TaskScript); ok {
-			scriptRoots[ts.Root] = true
+			if _, ok := scriptRoots[ts.Root]; !ok {
+				scriptRoots[ts.Root] = ts.Path
+			}
 		}
 	}
 
@@ -89,36 +92,38 @@ func DiscoverScopes(r *sourcetree.SourceTree, repoRoot, dir string) ([]*tasks.AP
 			continue
 		}
 
-		parentDir := filepath.Dir(d)
-		if scriptRoots[parentDir] {
+		e2eDir := filepath.Join(d, "e2e")
+		if !sub.HasGoTests(e2eDir) {
 			continue
 		}
-		e2eDir := filepath.Join(d, "e2e")
-		if sub.HasGoTests(e2eDir) {
-			buildDir := filepath.Join(repoRoot, ".build", "test-results", "go")
-			if artifactsDir := os.Getenv("ARTIFACTS"); artifactsDir != "" {
-				buildDir = filepath.Join(artifactsDir, "test-results", "go")
-			}
-			if err := os.MkdirAll(buildDir, 0755); err != nil {
-				return nil, fmt.Errorf("failed to create build dir: %w", err)
-			}
-			rel, err := filepath.Rel(repoRoot, parentDir)
-			if err != nil {
-				return nil, fmt.Errorf("failed to determine relative path for %s: %w", parentDir, err)
-			}
-			name := rel
-			if name == "." {
-				name = "root"
-			}
-			filename := filepath.ToSlash(name)
-			filename = strings.ReplaceAll(filename, "/", "-")
-			resultFile := filepath.Join(buildDir, filename+"-e2e.json")
-			scope.E2ETasks = append(scope.E2ETasks, &golang.GoE2eTask{
-				Dir:        parentDir,
-				Name:       name,
-				ResultFile: resultFile,
-			})
+		parentDir := filepath.Dir(d)
+		if script, ok := scriptRoots[parentDir]; ok {
+			klog.Infof("skipping go e2e tests in %s: %s owns e2e for this root", parentDir, script)
+			continue
 		}
+		buildDir := filepath.Join(repoRoot, ".build", "test-results", "go")
+		if artifactsDir := os.Getenv("ARTIFACTS"); artifactsDir != "" {
+			buildDir = filepath.Join(artifactsDir, "test-results", "go")
+		}
+		if err := os.MkdirAll(buildDir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create build dir: %w", err)
+		}
+		rel, err := filepath.Rel(repoRoot, parentDir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to determine relative path for %s: %w", parentDir, err)
+		}
+		name := rel
+		if name == "." {
+			name = "root"
+		}
+		filename := filepath.ToSlash(name)
+		filename = strings.ReplaceAll(filename, "/", "-")
+		resultFile := filepath.Join(buildDir, filename+"-e2e.json")
+		scope.E2ETasks = append(scope.E2ETasks, &golang.GoE2eTask{
+			Dir:        parentDir,
+			Name:       name,
+			ResultFile: resultFile,
+		})
 	}
 
 	// Go Test tasks

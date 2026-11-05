@@ -53,6 +53,10 @@ Running `ap generate --verify` (or `ap verify-generate`) perturbs each generated
 
 The `ap deploy` command builds container images and applies Kubernetes manifests. Built images deployed with `:latest` are pinned by digest (`tag@sha256`) in applied manifests so redeploying always rolls pods to the new image. When the current context is a kind cluster, `ap deploy` works with no `IMAGE_PREFIX`, building locally, loading images with `kind load docker-image` using a unique content-addressed tag, and applying. Use `--cluster=kind://<name>` to target a specific kind cluster, or `--cluster=<context>` to target a kubeconfig context.
 
+## End-to-End Testing (e2e)
+
+If a root has a `dev/tasks/test-e2e*` script, `ap e2e` runs the script and nothing else, so the script must run the Go tests itself; without a script, `ap` runs `RUN_E2E=1 go test -v -count=1 -timeout 30m ./tests/e2e/...`.
+
 ## Configuration Files
 
 The following files can be placed in the `.ap/` directory:
