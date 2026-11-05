@@ -75,7 +75,7 @@ func TestAutodeploy(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to open sourcetree: %v", err)
 		}
-		scope := tasks.NewScope(repoRoot, repoRoot, tree)
+		scope := tasks.NewTaskContext(repoRoot, repoRoot, tree)
 		if err := tasks.RunTask(t.Context(), scope, task); err != nil {
 			t.Fatalf("failed to load image(s) %v: %v", images, err)
 		}
