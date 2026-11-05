@@ -82,6 +82,19 @@ func (t *LegacyScriptTask) GetChildren() []tasks.Task {
 	return nil
 }
 
+func (t *LegacyScriptTask) SourcePath() string {
+	if filepath.IsAbs(t.Path) {
+		return t.Path
+	}
+	abs, err := filepath.Abs(t.Path)
+	if err != nil {
+		return t.Path
+	}
+	return abs
+}
+
+var _ tasks.Sourced = (*LegacyScriptTask)(nil)
+
 // GoGenerateTask represents a task to run `go generate ./...` in a module directory.
 type GoGenerateTask struct {
 	Dir string
@@ -110,6 +123,19 @@ func (t *GoGenerateTask) GetName() string {
 func (t *GoGenerateTask) GetChildren() []tasks.Task {
 	return nil
 }
+
+func (t *GoGenerateTask) SourcePath() string {
+	if filepath.IsAbs(t.Dir) {
+		return t.Dir
+	}
+	abs, err := filepath.Abs(t.Dir)
+	if err != nil {
+		return t.Dir
+	}
+	return abs
+}
+
+var _ tasks.Sourced = (*GoGenerateTask)(nil)
 
 // BuiltinGeneratorTask represents a task to run a built-in generator.
 type BuiltinGeneratorTask struct {

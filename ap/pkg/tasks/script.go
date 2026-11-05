@@ -58,6 +58,19 @@ func (t *TaskScript) GetChildren() []Task {
 	return nil
 }
 
+func (t *TaskScript) SourcePath() string {
+	if filepath.IsAbs(t.Path) {
+		return t.Path
+	}
+	abs, err := filepath.Abs(t.Path)
+	if err != nil {
+		return t.Path
+	}
+	return abs
+}
+
+var _ Sourced = (*TaskScript)(nil)
+
 type FindOptions struct {
 	Prefix        string
 	ExcludePrefix string

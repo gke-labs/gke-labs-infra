@@ -53,6 +53,23 @@ func (r *RetryableTask) RetryPolicy() RetryPolicy {
 	return r.Policy
 }
 
+func (r *RetryableTask) SourcePath() string {
+	if s, ok := r.Task.(Sourced); ok {
+		return s.SourcePath()
+	}
+	return ""
+}
+
+func (r *RetryableTask) WithChildren(children []Task) Task {
+	if p, ok := r.Task.(Parent); ok {
+		return &RetryableTask{
+			Task:   p.WithChildren(children),
+			Policy: r.Policy,
+		}
+	}
+	return nil
+}
+
 // RunTask executes a single task, retrying if it implements Retryable according to its RetryPolicy.
 func RunTask(ctx context.Context, scope *TaskContext, task Task) error {
 	var policy RetryPolicy

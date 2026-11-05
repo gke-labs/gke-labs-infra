@@ -260,6 +260,15 @@ func (g *Group) GetChildren() []Task {
 	return g.Tasks
 }
 
+// WithChildren returns a shallow copy of the group with new children tasks.
+func (g *Group) WithChildren(children []Task) Task {
+	cp := *g
+	cp.Tasks = children
+	return &cp
+}
+
+var _ Parent = (*Group)(nil)
+
 // RunOptions holds options for running tasks.
 type RunOptions struct {
 	DryRun          bool

@@ -548,6 +548,19 @@ func (t *KubectlApplyTask) GetChildren() []tasks.Task {
 	return children
 }
 
+func (t *KubectlApplyTask) SourcePath() string {
+	if filepath.IsAbs(t.ManifestPath) {
+		return t.ManifestPath
+	}
+	abs, err := filepath.Abs(t.ManifestPath)
+	if err != nil {
+		return t.ManifestPath
+	}
+	return abs
+}
+
+var _ tasks.Sourced = (*KubectlApplyTask)(nil)
+
 func getCRDNames(content []byte) ([]string, error) {
 	var names []string
 	decoder := yaml.NewDecoder(bytes.NewReader(content))

@@ -18,12 +18,9 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"sort"
-	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
 )
@@ -58,18 +55,6 @@ func BuildBuildCommand(rootOpt *RootOptions) *cobra.Command {
 	return cmd
 }
 
-func isImageDir(r *sourcetree.SourceTree, dir string) bool {
-	return filepath.Base(filepath.Dir(dir)) == "images" && r.FileExists(filepath.Join(dir, "Dockerfile"))
-}
-
-func isSubpathOrEqual(parent, child string) bool {
-	rel, err := filepath.Rel(parent, child)
-	if err != nil {
-		return false
-	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
-}
-
 // RunBuild executes the business logic for the "build" command.
 func RunBuild(ctx context.Context, opt BuildOptions) error {
 	if err := requireRepoRoot(opt.RootOptions); err != nil {
@@ -96,8 +81,7 @@ func RunBuild(ctx context.Context, opt BuildOptions) error {
 		targets = []string{currentDir}
 	}
 
-	imageSet := make(map[string]bool)
-	var subtreeTargets []string
+	var resolvedTargets []string
 	var firstResolved string
 
 	for i, target := range targets {
@@ -108,76 +92,8 @@ func RunBuild(ctx context.Context, opt BuildOptions) error {
 		if i == 0 {
 			firstResolved = resolved
 		}
-
-		if isImageDir(r, resolved) {
-			imageSet[filepath.Base(resolved)] = true
-			continue
-		}
-
-		subtreeTargets = append(subtreeTargets, resolved)
+		resolvedTargets = append(resolvedTargets, resolved)
 	}
-
-	var filteredSubtrees []string
-	for _, s := range subtreeTargets {
-		contained := false
-		for _, other := range subtreeTargets {
-			if other == s {
-				continue
-			}
-			if isSubpathOrEqual(other, s) {
-				contained = true
-				break
-			}
-		}
-		if !contained {
-			alreadyAdded := false
-			for _, existing := range filteredSubtrees {
-				if existing == s {
-					alreadyAdded = true
-					break
-				}
-			}
-			if !alreadyAdded {
-				filteredSubtrees = append(filteredSubtrees, s)
-			}
-		}
-	}
-
-	var allBuildTasks []tasks.Task
-	for _, subtree := range filteredSubtrees {
-		scopes, err := DiscoverScopes(r, opt.RepoRoot, subtree)
-		if err != nil {
-			return err
-		}
-		if len(scopes) == 0 {
-			return fmt.Errorf("no scopes found under %s", subtree)
-		}
-
-		subImages, err := images.FindImageNames(r, subtree)
-		if err != nil {
-			return err
-		}
-
-		var scopeBuildTasks []tasks.Task
-		for _, scope := range scopes {
-			scopeBuildTasks = append(scopeBuildTasks, scope.BuildTasks...)
-		}
-
-		if len(subImages) == 0 && len(scopeBuildTasks) == 0 {
-			return fmt.Errorf("nothing to build under %s: no images/*/Dockerfile and no dev/tasks/build-* scripts", subtree)
-		}
-
-		for _, img := range subImages {
-			imageSet[img] = true
-		}
-		allBuildTasks = append(allBuildTasks, scopeBuildTasks...)
-	}
-
-	var allImageNames []string
-	for img := range imageSet {
-		allImageNames = append(allImageNames, img)
-	}
-	sort.Strings(allImageNames)
 
 	cfg, err := config.Load(opt.RepoRoot)
 	if err != nil {
@@ -193,26 +109,33 @@ func RunBuild(ctx context.Context, opt BuildOptions) error {
 		Name: fmt.Sprintf("build-%s", filepath.Base(groupNameDir)),
 	}
 
-	if len(allImageNames) > 0 {
-		imageTasks, err := images.BuildTasksForImages(r, opt.RepoRoot, opt.Push, buildkitHost, allImageNames, naming)
-		if err != nil {
-			return err
-		}
-		if imageTasks != nil && len(imageTasks.GetChildren()) > 0 {
-			group.Tasks = append(group.Tasks, imageTasks)
+	imageTasks, err := images.BuildTasks(r, opt.RepoRoot, opt.Push, buildkitHost, naming)
+	if err != nil {
+		return err
+	}
+	if imageTasks != nil && len(imageTasks.GetChildren()) > 0 {
+		group.Tasks = append(group.Tasks, imageTasks)
+	}
+
+	scopes, err := DiscoverScopes(r, opt.RepoRoot, opt.RepoRoot)
+	if err != nil {
+		return err
+	}
+	for _, scope := range scopes {
+		group.Tasks = append(group.Tasks, scope.BuildTasks...)
+	}
+
+	for _, target := range resolvedTargets {
+		matched := tasks.FilterBySourcePath(group.Tasks, []string{target})
+		if len(matched) == 0 {
+			return fmt.Errorf("nothing to build under %s: no images/*/Dockerfile and no dev/tasks/build-* scripts", target)
 		}
 	}
 
-	group.Tasks = append(group.Tasks, allBuildTasks...)
-
-	var allTasks []tasks.Task
-	if len(group.Tasks) > 0 {
-		allTasks = append(allTasks, group)
-	}
-
-	if len(allTasks) == 0 {
+	group.Tasks = tasks.FilterBySourcePath(group.Tasks, resolvedTargets)
+	if len(group.Tasks) == 0 {
 		return fmt.Errorf("nothing to build under %s: no images/*/Dockerfile and no dev/tasks/build-* scripts", groupNameDir)
 	}
 
-	return tasks.Run(ctx, tasks.NewTaskContext(opt.RepoRoot, opt.RepoRoot, r), allTasks, tasks.RunOptions{DryRun: opt.DryRun})
+	return tasks.Run(ctx, tasks.NewTaskContext(opt.RepoRoot, opt.RepoRoot, r), []tasks.Task{group}, tasks.RunOptions{DryRun: opt.DryRun})
 }

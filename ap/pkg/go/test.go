@@ -68,6 +68,19 @@ func (t *GoTestTask) GetChildren() []tasks.Task {
 	return nil
 }
 
+func (t *GoTestTask) SourcePath() string {
+	if filepath.IsAbs(t.Dir) {
+		return t.Dir
+	}
+	abs, err := filepath.Abs(t.Dir)
+	if err != nil {
+		return t.Dir
+	}
+	return abs
+}
+
+var _ tasks.Sourced = (*GoTestTask)(nil)
+
 // GoE2eTask represents a task to run go e2e tests.
 type GoE2eTask struct {
 	Dir        string
@@ -96,6 +109,19 @@ func (t *GoE2eTask) GetName() string {
 func (t *GoE2eTask) GetChildren() []tasks.Task {
 	return nil
 }
+
+func (t *GoE2eTask) SourcePath() string {
+	if filepath.IsAbs(t.Dir) {
+		return t.Dir
+	}
+	abs, err := filepath.Abs(t.Dir)
+	if err != nil {
+		return t.Dir
+	}
+	return abs
+}
+
+var _ tasks.Sourced = (*GoE2eTask)(nil)
 
 // HasGoTests returns true if the directory or any subdirectory contains a .go file with a _test.go suffix.
 func HasGoTests(r *sourcetree.SourceTree, dir string) (bool, error) {
