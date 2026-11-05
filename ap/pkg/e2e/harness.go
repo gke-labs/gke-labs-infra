@@ -270,8 +270,7 @@ func (h *Harness) KindLoad(tag string) {
 		}
 		h.sourceTree = tree
 	}
-	scope := tasks.NewScope(h.RepoRoot(), h.RepoRoot(), h.sourceTree)
-	scope.KubectlBin = h.kubectlBin
+	scope := tasks.NewTaskContext(h.RepoRoot(), h.RepoRoot(), h.sourceTree)
 	if err := tasks.RunTask(h.t.Context(), scope, task); err != nil {
 		h.t.Fatalf("KindLoad failed: %v", err)
 	}

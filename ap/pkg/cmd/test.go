@@ -69,7 +69,7 @@ func RunTest(ctx context.Context, opt TestOptions) error {
 	for _, scope := range scopes {
 		if len(scope.TestTasks) > 0 {
 			group := &tasks.Group{
-				Name:            fmt.Sprintf("test-%s", filepath.Base(scope.Dir)),
+				Name:            fmt.Sprintf("test-%s", filepath.Base(scope.Dir())),
 				Tasks:           scope.TestTasks,
 				ContinueOnError: true,
 			}
@@ -77,5 +77,5 @@ func RunTest(ctx context.Context, opt TestOptions) error {
 		}
 	}
 
-	return tasks.Run(ctx, tasks.NewScope(opt.RepoRoot, opt.RepoRoot, r), allTasks, tasks.RunOptions{DryRun: opt.DryRun, ContinueOnError: true})
+	return tasks.Run(ctx, tasks.NewTaskContext(opt.RepoRoot, opt.RepoRoot, r), allTasks, tasks.RunOptions{DryRun: opt.DryRun, ContinueOnError: true})
 }

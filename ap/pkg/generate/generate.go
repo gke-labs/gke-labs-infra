@@ -54,7 +54,7 @@ type LegacyScriptTask struct {
 	Dir  string
 }
 
-func (t *LegacyScriptTask) Run(ctx context.Context, scope *tasks.APScope) error {
+func (t *LegacyScriptTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
 	klog.Infof("Running legacy generate script: %s", t.Name)
 	cmd := exec.CommandContext(ctx, t.Path)
 	cmd.Dir = t.Dir
@@ -63,12 +63,12 @@ func (t *LegacyScriptTask) Run(ctx context.Context, scope *tasks.APScope) error 
 		return fmt.Errorf("failed to prepare script environment for %s: %w", t.Name, err)
 	}
 	cmd.Env = env
-	cmd.Stdout = scope.GetStdout()
-	cmd.Stderr = scope.GetStderr()
+	cmd.Stdout = scope.Stdout()
+	cmd.Stderr = scope.Stderr()
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to run %s: %w", t.Name, err)
 	}
-	if err := scope.SourceTree.InvalidateAll(); err != nil {
+	if err := scope.SourceTree().InvalidateAll(); err != nil {
 		return fmt.Errorf("failed to invalidate repo tree after %s: %w", t.Name, err)
 	}
 	return nil
@@ -87,17 +87,17 @@ type GoGenerateTask struct {
 	Dir string
 }
 
-func (t *GoGenerateTask) Run(ctx context.Context, scope *tasks.APScope) error {
+func (t *GoGenerateTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
 	klog.Infof("Running go generate in %s", t.Dir)
 	cmd := exec.CommandContext(ctx, "go", "generate", "./...")
 	cmd.Dir = t.Dir
-	cmd.Stdout = scope.GetStdout()
-	cmd.Stderr = scope.GetStderr()
+	cmd.Stdout = scope.Stdout()
+	cmd.Stderr = scope.Stderr()
 	cmd.Env = append(os.Environ(), "GOTOOLCHAIN=auto")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("go generate failed in %s: %w", t.Dir, err)
 	}
-	if err := scope.SourceTree.InvalidateAll(); err != nil {
+	if err := scope.SourceTree().InvalidateAll(); err != nil {
 		return fmt.Errorf("failed to invalidate repo tree after go generate in %s: %w", t.Dir, err)
 	}
 	return nil
@@ -117,9 +117,9 @@ type BuiltinGeneratorTask struct {
 	RunFunc func(ctx context.Context, r *sourcetree.SourceTree, repoRoot string) error
 }
 
-func (t *BuiltinGeneratorTask) Run(ctx context.Context, scope *tasks.APScope) error {
+func (t *BuiltinGeneratorTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
 	klog.Infof("Running built-in generator: %s", t.Name)
-	return t.RunFunc(ctx, scope.SourceTree, scope.RepoRoot)
+	return t.RunFunc(ctx, scope.SourceTree(), scope.RepoRoot())
 }
 
 func (t *BuiltinGeneratorTask) GetName() string {
@@ -143,16 +143,16 @@ func hasGoGenerateInModule(r *sourcetree.SourceTree, mod string) bool {
 }
 
 // GenerateTasks returns a task group for all generation tasks.
-func GenerateTasks(repoRoot string, scopes []*tasks.APScope) (tasks.Task, error) {
+func GenerateTasks(repoRoot string, scopes []*tasks.TaskContext) (tasks.Task, error) {
 	var allTasks []tasks.Task
 
 	for _, scope := range scopes {
-		dir := scope.Dir
+		dir := scope.Dir()
 		group := &tasks.Group{
 			Name: fmt.Sprintf("generate-%s", filepath.Base(dir)),
 		}
 
-		r := scope.SourceTree
+		r := scope.SourceTree()
 
 		// 1. Run legacy scripts
 		legacyScripts, err := tasks.FindTaskScripts(r, dir, tasks.WithPrefix("generate-"), tasks.WithExcludePrefix("generate-github-actions"))
@@ -227,16 +227,16 @@ func GenerateTasks(repoRoot string, scopes []*tasks.APScope) (tasks.Task, error)
 	}, nil
 }
 
-func Run(ctx context.Context, repoRoot string, scopes []*tasks.APScope) error {
+func Run(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext) error {
 	t, err := GenerateTasks(repoRoot, scopes)
 	if err != nil {
 		return err
 	}
 	var r *sourcetree.SourceTree
 	if len(scopes) > 0 {
-		r = scopes[0].SourceTree
+		r = scopes[0].SourceTree()
 	}
-	return t.Run(ctx, tasks.NewScope(repoRoot, repoRoot, r))
+	return t.Run(ctx, tasks.NewTaskContext(repoRoot, repoRoot, r))
 }
 
 func runGenerateVerifierGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot string) error {
@@ -475,12 +475,12 @@ cd "${REPO_ROOT}"
 	return nil
 }
 
-func runApBuildGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot string, scopes []*tasks.APScope) error {
+func runApBuildGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot string, scopes []*tasks.TaskContext) error {
 	// Check if any apRoot has any images to build OR any build-* scripts
 	hasBuild := false
 	for _, scope := range scopes {
-		apRoot := scope.Dir
-		scopeTree := scope.SourceTree
+		apRoot := scope.Dir()
+		scopeTree := scope.SourceTree()
 		ok, err := images.HasImages(scopeTree, apRoot)
 		if err == nil && ok {
 			hasBuild = true
@@ -593,7 +593,7 @@ func isGeneratedByApGenerate(path string) (bool, error) {
 	return false, nil
 }
 
-func runApE2eGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot string, scopes []*tasks.APScope) error {
+func runApE2eGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot string, scopes []*tasks.TaskContext) error {
 	presubmitsDir := filepath.Join(repoRoot, "dev", "ci", "presubmits")
 
 	type e2eTarget struct {
@@ -731,7 +731,7 @@ cd "${REPO_ROOT}"
 	return nil
 }
 
-func runGithubActionsGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot string, scopes []*tasks.APScope) error {
+func runGithubActionsGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot string, scopes []*tasks.TaskContext) error {
 	workflowsDir := filepath.Join(repoRoot, ".github", "workflows")
 	outputFile := filepath.Join(workflowsDir, "ci-presubmits.yaml")
 

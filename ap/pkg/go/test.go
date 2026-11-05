@@ -48,11 +48,11 @@ type GoTestTask struct {
 	ResultFile string
 }
 
-func (t *GoTestTask) Run(ctx context.Context, scope *tasks.APScope) error {
+func (t *GoTestTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
 	klog.Infof("Running go test in %s", t.Dir)
 	opts := RunGoTestOptions{
-		Stdout: scope.GetStdout(),
-		Stderr: scope.GetStderr(),
+		Stdout: scope.Stdout(),
+		Stderr: scope.Stderr(),
 	}
 	if err := RunGoTest(ctx, t.Dir, t.ResultFile, opts); err != nil {
 		return fmt.Errorf("go test failed in %s: %w", t.Dir, err)
@@ -75,13 +75,13 @@ type GoE2eTask struct {
 	ResultFile string
 }
 
-func (t *GoE2eTask) Run(ctx context.Context, scope *tasks.APScope) error {
+func (t *GoE2eTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
 	klog.Infof("Running go e2e test in %s", t.Dir)
 	opts := RunGoTestOptions{
 		Env:    []string{"RUN_E2E=1"},
 		Args:   []string{"-v", "-count=1", "-timeout", "30m", "./tests/e2e/..."},
-		Stdout: scope.GetStdout(),
-		Stderr: scope.GetStderr(),
+		Stdout: scope.Stdout(),
+		Stderr: scope.Stderr(),
 	}
 	if err := RunGoTest(ctx, t.Dir, t.ResultFile, opts); err != nil {
 		return fmt.Errorf("go e2e test failed in %s: %w", t.Dir, err)
@@ -150,7 +150,7 @@ func Test(ctx context.Context, r *sourcetree.SourceTree, root string) error {
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, tasks.NewScope(root, root, r))
+	return t.Run(ctx, tasks.NewTaskContext(root, root, r))
 }
 
 // RunGoTestOptions holds options for running go tests.

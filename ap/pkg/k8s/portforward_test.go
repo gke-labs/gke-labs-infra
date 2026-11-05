@@ -27,7 +27,7 @@ type mockTask struct {
 	called bool
 }
 
-func (m *mockTask) Run(ctx context.Context, scope *tasks.APScope) error {
+func (m *mockTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
 	m.called = true
 	return nil
 }

@@ -41,7 +41,7 @@ type PortForwardTask struct {
 	KubectlBin string
 }
 
-func (t *PortForwardTask) Run(ctx context.Context, scope *tasks.APScope) (retErr error) {
+func (t *PortForwardTask) Run(ctx context.Context, scope *tasks.TaskContext) (retErr error) {
 	if IsInCluster() {
 		klog.Infof("Running in-cluster, skipping port-forward to %s/%s", t.Namespace, t.Service)
 		return t.Child.Run(ctx, scope)

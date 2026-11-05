@@ -25,7 +25,7 @@ import (
 
 // Task is the interface that all tasks must implement.
 type Task interface {
-	Run(ctx context.Context, scope *APScope) error
+	Run(ctx context.Context, scope *TaskContext) error
 	GetName() string
 	GetChildren() []Task
 }
@@ -33,10 +33,10 @@ type Task interface {
 // FuncTask represents a task that executes a function.
 type FuncTask struct {
 	Name  string
-	RunFn func(ctx context.Context, scope *APScope) error
+	RunFn func(ctx context.Context, scope *TaskContext) error
 }
 
-func (t *FuncTask) Run(ctx context.Context, scope *APScope) error {
+func (t *FuncTask) Run(ctx context.Context, scope *TaskContext) error {
 	return t.RunFn(ctx, scope)
 }
 

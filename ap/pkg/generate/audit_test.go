@@ -85,9 +85,9 @@ func TestRunAudit_DryRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := tasks.NewScope(tempDir, tempDir, r)
+	scope := tasks.NewTaskContext(tempDir, tempDir, r)
 
-	err = RunAudit(t.Context(), tempDir, []*tasks.APScope{scope}, AuditOptions{DryRun: true})
+	err = RunAudit(t.Context(), tempDir, []*tasks.TaskContext{scope}, AuditOptions{DryRun: true})
 	if err != nil {
 		t.Fatalf("RunAudit with DryRun failed: %v", err)
 	}
@@ -135,14 +135,14 @@ EOF
 	}
 
 	// Informational mode: should succeed (exit 0) and find generated_no_header.yaml
-	scope := tasks.NewScope(tempDir, tempDir, r)
-	err = RunAudit(t.Context(), tempDir, []*tasks.APScope{scope}, AuditOptions{Strict: false})
+	scope := tasks.NewTaskContext(tempDir, tempDir, r)
+	err = RunAudit(t.Context(), tempDir, []*tasks.TaskContext{scope}, AuditOptions{Strict: false})
 	if err != nil {
 		t.Fatalf("RunAudit (non-strict) failed: %v", err)
 	}
 
 	// Strict mode: should fail because finding exists
-	errStrict := RunAudit(t.Context(), tempDir, []*tasks.APScope{scope}, AuditOptions{Strict: true})
+	errStrict := RunAudit(t.Context(), tempDir, []*tasks.TaskContext{scope}, AuditOptions{Strict: true})
 	if errStrict == nil {
 		t.Fatalf("expected RunAudit (strict) to fail on unheadered generated file, got nil")
 	}
@@ -192,9 +192,9 @@ EOF
 		t.Fatal(err)
 	}
 
-	scope := tasks.NewScope(tempDir, tempDir, r)
+	scope := tasks.NewTaskContext(tempDir, tempDir, r)
 	// Strict mode should succeed because the generated file HAS a header!
-	err = RunAudit(t.Context(), tempDir, []*tasks.APScope{scope}, AuditOptions{Strict: true})
+	err = RunAudit(t.Context(), tempDir, []*tasks.TaskContext{scope}, AuditOptions{Strict: true})
 	if err != nil {
 		t.Fatalf("RunAudit (strict) failed unexpectedly: %v", err)
 	}

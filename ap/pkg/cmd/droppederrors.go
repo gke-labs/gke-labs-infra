@@ -192,5 +192,5 @@ func RunDroppedErrors(ctx context.Context, cmd *cobra.Command, opt DroppedErrors
 		return err
 	}
 
-	return task.Run(ctx, tasks.NewScope(repoRoot, cwd, r))
+	return task.Run(ctx, tasks.NewTaskContext(repoRoot, cwd, r))
 }

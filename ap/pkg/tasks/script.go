@@ -33,7 +33,7 @@ type TaskScript struct {
 	Root string
 }
 
-func (t *TaskScript) Run(ctx context.Context, scope *APScope) error {
+func (t *TaskScript) Run(ctx context.Context, scope *TaskContext) error {
 	klog.Infof("Running task: %s", t.Name)
 	cmd := exec.CommandContext(ctx, t.Path)
 	cmd.Dir = t.Root
@@ -42,8 +42,8 @@ func (t *TaskScript) Run(ctx context.Context, scope *APScope) error {
 		return fmt.Errorf("failed to prepare script environment for %s: %w", t.Name, err)
 	}
 	cmd.Env = env
-	cmd.Stdout = scope.GetStdout()
-	cmd.Stderr = scope.GetStderr()
+	cmd.Stdout = scope.Stdout()
+	cmd.Stderr = scope.Stderr()
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("task %s failed: %w", t.Name, err)
 	}

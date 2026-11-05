@@ -66,14 +66,14 @@ type Group struct {
 	maxWorkers      int
 }
 
-func (g *Group) Run(ctx context.Context, scope *APScope) error {
+func (g *Group) Run(ctx context.Context, scope *TaskContext) error {
 	if !g.Parallel {
 		return g.runSequential(ctx, scope)
 	}
 	return g.runParallel(ctx, scope)
 }
 
-func (g *Group) runSequential(ctx context.Context, scope *APScope) error {
+func (g *Group) runSequential(ctx context.Context, scope *TaskContext) error {
 	var errs []error
 	var failedNames []string
 	for _, t := range g.Tasks {
@@ -94,7 +94,7 @@ func (g *Group) runSequential(ctx context.Context, scope *APScope) error {
 	return nil
 }
 
-func (g *Group) runParallel(ctx context.Context, scope *APScope) error {
+func (g *Group) runParallel(ctx context.Context, scope *TaskContext) error {
 	if len(g.Tasks) == 0 {
 		return nil
 	}
@@ -139,7 +139,7 @@ func (g *Group) runParallel(ctx context.Context, scope *APScope) error {
 	var firstErr error
 
 	var printMu sync.Mutex
-	out := scope.GetStdout()
+	out := scope.Stdout()
 
 	var wg sync.WaitGroup
 	for w := 0; w < limit; w++ {
@@ -267,17 +267,19 @@ type RunOptions struct {
 }
 
 // Run executes a list of tasks.
-func Run(ctx context.Context, scope *APScope, ts []Task, opts RunOptions) error {
+func Run(ctx context.Context, scope *TaskContext, ts []Task, opts RunOptions) error {
 	if opts.DryRun {
-		out := scope.GetStdout()
+		out := scope.Stdout()
 		for _, task := range ts {
 			PrintTree(out, task, 0)
 		}
 		return nil
 	}
 	defer func() {
-		if saveErr := scope.SourceTree.Save(); saveErr != nil {
-			klog.V(2).Infof("failed to save sourcetree hash cache: %v", saveErr)
+		if scope != nil && scope.SourceTree() != nil {
+			if saveErr := scope.SourceTree().Save(); saveErr != nil {
+				klog.V(2).Infof("failed to save sourcetree hash cache: %v", saveErr)
+			}
 		}
 	}()
 	var errs []error

@@ -276,7 +276,7 @@ func TestGithubActionsWorkflowArtifactUpload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scopes := []*tasks.APScope{tasks.NewScope(root, root, r)}
+	scopes := []*tasks.TaskContext{tasks.NewTaskContext(root, root, r)}
 	if err := runGithubActionsGenerator(t.Context(), r, root, scopes); err != nil {
 		t.Fatalf("runGithubActionsGenerator: %v", err)
 	}
@@ -352,7 +352,7 @@ func TestGenerateTasks_DevTasks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scopes := []*tasks.APScope{tasks.NewScope(root, root, r)}
+	scopes := []*tasks.TaskContext{tasks.NewTaskContext(root, root, r)}
 
 	// 1. dev/tasks does not exist -> should succeed
 	task, err := GenerateTasks(root, scopes)
@@ -377,7 +377,7 @@ func TestGenerateTasks_DevTasks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scopes = []*tasks.APScope{tasks.NewScope(root, root, r)}
+	scopes = []*tasks.TaskContext{tasks.NewTaskContext(root, root, r)}
 
 	task, err = GenerateTasks(root, scopes)
 	if err != nil {
@@ -440,8 +440,8 @@ func TestGenerateIdempotence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope1 := tasks.NewScope(root, root, r1)
-	task1, err := GenerateTasks(root, []*tasks.APScope{scope1})
+	scope1 := tasks.NewTaskContext(root, root, r1)
+	task1, err := GenerateTasks(root, []*tasks.TaskContext{scope1})
 	if err != nil {
 		t.Fatalf("GenerateTasks run 1 failed: %v", err)
 	}
@@ -468,8 +468,8 @@ func TestGenerateIdempotence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope2 := tasks.NewScope(root, root, r2)
-	task2, err := GenerateTasks(root, []*tasks.APScope{scope2})
+	scope2 := tasks.NewTaskContext(root, root, r2)
+	task2, err := GenerateTasks(root, []*tasks.TaskContext{scope2})
 	if err != nil {
 		t.Fatalf("GenerateTasks run 2 failed: %v", err)
 	}
@@ -677,7 +677,7 @@ go run github.com/gke-labs/gke-labs-infra/ap@latest e2e .
 	}
 
 	// Create an active e2e task for the root
-	scope := tasks.NewScope(root, root, r)
+	scope := tasks.NewTaskContext(root, root, r)
 	scope.E2ETasks = []tasks.Task{
 		&tasks.TaskScript{
 			Name: "test-e2e",
@@ -687,7 +687,7 @@ go run github.com/gke-labs/gke-labs-infra/ap@latest e2e .
 	}
 
 	// Run ap-e2e generator
-	if err := runApE2eGenerator(t.Context(), r, root, []*tasks.APScope{scope}); err != nil {
+	if err := runApE2eGenerator(t.Context(), r, root, []*tasks.TaskContext{scope}); err != nil {
 		t.Fatalf("runApE2eGenerator failed: %v", err)
 	}
 
@@ -712,7 +712,7 @@ go run github.com/gke-labs/gke-labs-infra/ap@latest e2e .
 	}
 
 	// Verify that runGithubActionsGenerator includes both active and hand-coded jobs
-	if err := runGithubActionsGenerator(t.Context(), r, root, []*tasks.APScope{scope}); err != nil {
+	if err := runGithubActionsGenerator(t.Context(), r, root, []*tasks.TaskContext{scope}); err != nil {
 		t.Fatalf("runGithubActionsGenerator failed: %v", err)
 	}
 	workflowPath := filepath.Join(root, ".github", "workflows", "ci-presubmits.yaml")

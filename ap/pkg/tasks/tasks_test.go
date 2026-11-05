@@ -78,25 +78,37 @@ func TestFindTaskScripts(t *testing.T) {
 	}
 }
 
-func TestAPScopeSourceTree(t *testing.T) {
+func TestTaskContextSourceTree(t *testing.T) {
 	tmpDir := t.TempDir()
 	tree, err := sourcetree.Open(tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := NewScope(tmpDir, tmpDir, tree)
-	if scope.SourceTree != tree {
-		t.Fatalf("SourceTree = %v, want %v", scope.SourceTree, tree)
+	scope := NewTaskContext(tmpDir, tmpDir, tree)
+	if scope.SourceTree() != tree {
+		t.Fatalf("SourceTree() = %v, want %v", scope.SourceTree(), tree)
+	}
+	if scope.RepoRoot() != tmpDir {
+		t.Fatalf("RepoRoot() = %q, want %q", scope.RepoRoot(), tmpDir)
+	}
+	if scope.Dir() != tmpDir {
+		t.Fatalf("Dir() = %q, want %q", scope.Dir(), tmpDir)
+	}
+	if scope.Stdout() != os.Stdout {
+		t.Fatalf("Stdout() = %v, want %v", scope.Stdout(), os.Stdout)
+	}
+	if scope.Stderr() != os.Stderr {
+		t.Fatalf("Stderr() = %v, want %v", scope.Stderr(), os.Stderr)
 	}
 
-	// NewScope must panic if tree is nil
+	// NewTaskContext must panic if tree is nil
 	defer func() {
 		r := recover()
 		if r == nil {
 			t.Errorf("expected panic when tree is nil, got nil")
 		}
 	}()
-	_ = NewScope(tmpDir, tmpDir, nil)
+	_ = NewTaskContext(tmpDir, tmpDir, nil)
 }
 
 func TestGroupRun_ContinueOnError(t *testing.T) {
@@ -111,21 +123,21 @@ func TestGroupRun_ContinueOnError(t *testing.T) {
 		Tasks: []Task{
 			&FuncTask{
 				Name: "check-a",
-				RunFn: func(ctx context.Context, scope *APScope) error {
+				RunFn: func(ctx context.Context, scope *TaskContext) error {
 					ranA = true
 					return errA
 				},
 			},
 			&FuncTask{
 				Name: "check-b",
-				RunFn: func(ctx context.Context, scope *APScope) error {
+				RunFn: func(ctx context.Context, scope *TaskContext) error {
 					ranB = true
 					return nil
 				},
 			},
 			&FuncTask{
 				Name: "check-c",
-				RunFn: func(ctx context.Context, scope *APScope) error {
+				RunFn: func(ctx context.Context, scope *TaskContext) error {
 					ranC = true
 					return errC
 				},
@@ -138,7 +150,7 @@ func TestGroupRun_ContinueOnError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := NewScope(t.TempDir(), t.TempDir(), tree)
+	scope := NewTaskContext(t.TempDir(), t.TempDir(), tree)
 	err = group.Run(ctx, scope)
 	if err == nil {
 		t.Fatalf("expected error from Group.Run(), got nil")
@@ -176,14 +188,14 @@ func TestGroupRun_FailFast(t *testing.T) {
 		Tasks: []Task{
 			&FuncTask{
 				Name: "task-a",
-				RunFn: func(ctx context.Context, scope *APScope) error {
+				RunFn: func(ctx context.Context, scope *TaskContext) error {
 					ranA = true
 					return errA
 				},
 			},
 			&FuncTask{
 				Name: "task-b",
-				RunFn: func(ctx context.Context, scope *APScope) error {
+				RunFn: func(ctx context.Context, scope *TaskContext) error {
 					ranB = true
 					return errB
 				},
@@ -196,7 +208,7 @@ func TestGroupRun_FailFast(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := NewScope(t.TempDir(), t.TempDir(), tree)
+	scope := NewTaskContext(t.TempDir(), t.TempDir(), tree)
 	err = group.Run(ctx, scope)
 	if err == nil {
 		t.Fatalf("expected error from Group.Run(), got nil")
@@ -221,14 +233,14 @@ func TestTasksRun_ContinueOnError(t *testing.T) {
 	ts := []Task{
 		&FuncTask{
 			Name: "t1",
-			RunFn: func(ctx context.Context, scope *APScope) error {
+			RunFn: func(ctx context.Context, scope *TaskContext) error {
 				ran1 = true
 				return err1
 			},
 		},
 		&FuncTask{
 			Name: "t2",
-			RunFn: func(ctx context.Context, scope *APScope) error {
+			RunFn: func(ctx context.Context, scope *TaskContext) error {
 				ran2 = true
 				return err2
 			},
@@ -240,7 +252,7 @@ func TestTasksRun_ContinueOnError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := NewScope(t.TempDir(), t.TempDir(), tree)
+	scope := NewTaskContext(t.TempDir(), t.TempDir(), tree)
 
 	// Test fail-fast
 	err = Run(ctx, scope, ts, RunOptions{ContinueOnError: false})
@@ -294,7 +306,7 @@ func TestTaskScript_ResolvesApOnPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ts.Run(t.Context(), NewScope(tmpDir, tmpDir, tree)); err != nil {
+	if err := ts.Run(t.Context(), NewTaskContext(tmpDir, tmpDir, tree)); err != nil {
 		t.Fatalf("task run failed: %v", err)
 	}
 
@@ -338,7 +350,7 @@ func TestTaskScript_ResolvesToolsOnPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ts.Run(t.Context(), NewScope(tmpDir, tmpDir, tree)); err != nil {
+	if err := ts.Run(t.Context(), NewTaskContext(tmpDir, tmpDir, tree)); err != nil {
 		t.Fatalf("task run failed: %v", err)
 	}
 
@@ -374,7 +386,7 @@ func TestParallelGroup(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		scope := NewScope(t.TempDir(), t.TempDir(), tree).WithOutput(&outBuf, &outBuf)
+		scope := NewTaskContext(t.TempDir(), t.TempDir(), tree).WithOutput(&outBuf, &outBuf)
 
 		recordActive := func() func() {
 			curr := atomic.AddInt64(&activeCount, 1)
@@ -396,7 +408,7 @@ func TestParallelGroup(t *testing.T) {
 			Tasks: []Task{
 				&FuncTask{
 					Name: "task-0",
-					RunFn: func(ctx context.Context, s *APScope) error {
+					RunFn: func(ctx context.Context, s *TaskContext) error {
 						done := recordActive()
 						defer done()
 						close(startTask0)
@@ -404,32 +416,32 @@ func TestParallelGroup(t *testing.T) {
 						<-startTask1
 						// Wait for permission to finish (after task 1 has finished)
 						<-allowTask0Finish
-						fmt.Fprintln(s.GetStdout(), "stdout line from task 0")
-						fmt.Fprintln(s.GetStderr(), "stderr line from task 0")
+						fmt.Fprintln(s.Stdout(), "stdout line from task 0")
+						fmt.Fprintln(s.Stderr(), "stderr line from task 0")
 						return nil
 					},
 				},
 				&FuncTask{
 					Name: "task-1",
-					RunFn: func(ctx context.Context, s *APScope) error {
+					RunFn: func(ctx context.Context, s *TaskContext) error {
 						done := recordActive()
 						defer done()
 						// Wait for task 0 to start
 						<-startTask0
 						close(startTask1)
 						<-allowTask1Finish
-						fmt.Fprintln(s.GetStdout(), "stdout line from task 1")
-						fmt.Fprintln(s.GetStderr(), "stderr line from task 1")
+						fmt.Fprintln(s.Stdout(), "stdout line from task 1")
+						fmt.Fprintln(s.Stderr(), "stderr line from task 1")
 						return nil
 					},
 				},
 				&FuncTask{
 					Name: "task-2",
-					RunFn: func(ctx context.Context, s *APScope) error {
+					RunFn: func(ctx context.Context, s *TaskContext) error {
 						done := recordActive()
 						defer done()
 						<-allowTask2Finish
-						fmt.Fprintln(s.GetStdout(), "output from task 2")
+						fmt.Fprintln(s.Stdout(), "output from task 2")
 						return nil
 					},
 				},
@@ -516,7 +528,7 @@ func TestParallelGroup(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		scope := NewScope(t.TempDir(), t.TempDir(), tree).WithOutput(&outBuf, &outBuf)
+		scope := NewTaskContext(t.TempDir(), t.TempDir(), tree).WithOutput(&outBuf, &outBuf)
 
 		g := &Group{
 			Name:            "test-cancel-group",
@@ -526,16 +538,16 @@ func TestParallelGroup(t *testing.T) {
 			Tasks: []Task{
 				&FuncTask{
 					Name: "task-0",
-					RunFn: func(ctx context.Context, s *APScope) error {
+					RunFn: func(ctx context.Context, s *TaskContext) error {
 						// Wait for task 1 to be actively running
 						<-task1Started
-						fmt.Fprintln(s.GetStderr(), "task-0 failed details")
+						fmt.Fprintln(s.Stderr(), "task-0 failed details")
 						return errFail
 					},
 				},
 				&FuncTask{
 					Name: "task-1",
-					RunFn: func(ctx context.Context, s *APScope) error {
+					RunFn: func(ctx context.Context, s *TaskContext) error {
 						close(task1Started)
 						// Wait for context cancellation
 						<-ctx.Done()
@@ -545,7 +557,7 @@ func TestParallelGroup(t *testing.T) {
 				},
 				&FuncTask{
 					Name: "task-2",
-					RunFn: func(ctx context.Context, s *APScope) error {
+					RunFn: func(ctx context.Context, s *TaskContext) error {
 						task2Ran.Store(true)
 						return nil
 					},
@@ -590,7 +602,7 @@ func TestParallelGroup(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		scope := NewScope(t.TempDir(), t.TempDir(), tree).WithOutput(&outBuf, &outBuf)
+		scope := NewTaskContext(t.TempDir(), t.TempDir(), tree).WithOutput(&outBuf, &outBuf)
 
 		g := &Group{
 			Name:            "test-continue-group",
@@ -599,25 +611,25 @@ func TestParallelGroup(t *testing.T) {
 			Tasks: []Task{
 				&FuncTask{
 					Name: "task-a",
-					RunFn: func(ctx context.Context, s *APScope) error {
+					RunFn: func(ctx context.Context, s *TaskContext) error {
 						ranA.Store(true)
-						fmt.Fprintln(s.GetStderr(), "task-a error output")
+						fmt.Fprintln(s.Stderr(), "task-a error output")
 						return errA
 					},
 				},
 				&FuncTask{
 					Name: "task-b",
-					RunFn: func(ctx context.Context, s *APScope) error {
+					RunFn: func(ctx context.Context, s *TaskContext) error {
 						ranB.Store(true)
-						fmt.Fprintln(s.GetStdout(), "task-b ok output")
+						fmt.Fprintln(s.Stdout(), "task-b ok output")
 						return nil
 					},
 				},
 				&FuncTask{
 					Name: "task-c",
-					RunFn: func(ctx context.Context, s *APScope) error {
+					RunFn: func(ctx context.Context, s *TaskContext) error {
 						ranC.Store(true)
-						fmt.Fprintln(s.GetStderr(), "task-c error output")
+						fmt.Fprintln(s.Stderr(), "task-c error output")
 						return errC
 					},
 				},

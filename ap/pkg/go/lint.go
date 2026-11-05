@@ -46,12 +46,12 @@ type GoVetTask struct {
 	Dir string
 }
 
-func (t *GoVetTask) Run(ctx context.Context, scope *tasks.APScope) error {
+func (t *GoVetTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
 	klog.Infof("Running go vet in %s", t.Dir)
 	vetCmd := exec.CommandContext(ctx, "go", "vet", "./...")
 	vetCmd.Dir = t.Dir
-	vetCmd.Stdout = scope.GetStdout()
-	vetCmd.Stderr = scope.GetStderr()
+	vetCmd.Stdout = scope.Stdout()
+	vetCmd.Stderr = scope.Stderr()
 	if err := vetCmd.Run(); err != nil {
 		return fmt.Errorf("go vet failed in %s: %w", t.Dir, err)
 	}
@@ -71,12 +71,12 @@ type GovulncheckTask struct {
 	Dir string
 }
 
-func (t *GovulncheckTask) Run(ctx context.Context, scope *tasks.APScope) error {
+func (t *GovulncheckTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
 	klog.Infof("Running govulncheck in %s", t.Dir)
 	vulnCmd := exec.CommandContext(ctx, "go", "run", "golang.org/x/vuln/cmd/govulncheck@latest", "./...")
 	vulnCmd.Dir = t.Dir
-	vulnCmd.Stdout = scope.GetStdout()
-	vulnCmd.Stderr = scope.GetStderr()
+	vulnCmd.Stdout = scope.Stdout()
+	vulnCmd.Stderr = scope.Stderr()
 	if err := vulnCmd.Run(); err != nil {
 		return fmt.Errorf("govulncheck failed in %s: %w", t.Dir, err)
 	}
@@ -138,7 +138,7 @@ func (t *AnalyzersTask) Types(name string) []string {
 	return nil
 }
 
-func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.APScope) error {
+func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
 	klog.Infof("Running analyzers in %s", t.Dir)
 
 	if len(t.Analyzers) == 0 {
@@ -190,7 +190,7 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.APScope) error {
 		var pkgErrors int
 		for _, pkg := range pkgs {
 			for _, err := range pkg.Errors {
-				if _, writeErr := fmt.Fprintln(scope.GetStderr(), err); writeErr != nil {
+				if _, writeErr := fmt.Fprintln(scope.Stderr(), err); writeErr != nil {
 					klog.V(2).Infof("failed to write package error: %v", writeErr)
 				}
 				pkgErrors++
@@ -297,8 +297,8 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.APScope) error {
 			WriteBaseline:   t.WriteBaseline,
 			AllCheckedFiles: allCheckedFiles,
 			Mode:            mode,
-			Stdout:          scope.GetStdout(),
-			Stderr:          scope.GetStderr(),
+			Stdout:          scope.Stdout(),
+			Stderr:          scope.Stderr(),
 		})
 		if err != nil {
 			errs = append(errs, err)
@@ -482,7 +482,7 @@ func Lint(ctx context.Context, r *sourcetree.SourceTree, root string) error {
 	if err != nil {
 		return err
 	}
-	return tasks.Run(ctx, tasks.NewScope(root, root, r), []tasks.Task{task}, tasks.RunOptions{})
+	return tasks.Run(ctx, tasks.NewTaskContext(root, root, r), []tasks.Task{task}, tasks.RunOptions{})
 }
 
 // hasGoFiles returns true if the directory or any of its subdirectories

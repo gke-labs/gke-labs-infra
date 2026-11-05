@@ -34,13 +34,13 @@ type CodestyleTask struct {
 	Files []string
 }
 
-func (t *CodestyleTask) Run(ctx context.Context, scope *tasks.APScope) error {
+func (t *CodestyleTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
 	klog.Infof("Running codestyle in %s...", t.Root)
-	r := scope.SourceTree
+	r := scope.SourceTree()
 	if err := fileheaders.Run(ctx, r, t.Root, t.Files); err != nil {
 		return fmt.Errorf("fileheaders failed in %s: %w", t.Root, err)
 	}
-	if err := gostyle.Run(ctx, r, t.Root, t.Files, scope.GetStdout(), scope.GetStderr()); err != nil {
+	if err := gostyle.Run(ctx, r, t.Root, t.Files, scope.Stdout(), scope.Stderr()); err != nil {
 		return fmt.Errorf("gostyle failed in %s: %w", t.Root, err)
 	}
 	return nil
@@ -60,17 +60,17 @@ type LegacyFormatScriptTask struct {
 	Path string
 }
 
-func (t *LegacyFormatScriptTask) Run(ctx context.Context, scope *tasks.APScope) error {
+func (t *LegacyFormatScriptTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
 	klog.Infof("Running legacy format script: %s", t.Name)
 	cmd := exec.CommandContext(ctx, t.Path)
-	cmd.Dir = scope.Dir
+	cmd.Dir = scope.Dir()
 	env, err := scope.ScriptEnv()
 	if err != nil {
 		return fmt.Errorf("failed to prepare script environment for %s: %w", t.Name, err)
 	}
 	cmd.Env = env
-	cmd.Stdout = scope.GetStdout()
-	cmd.Stderr = scope.GetStderr()
+	cmd.Stdout = scope.Stdout()
+	cmd.Stderr = scope.Stderr()
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to run %s: %w", t.Name, err)
 	}
@@ -119,5 +119,5 @@ func Run(ctx context.Context, r *sourcetree.SourceTree, root string) error {
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, tasks.NewScope(root, root, r))
+	return t.Run(ctx, tasks.NewTaskContext(root, root, r))
 }

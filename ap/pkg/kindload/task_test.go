@@ -147,7 +147,7 @@ func TestKindLoadTask_Run(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		scope := tasks.NewScope(tempDir, tempDir, tree)
+		scope := tasks.NewTaskContext(tempDir, tempDir, tree)
 		task := &KindLoadTask{
 			ClusterName: "test-cluster",
 			Images:      nil,
@@ -192,7 +192,7 @@ exit 0
 		if err != nil {
 			t.Fatal(err)
 		}
-		scope := tasks.NewScope(tempDir, tempDir, tree)
+		scope := tasks.NewTaskContext(tempDir, tempDir, tree)
 
 		if err := task.Run(t.Context(), scope); err != nil {
 			t.Fatalf("task.Run failed: %v", err)

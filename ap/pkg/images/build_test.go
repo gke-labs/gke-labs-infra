@@ -480,7 +480,7 @@ func TestDockerBuildTask_Platforms(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := tasks.NewScope(tmpDir, tmpDir, r)
+	scope := tasks.NewTaskContext(tmpDir, tmpDir, r)
 
 	calls = nil
 	if err := task.Run(t.Context(), scope); err != nil {
@@ -807,7 +807,7 @@ func TestDockerBuildTask_ToolDocker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := tasks.NewScope(tmpDir, tmpDir, r)
+	scope := tasks.NewTaskContext(tmpDir, tmpDir, r)
 
 	if err := task.Run(t.Context(), scope); err != nil {
 		t.Fatalf("unexpected error running task: %v", err)

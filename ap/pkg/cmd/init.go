@@ -170,7 +170,7 @@ func RunInit(ctx context.Context, opt InitOptions) error {
 				return err
 			}
 		}
-		scopes := []*tasks.APScope{tasks.NewScope(repoRoot, targetDir, tree)}
+		scopes := []*tasks.TaskContext{tasks.NewTaskContext(repoRoot, targetDir, tree)}
 		if opt.Generate {
 			genTasks, err := generate.GenerateTasks(repoRoot, scopes)
 			if err == nil && genTasks != nil {
@@ -180,7 +180,7 @@ func RunInit(ctx context.Context, opt InitOptions) error {
 	}
 
 	if opt.DryRun {
-		return tasks.Run(ctx, tasks.NewScope(targetDir, targetDir, tree), allTasks, tasks.RunOptions{DryRun: true})
+		return tasks.Run(ctx, tasks.NewTaskContext(targetDir, targetDir, tree), allTasks, tasks.RunOptions{DryRun: true})
 	}
 
 	if err := task.Run(ctx, nil); err != nil {
