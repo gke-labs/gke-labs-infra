@@ -15,8 +15,12 @@
 package tasks
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"os"
+	"sync"
 	"time"
 
 	"k8s.io/klog/v2"
@@ -71,7 +75,54 @@ func (r *RetryableTask) WithChildren(children []Task) Task {
 }
 
 // RunTask executes a single task, retrying if it implements Retryable according to its RetryPolicy.
+// Leaf tasks (no children) run with buffered output printed on failure or at -v=1.
+// Group tasks aggregate their children and do not buffer directly.
 func RunTask(ctx context.Context, scope *TaskContext, task Task) error {
+	if len(task.GetChildren()) > 0 {
+		return runTaskWithRetry(ctx, scope, task)
+	}
+	return runLeafTask(ctx, scope, task)
+}
+
+var runnerMu sync.Mutex
+
+func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
+	buf := &syncBuffer{}
+	var taskScope *TaskContext
+	var out io.Writer = os.Stdout
+	if scope != nil {
+		taskScope = scope.WithOutput(buf, buf)
+		out = scope.Stdout()
+	}
+
+	start := time.Now()
+	err := runTaskWithRetry(ctx, taskScope, task)
+	duration := time.Since(start)
+
+	status := "ok"
+	if err != nil {
+		status = "FAILED"
+	}
+
+	runnerMu.Lock()
+	defer runnerMu.Unlock()
+
+	writef(out, "=== %s (%s, %.1fs)\n", task.GetName(), status, duration.Seconds())
+	if err != nil || klog.V(1).Enabled() {
+		output := buf.Bytes()
+		if len(output) > 0 {
+			if _, writeErr := out.Write(output); writeErr != nil {
+				klog.V(2).Infof("failed to write task output: %v", writeErr)
+			}
+			if !bytes.HasSuffix(output, []byte("\n")) {
+				writef(out, "\n")
+			}
+		}
+	}
+	return err
+}
+
+func runTaskWithRetry(ctx context.Context, scope *TaskContext, task Task) error {
 	var policy RetryPolicy
 	if r, ok := task.(Retryable); ok {
 		policy = r.RetryPolicy()

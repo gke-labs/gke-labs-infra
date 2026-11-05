@@ -269,6 +269,10 @@ Run `go run ap/main.go` or build the binary.
 ap <command>
 ```
 
+### Task Output
+
+Every leaf task runs with buffered stdout/stderr. At default verbosity, `ap` prints a single status line per task (`=== <name> (ok|FAILED, 1.2s)`) and prints captured output only for tasks that failed. Use `-v=1` (or higher) to also print the output of successful tasks.
+
 Commands:
 - `init`: Initialize `.ap/` configuration for a repository
 - `ls`: List discovered tasks under the selected subtree

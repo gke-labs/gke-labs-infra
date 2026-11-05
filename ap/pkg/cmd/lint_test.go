@@ -16,6 +16,7 @@ package cmd
 
 import (
 	"bytes"
+	"flag"
 	"io"
 	"os"
 	"path/filepath"
@@ -23,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/baseline"
+	"k8s.io/klog/v2"
 )
 
 func TestRunLint_UnknownKeyFails(t *testing.T) {
@@ -193,7 +195,12 @@ func main() {
 		t.Fatal(err)
 	}
 
-	// Capture stdout to verify stale baseline entry report
+	// Capture stdout with verbosity -v=1 to verify stale baseline entry report for passing task
+	fs := flag.NewFlagSet("klog", flag.ContinueOnError)
+	klog.InitFlags(fs)
+	_ = fs.Set("v", "1")
+	defer fs.Set("v", "0")
+
 	oldStdout := os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {

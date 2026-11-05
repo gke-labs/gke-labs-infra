@@ -20,10 +20,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
-	"time"
 
 	"k8s.io/klog/v2"
 )
@@ -87,7 +87,11 @@ func (g *Group) runSequential(ctx context.Context, scope *TaskContext) error {
 	}
 	if len(errs) > 0 {
 		if len(g.Tasks) > 1 {
-			klog.Errorf("%s: %d of %d failed: %s", g.Name, len(failedNames), len(g.Tasks), strings.Join(failedNames, ", "))
+			var out io.Writer = os.Stdout
+			if scope != nil {
+				out = scope.Stdout()
+			}
+			writef(out, "%s: %d of %d failed: %s\n", g.Name, len(failedNames), len(g.Tasks), strings.Join(failedNames, ", "))
 		}
 		return errors.Join(errs...)
 	}
@@ -119,11 +123,7 @@ func (g *Group) runParallel(ctx context.Context, scope *TaskContext) error {
 	}
 
 	type taskResult struct {
-		index    int
-		task     Task
-		duration time.Duration
-		output   []byte
-		err      error
+		err error
 	}
 
 	taskCh := make(chan taskItem, len(g.Tasks))
@@ -138,9 +138,6 @@ func (g *Group) runParallel(ctx context.Context, scope *TaskContext) error {
 	var firstErrMu sync.Mutex
 	var firstErr error
 
-	var printMu sync.Mutex
-	out := scope.Stdout()
-
 	var wg sync.WaitGroup
 	for w := 0; w < limit; w++ {
 		wg.Add(1)
@@ -153,42 +150,11 @@ func (g *Group) runParallel(ctx context.Context, scope *TaskContext) error {
 				default:
 				}
 
-				buf := &syncBuffer{}
-				taskScope := scope.WithOutput(buf, buf)
-
-				start := time.Now()
-				err := RunTask(runCtx, taskScope, item.task)
-				duration := time.Since(start)
-
-				output := buf.Bytes()
-				res := &taskResult{
-					index:    item.index,
-					task:     item.task,
-					duration: duration,
-					output:   output,
-					err:      err,
-				}
+				err := RunTask(runCtx, scope, item.task)
 
 				resultsMu.Lock()
-				results[item.index] = res
+				results[item.index] = &taskResult{err: err}
 				resultsMu.Unlock()
-
-				status := "ok"
-				if err != nil {
-					status = "FAILED"
-				}
-
-				printMu.Lock()
-				writef(out, "=== %s (%s, %.1fs)\n", item.task.GetName(), status, duration.Seconds())
-				if len(output) > 0 {
-					if _, err := out.Write(output); err != nil {
-						klog.V(2).Infof("failed to write task output: %v", err)
-					}
-					if !bytes.HasSuffix(output, []byte("\n")) {
-						writef(out, "\n")
-					}
-				}
-				printMu.Unlock()
 
 				if err != nil {
 					firstErrMu.Lock()
@@ -207,11 +173,10 @@ func (g *Group) runParallel(ctx context.Context, scope *TaskContext) error {
 
 	wg.Wait()
 
-	var failedResults []*taskResult
 	var errs []error
 	var failedNames []string
 
-	for _, res := range results {
+	for i, res := range results {
 		if res == nil {
 			continue
 		}
@@ -219,27 +184,18 @@ func (g *Group) runParallel(ctx context.Context, scope *TaskContext) error {
 			if !g.ContinueOnError && errors.Is(res.err, context.Canceled) && !errors.Is(firstErr, context.Canceled) {
 				continue
 			}
-			failedResults = append(failedResults, res)
 			errs = append(errs, res.err)
-			failedNames = append(failedNames, strings.TrimSuffix(res.task.GetName(), "-check"))
+			failedNames = append(failedNames, strings.TrimSuffix(g.Tasks[i].GetName(), "-check"))
 		}
 	}
 
-	if len(failedResults) > 0 {
-		writef(out, "\n=== FAILURE SUMMARY ===\n")
-		for _, res := range failedResults {
-			writef(out, "=== %s (FAILED, %.1fs) ===\n", res.task.GetName(), res.duration.Seconds())
-			if len(res.output) > 0 {
-				if _, err := out.Write(res.output); err != nil {
-					klog.V(2).Infof("failed to write failure summary output: %v", err)
-				}
-				if !bytes.HasSuffix(res.output, []byte("\n")) {
-					writef(out, "\n")
-				}
-			}
-		}
+	if len(failedNames) > 0 {
 		if len(g.Tasks) > 1 {
-			klog.Errorf("%s: %d of %d failed: %s", g.Name, len(failedNames), len(g.Tasks), strings.Join(failedNames, ", "))
+			var out io.Writer = os.Stdout
+			if scope != nil {
+				out = scope.Stdout()
+			}
+			writef(out, "%s: %d of %d failed: %s\n", g.Name, len(failedNames), len(g.Tasks), strings.Join(failedNames, ", "))
 		}
 	}
 
