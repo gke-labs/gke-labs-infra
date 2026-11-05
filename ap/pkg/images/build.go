@@ -424,6 +424,12 @@ func (t *DockerBuildTask) GetChildren() []tasks.Task {
 	return nil
 }
 
+func (t *DockerBuildTask) SourcePath() string {
+	return filepath.Join(t.Root, t.Dockerfile)
+}
+
+var _ tasks.Sourced = (*DockerBuildTask)(nil)
+
 // FindImageNames returns the sorted names of all Docker images defined in the given root.
 func FindImageNames(r *sourcetree.SourceTree, root string) ([]string, error) {
 	dockerfiles, err := findDockerfiles(r, root)

@@ -217,3 +217,14 @@ func (t *PortForwardTask) GetName() string {
 func (t *PortForwardTask) GetChildren() []tasks.Task {
 	return []tasks.Task{t.Child}
 }
+
+func (t *PortForwardTask) WithChildren(children []tasks.Task) tasks.Task {
+	if len(children) == 0 {
+		return nil
+	}
+	cp := *t
+	cp.Child = children[0]
+	return &cp
+}
+
+var _ tasks.Parent = (*PortForwardTask)(nil)

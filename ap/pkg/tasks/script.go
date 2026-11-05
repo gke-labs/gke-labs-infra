@@ -58,6 +58,12 @@ func (t *TaskScript) GetChildren() []Task {
 	return nil
 }
 
+func (t *TaskScript) SourcePath() string {
+	return t.Path
+}
+
+var _ Sourced = (*TaskScript)(nil)
+
 type FindOptions struct {
 	Prefix        string
 	ExcludePrefix string
