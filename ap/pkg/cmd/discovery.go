@@ -28,45 +28,45 @@ import (
 )
 
 // DiscoverScopes discovers all tasks under the given directory subtree.
-func DiscoverScopes(r *sourcetree.SourceTree, repoRoot, dir string) ([]*tasks.APScope, error) {
+func DiscoverScopes(r *sourcetree.SourceTree, repoRoot, dir string) ([]*tasks.TaskContext, error) {
 	if dir == "" {
 		dir = repoRoot
 	}
 	if r != nil && dir != repoRoot && !r.DirExists(dir) && !r.FileExists(dir) {
 		return nil, nil
 	}
-	scope := tasks.NewScope(repoRoot, dir, r.Under(dir))
+	scope := tasks.NewTaskContext(repoRoot, dir, r.Under(dir))
 
 	// Discover e2e scripts
-	e2eScripts, err := tasks.FindTaskScripts(scope.SourceTree, dir, tasks.WithPrefix("test-e2e"))
+	e2eScripts, err := tasks.FindTaskScripts(scope.SourceTree(), dir, tasks.WithPrefix("test-e2e"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to discover e2e scripts in %s: %w", dir, err)
 	}
 	scope.E2ETasks = append(scope.E2ETasks, e2eScripts...)
 
 	// Discover test scripts
-	testScripts, err := tasks.FindTaskScripts(scope.SourceTree, dir, tasks.WithPrefix("test-"), tasks.WithExcludePrefix("test-e2e"))
+	testScripts, err := tasks.FindTaskScripts(scope.SourceTree(), dir, tasks.WithPrefix("test-"), tasks.WithExcludePrefix("test-e2e"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to discover test scripts in %s: %w", dir, err)
 	}
 	scope.TestTasks = append(scope.TestTasks, testScripts...)
 
 	// Discover build scripts
-	buildScripts, err := tasks.FindTaskScripts(scope.SourceTree, dir, tasks.WithPrefix("build-"))
+	buildScripts, err := tasks.FindTaskScripts(scope.SourceTree(), dir, tasks.WithPrefix("build-"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to discover build scripts in %s: %w", dir, err)
 	}
 	scope.BuildTasks = append(scope.BuildTasks, buildScripts...)
 
 	// Discover lint scripts
-	lintScripts, err := tasks.FindTaskScripts(scope.SourceTree, dir, tasks.WithPrefix("lint-"))
+	lintScripts, err := tasks.FindTaskScripts(scope.SourceTree(), dir, tasks.WithPrefix("lint-"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to discover lint scripts in %s: %w", dir, err)
 	}
 	scope.LintTasks = append(scope.LintTasks, lintScripts...)
 
 	// Discover format tasks
-	formatTasks, err := format.FormatTasks(scope.SourceTree, dir)
+	formatTasks, err := format.FormatTasks(scope.SourceTree(), dir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to discover format tasks in %s: %w", dir, err)
 	}
@@ -122,7 +122,7 @@ func DiscoverScopes(r *sourcetree.SourceTree, repoRoot, dir string) ([]*tasks.AP
 	}
 
 	// Go Test tasks
-	goTestTasks, err := golang.TestTasks(scope.SourceTree, dir)
+	goTestTasks, err := golang.TestTasks(scope.SourceTree(), dir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to discover test tasks in %s: %w", dir, err)
 	}
@@ -131,7 +131,7 @@ func DiscoverScopes(r *sourcetree.SourceTree, repoRoot, dir string) ([]*tasks.AP
 	}
 
 	// Go lint tasks
-	goLintTasks, err := golang.LintTasks(scope.SourceTree, dir)
+	goLintTasks, err := golang.LintTasks(scope.SourceTree(), dir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to discover lint tasks in %s: %w", dir, err)
 	}
@@ -140,7 +140,7 @@ func DiscoverScopes(r *sourcetree.SourceTree, repoRoot, dir string) ([]*tasks.AP
 	}
 
 	// Portability lint tasks
-	portabilityTask, err := portability.NewTask(scope.SourceTree, dir, repoRoot)
+	portabilityTask, err := portability.NewTask(scope.SourceTree(), dir, repoRoot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to discover portability task in %s: %w", dir, err)
 	}
@@ -148,5 +148,5 @@ func DiscoverScopes(r *sourcetree.SourceTree, repoRoot, dir string) ([]*tasks.AP
 		scope.LintTasks = append(scope.LintTasks, portabilityTask)
 	}
 
-	return []*tasks.APScope{scope}, nil
+	return []*tasks.TaskContext{scope}, nil
 }

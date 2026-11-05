@@ -54,7 +54,7 @@ func (r *RetryableTask) RetryPolicy() RetryPolicy {
 }
 
 // RunTask executes a single task, retrying if it implements Retryable according to its RetryPolicy.
-func RunTask(ctx context.Context, scope *APScope, task Task) error {
+func RunTask(ctx context.Context, scope *TaskContext, task Task) error {
 	var policy RetryPolicy
 	if r, ok := task.(Retryable); ok {
 		policy = r.RetryPolicy()

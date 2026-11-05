@@ -100,23 +100,23 @@ func TestSingleWalkPerInvocation(t *testing.T) {
 	// Step 3: Run all task discovery functions using scopes and shared tree
 	for _, scope := range scopes {
 		naming := images.ResolveImageNaming(nil)
-		if _, err := images.BuildTasks(scope.SourceTree, scope.Dir, false, "", naming); err != nil {
-			t.Fatalf("BuildTasks failed for %s: %v", scope.Dir, err)
+		if _, err := images.BuildTasks(scope.SourceTree(), scope.Dir(), false, "", naming); err != nil {
+			t.Fatalf("BuildTasks failed for %s: %v", scope.Dir(), err)
 		}
-		if _, err := k8s.DeployTasks(scope.SourceTree, scope.Dir); err != nil {
-			t.Fatalf("DeployTasks failed for %s: %v", scope.Dir, err)
+		if _, err := k8s.DeployTasks(scope.SourceTree(), scope.Dir()); err != nil {
+			t.Fatalf("DeployTasks failed for %s: %v", scope.Dir(), err)
 		}
-		if _, err := golang.LintTasks(scope.SourceTree, scope.Dir); err != nil {
-			t.Fatalf("LintTasks failed for %s: %v", scope.Dir, err)
+		if _, err := golang.LintTasks(scope.SourceTree(), scope.Dir()); err != nil {
+			t.Fatalf("LintTasks failed for %s: %v", scope.Dir(), err)
 		}
-		if _, err := golang.TestTasks(scope.SourceTree, scope.Dir); err != nil {
-			t.Fatalf("TestTasks failed for %s: %v", scope.Dir, err)
+		if _, err := golang.TestTasks(scope.SourceTree(), scope.Dir()); err != nil {
+			t.Fatalf("TestTasks failed for %s: %v", scope.Dir(), err)
 		}
-		if _, err := format.FormatTasks(scope.SourceTree, scope.Dir); err != nil {
-			t.Fatalf("FormatTasks failed for %s: %v", scope.Dir, err)
+		if _, err := format.FormatTasks(scope.SourceTree(), scope.Dir()); err != nil {
+			t.Fatalf("FormatTasks failed for %s: %v", scope.Dir(), err)
 		}
-		if _, err := tasks.FindTaskScripts(scope.SourceTree, scope.Dir); err != nil {
-			t.Fatalf("FindTaskScripts failed for %s: %v", scope.Dir, err)
+		if _, err := tasks.FindTaskScripts(scope.SourceTree(), scope.Dir()); err != nil {
+			t.Fatalf("FindTaskScripts failed for %s: %v", scope.Dir(), err)
 		}
 	}
 
@@ -180,8 +180,8 @@ func TestSkipUniformlyInvisibleToAllConsumers(t *testing.T) {
 		t.Fatalf("DiscoverScopes failed: %v", err)
 	}
 	for _, s := range scopes {
-		if s.Dir == ignoredDir {
-			t.Fatalf("DiscoverScopes discovered skipped directory %s", s.Dir)
+		if s.Dir() == ignoredDir {
+			t.Fatalf("DiscoverScopes discovered skipped directory %s", s.Dir())
 		}
 	}
 

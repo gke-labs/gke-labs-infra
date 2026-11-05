@@ -426,7 +426,7 @@ lint:
 		if at == nil {
 			t.Fatalf("expected AnalyzersTask to be found")
 		}
-		err = at.Run(t.Context(), tasks.NewScope(dir, dir, r))
+		err = at.Run(t.Context(), tasks.NewTaskContext(dir, dir, r))
 		if err == nil {
 			t.Fatalf("expected unused parameter violation, got nil")
 		}
@@ -455,7 +455,7 @@ lint:
 		if at == nil {
 			t.Fatalf("expected AnalyzersTask to be found")
 		}
-		err = at.Run(t.Context(), tasks.NewScope(dir, dir, r))
+		err = at.Run(t.Context(), tasks.NewTaskContext(dir, dir, r))
 		if err != nil {
 			t.Fatalf("expected no violation when unusedparameters is not enabled, got %v", err)
 		}
@@ -732,42 +732,42 @@ func TestLintTasks_GovulncheckAndDroppedErrorsBothReport(t *testing.T) {
 		Tasks: []tasks.Task{
 			&tasks.FuncTask{
 				Name: "go-vet",
-				RunFn: func(ctx context.Context, scope *tasks.APScope) error {
+				RunFn: func(ctx context.Context, scope *tasks.TaskContext) error {
 					ranVet = true
 					return nil
 				},
 			},
 			&tasks.FuncTask{
 				Name: "govulncheck",
-				RunFn: func(ctx context.Context, scope *tasks.APScope) error {
+				RunFn: func(ctx context.Context, scope *tasks.TaskContext) error {
 					ranVuln = true
 					return errVuln
 				},
 			},
 			&tasks.FuncTask{
 				Name: "unused-check",
-				RunFn: func(ctx context.Context, scope *tasks.APScope) error {
+				RunFn: func(ctx context.Context, scope *tasks.TaskContext) error {
 					ranUnused = true
 					return nil
 				},
 			},
 			&tasks.FuncTask{
 				Name: "testcontext-check",
-				RunFn: func(ctx context.Context, scope *tasks.APScope) error {
+				RunFn: func(ctx context.Context, scope *tasks.TaskContext) error {
 					ranTC = true
 					return nil
 				},
 			},
 			&tasks.FuncTask{
 				Name: "replace-empty-interface-with-any-check",
-				RunFn: func(ctx context.Context, scope *tasks.APScope) error {
+				RunFn: func(ctx context.Context, scope *tasks.TaskContext) error {
 					ranAny = true
 					return nil
 				},
 			},
 			&tasks.FuncTask{
 				Name: "droppederrors-check",
-				RunFn: func(ctx context.Context, scope *tasks.APScope) error {
+				RunFn: func(ctx context.Context, scope *tasks.TaskContext) error {
 					ranDropped = true
 					return errDropped
 				},
@@ -787,7 +787,7 @@ func TestLintTasks_GovulncheckAndDroppedErrorsBothReport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := tasks.NewScope(tmpDir, tmpDir, tree)
+	scope := tasks.NewTaskContext(tmpDir, tmpDir, tree)
 	err = outerGroup.Run(ctx, scope)
 	if err == nil {
 		t.Fatalf("expected error from outerGroup.Run(), got nil")
@@ -838,7 +838,7 @@ func TestLintTasks_PackageLoadError(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	err = task.Run(ctx, tasks.NewScope(dir, dir, r))
+	err = task.Run(ctx, tasks.NewTaskContext(dir, dir, r))
 	if err == nil {
 		t.Fatalf("expected task.Run to fail on package load error, got nil")
 	}
@@ -884,7 +884,7 @@ func TestLintTasks_MultiGOOS_LinuxOnDarwin(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	err = task.Run(ctx, tasks.NewScope(dir, dir, r))
+	err = task.Run(ctx, tasks.NewTaskContext(dir, dir, r))
 	if err == nil {
 		t.Fatalf("expected unused error in foo_linux.go to be reported on simulated darwin, got nil")
 	}
@@ -921,7 +921,7 @@ func TestLintTasks_MultiGOOS_SingleLoad(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	err = task.Run(ctx, tasks.NewScope(dir, dir, r))
+	err = task.Run(ctx, tasks.NewTaskContext(dir, dir, r))
 	if err != nil {
 		t.Fatalf("unexpected error from task.Run: %v", err)
 	}
@@ -972,7 +972,7 @@ func TestLintTasks_MultiGOOS_VendorIgnored(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	err = task.Run(ctx, tasks.NewScope(dir, dir, r))
+	err = task.Run(ctx, tasks.NewTaskContext(dir, dir, r))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1067,7 +1067,7 @@ func main() {
 	task.BaselinePath = baselinePath
 
 	ctx := t.Context()
-	scope := tasks.NewScope(dir, dir, r)
+	scope := tasks.NewTaskContext(dir, dir, r)
 	if err := task.Run(ctx, scope); err != nil {
 		t.Fatalf("write baseline failed: %v", err)
 	}

@@ -102,7 +102,7 @@ func RunGenerate(ctx context.Context, opt GenerateOptions) error {
 	allTasks = append(allTasks, generateTasks)
 
 	for _, scope := range scopes {
-		formatTasks, err := format.FormatTasks(scope.SourceTree, scope.Dir)
+		formatTasks, err := format.FormatTasks(scope.SourceTree(), scope.Dir())
 		if err != nil {
 			return err
 		}
@@ -120,5 +120,5 @@ func RunGenerate(ctx context.Context, opt GenerateOptions) error {
 		})
 	}
 
-	return tasks.Run(ctx, tasks.NewScope(opt.RepoRoot, opt.RepoRoot, r), allTasks, tasks.RunOptions{DryRun: opt.DryRun})
+	return tasks.Run(ctx, tasks.NewTaskContext(opt.RepoRoot, opt.RepoRoot, r), allTasks, tasks.RunOptions{DryRun: opt.DryRun})
 }

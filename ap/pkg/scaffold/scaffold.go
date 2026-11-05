@@ -39,7 +39,7 @@ type InitTask struct {
 }
 
 // Run executes the scaffold init task.
-func (t *InitTask) Run(ctx context.Context, scope *tasks.APScope) error {
+func (t *InitTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
 	return Init(t.Options)
 }
 

@@ -69,12 +69,12 @@ func RunE2e(ctx context.Context, opt E2eOptions) error {
 	for _, scope := range scopes {
 		if len(scope.E2ETasks) > 0 {
 			group := &tasks.Group{
-				Name:  fmt.Sprintf("e2e-%s", filepath.Base(scope.Dir)),
+				Name:  fmt.Sprintf("e2e-%s", filepath.Base(scope.Dir())),
 				Tasks: scope.E2ETasks,
 			}
 			allTasks = append(allTasks, group)
 		}
 	}
 
-	return tasks.Run(ctx, tasks.NewScope(opt.RepoRoot, opt.RepoRoot, r), allTasks, tasks.RunOptions{DryRun: opt.DryRun})
+	return tasks.Run(ctx, tasks.NewTaskContext(opt.RepoRoot, opt.RepoRoot, r), allTasks, tasks.RunOptions{DryRun: opt.DryRun})
 }

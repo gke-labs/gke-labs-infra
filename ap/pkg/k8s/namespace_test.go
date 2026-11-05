@@ -377,7 +377,7 @@ metadata:
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := tasks.NewScope(tempDir, tempDir, tree)
+	scope := tasks.NewTaskContext(tempDir, tempDir, tree)
 	err = task.Run(t.Context(), scope)
 	if err == nil {
 		t.Fatalf("expected error when namespace does not exist, got nil")

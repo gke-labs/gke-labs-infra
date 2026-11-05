@@ -40,7 +40,7 @@ type KindLoadTask struct {
 	Images []*imageref.ImageRef
 }
 
-func (t *KindLoadTask) Run(ctx context.Context, scope *tasks.APScope) error {
+func (t *KindLoadTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
 	if len(t.Images) == 0 {
 		return nil
 	}
@@ -50,13 +50,13 @@ func (t *KindLoadTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	}
 	root := t.RepoRoot
 	if root == "" && scope != nil {
-		root = scope.RepoRoot
+		root = scope.RepoRoot()
 	}
 	kindBin, err := ensureKind(ctx, root)
 	if err != nil {
 		return fmt.Errorf("failed to ensure kind tool: %w", err)
 	}
-	return LoadImages(ctx, kindBin, t.ClusterName, imagesToLoad, scope.GetStdout(), scope.GetStderr())
+	return LoadImages(ctx, kindBin, t.ClusterName, imagesToLoad, scope.Stdout(), scope.Stderr())
 }
 
 func (t *KindLoadTask) GetName() string {

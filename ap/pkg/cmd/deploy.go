@@ -458,7 +458,6 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		return err
 	}
 
-	scope := tasks.NewScope(opt.RepoRoot, opt.RepoRoot, r)
-	scope.KubectlBin = kubectlBin
+	scope := tasks.NewTaskContext(opt.RepoRoot, opt.RepoRoot, r)
 	return tasks.Run(ctx, scope, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
 }

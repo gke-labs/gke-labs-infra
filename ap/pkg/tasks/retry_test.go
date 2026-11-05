@@ -27,13 +27,13 @@ import (
 	"k8s.io/klog/v2"
 )
 
-func newTestScope(t *testing.T) *APScope {
+func newTestScope(t *testing.T) *TaskContext {
 	dir := t.TempDir()
 	tree, err := sourcetree.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return NewScope(dir, dir, tree)
+	return NewTaskContext(dir, dir, tree)
 }
 
 type fakeRetryableTask struct {
@@ -44,7 +44,7 @@ type fakeRetryableTask struct {
 	err      error
 }
 
-func (t *fakeRetryableTask) Run(ctx context.Context, scope *APScope) error {
+func (t *fakeRetryableTask) Run(ctx context.Context, scope *TaskContext) error {
 	t.attempts++
 	if t.attempts <= t.failTill {
 		if t.err != nil {
@@ -262,7 +262,7 @@ func TestRunTask_Retry(t *testing.T) {
 		var ranCount int
 		task := &FuncTask{
 			Name: "plain-task",
-			RunFn: func(ctx context.Context, scope *APScope) error {
+			RunFn: func(ctx context.Context, scope *TaskContext) error {
 				ranCount++
 				return sentinelErr
 			},

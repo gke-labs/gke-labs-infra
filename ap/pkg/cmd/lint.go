@@ -76,7 +76,7 @@ func RunLint(ctx context.Context, opt LintOptions) error {
 	for _, scope := range scopes {
 		if len(scope.LintTasks) > 0 {
 			group := &tasks.Group{
-				Name:            fmt.Sprintf("lint-%s", filepath.Base(scope.Dir)),
+				Name:            fmt.Sprintf("lint-%s", filepath.Base(scope.Dir())),
 				Tasks:           scope.LintTasks,
 				ContinueOnError: true,
 			}
@@ -90,5 +90,5 @@ func RunLint(ctx context.Context, opt LintOptions) error {
 		}
 	}
 
-	return tasks.Run(ctx, tasks.NewScope(opt.RepoRoot, opt.RepoRoot, r), allTasks, tasks.RunOptions{DryRun: opt.DryRun, ContinueOnError: true})
+	return tasks.Run(ctx, tasks.NewTaskContext(opt.RepoRoot, opt.RepoRoot, r), allTasks, tasks.RunOptions{DryRun: opt.DryRun, ContinueOnError: true})
 }

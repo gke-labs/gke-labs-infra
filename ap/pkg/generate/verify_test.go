@@ -169,9 +169,9 @@ generate:
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := tasks.NewScope(root, root, r)
+	scope := tasks.NewTaskContext(root, root, r)
 
-	files, err := FindGeneratedFiles(root, []*tasks.APScope{scope})
+	files, err := FindGeneratedFiles(root, []*tasks.TaskContext{scope})
 	if err != nil {
 		t.Fatalf("FindGeneratedFiles failed: %v", err)
 	}
@@ -228,16 +228,16 @@ func TestRunVerify_SuccessAndMtimePreservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := tasks.NewScope(root, root, r)
+	scope := tasks.NewTaskContext(root, root, r)
 
 	genTask := &tasks.FuncTask{
 		Name: "ap-test",
-		RunFn: func(_ context.Context, _ *tasks.APScope) error {
+		RunFn: func(_ context.Context, _ *tasks.TaskContext) error {
 			return fileutils.WriteFileAtomic(targetFile, []byte(initialContent), 0755)
 		},
 	}
 
-	err = RunVerify(ctx, root, []*tasks.APScope{scope}, []tasks.Task{genTask}, false)
+	err = RunVerify(ctx, root, []*tasks.TaskContext{scope}, []tasks.Task{genTask}, false)
 	if err != nil {
 		t.Fatalf("RunVerify failed unexpectedly: %v", err)
 	}
@@ -275,16 +275,16 @@ func TestRunVerify_UnrestoredMarkerDetected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := tasks.NewScope(root, root, r)
+	scope := tasks.NewTaskContext(root, root, r)
 
 	noopTask := &tasks.FuncTask{
 		Name: "ap-test",
-		RunFn: func(_ context.Context, _ *tasks.APScope) error {
+		RunFn: func(_ context.Context, _ *tasks.TaskContext) error {
 			return nil
 		},
 	}
 
-	err = RunVerify(ctx, root, []*tasks.APScope{scope}, []tasks.Task{noopTask}, false)
+	err = RunVerify(ctx, root, []*tasks.TaskContext{scope}, []tasks.Task{noopTask}, false)
 	if err == nil {
 		t.Fatalf("expected RunVerify to fail on unrestored marker")
 	}
@@ -318,16 +318,16 @@ func TestRunVerify_StaleMarkerDetected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := tasks.NewScope(root, root, r)
+	scope := tasks.NewTaskContext(root, root, r)
 
 	noopTask := &tasks.FuncTask{
 		Name: "ap-test",
-		RunFn: func(_ context.Context, _ *tasks.APScope) error {
+		RunFn: func(_ context.Context, _ *tasks.TaskContext) error {
 			return nil
 		},
 	}
 
-	err = RunVerify(ctx, root, []*tasks.APScope{scope}, []tasks.Task{noopTask}, false)
+	err = RunVerify(ctx, root, []*tasks.TaskContext{scope}, []tasks.Task{noopTask}, false)
 	if err == nil {
 		t.Fatalf("expected RunVerify to fail on stale marker")
 	}

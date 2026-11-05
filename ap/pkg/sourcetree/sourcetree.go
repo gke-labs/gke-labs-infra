@@ -16,7 +16,7 @@
 // (files, directories, modules, AP roots, and memoized hashes).
 //
 // Two fundamental rules govern sourcetree usage:
-//  1. One tree per command, held by the scope (APScope.SourceTree).
+//  1. One tree per command, held by the TaskContext (TaskContext.SourceTree()).
 //  2. Writes and external tool runs invalidate through it (#563).
 package sourcetree
 

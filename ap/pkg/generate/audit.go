@@ -70,7 +70,7 @@ type candidateFileInfo struct {
 
 // RunAudit performs the audit to find generated files lacking a generated-file header.
 // It executes in a scratch git worktree to avoid mutating the user's working copy.
-func RunAudit(ctx context.Context, repoRoot string, scopes []*tasks.APScope, opts AuditOptions) error {
+func RunAudit(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext, opts AuditOptions) error {
 	start := time.Now()
 
 	cfg, err := config.LoadAPConfig(repoRoot)
@@ -84,7 +84,7 @@ func RunAudit(ctx context.Context, repoRoot string, scopes []*tasks.APScope, opt
 	}
 
 	// 1. Identify candidate scopes
-	var targetScopes []*tasks.APScope
+	var targetScopes []*tasks.TaskContext
 	if len(scopes) > 0 {
 		targetScopes = scopes
 	}
@@ -92,7 +92,7 @@ func RunAudit(ctx context.Context, repoRoot string, scopes []*tasks.APScope, opt
 	// 2. Identify candidate files in live repo
 	var r *sourcetree.SourceTree
 	if len(targetScopes) > 0 {
-		r = targetScopes[0].SourceTree
+		r = targetScopes[0].SourceTree()
 	}
 
 	candidates, skippedUncommentable, err := findAuditCandidates(repoRoot, r, auditPaths)
@@ -178,14 +178,14 @@ func RunAudit(ctx context.Context, repoRoot string, scopes []*tasks.APScope, opt
 	}
 	allTasks := []tasks.Task{genTasks}
 	for _, sc := range scratchScopes {
-		formatTasks, err := format.FormatTasks(sc.SourceTree, sc.Dir)
+		formatTasks, err := format.FormatTasks(sc.SourceTree(), sc.Dir())
 		if err == nil && formatTasks != nil {
 			allTasks = append(allTasks, formatTasks)
 		}
 	}
 
 	var generatorErrors []string
-	runErr := tasks.Run(ctx, tasks.NewScope(scratchDir, scratchDir, scratchRepo), allTasks, tasks.RunOptions{
+	runErr := tasks.Run(ctx, tasks.NewTaskContext(scratchDir, scratchDir, scratchRepo), allTasks, tasks.RunOptions{
 		DryRun:          false,
 		ContinueOnError: true,
 	})
@@ -478,24 +478,24 @@ func copyFile(src, dst string, mode os.FileMode) (retErr error) {
 	return err
 }
 
-func discoverScratchScopes(r *sourcetree.SourceTree, scratchDir string) ([]*tasks.APScope, error) {
-	scope := tasks.NewScope(scratchDir, scratchDir, r.Under(scratchDir))
-	buildScripts, err := tasks.FindTaskScripts(scope.SourceTree, scratchDir, tasks.WithPrefix("build-"))
+func discoverScratchScopes(r *sourcetree.SourceTree, scratchDir string) ([]*tasks.TaskContext, error) {
+	scope := tasks.NewTaskContext(scratchDir, scratchDir, r.Under(scratchDir))
+	buildScripts, err := tasks.FindTaskScripts(scope.SourceTree(), scratchDir, tasks.WithPrefix("build-"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to find build scripts: %w", err)
 	}
 	scope.BuildTasks = append(scope.BuildTasks, buildScripts...)
 
-	e2eScripts, err := tasks.FindTaskScripts(scope.SourceTree, scratchDir, tasks.WithPrefix("test-e2e"))
+	e2eScripts, err := tasks.FindTaskScripts(scope.SourceTree(), scratchDir, tasks.WithPrefix("test-e2e"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to find e2e scripts: %w", err)
 	}
 	scope.E2ETasks = append(scope.E2ETasks, e2eScripts...)
 
-	return []*tasks.APScope{scope}, nil
+	return []*tasks.TaskContext{scope}, nil
 }
 
-func identifyGenerators(ctx context.Context, repoRoot string, scopes []*tasks.APScope) map[string]string {
+func identifyGenerators(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext) map[string]string {
 	outputs := make(map[string]string)
 	presubmitsDir := filepath.Join(repoRoot, "dev", "ci", "presubmits")
 	outputs[filepath.Join(presubmitsDir, "ap-verify-generate")] = "verify-generate"
@@ -518,7 +518,7 @@ func identifyGenerators(ctx context.Context, repoRoot string, scopes []*tasks.AP
 
 	var legacyGenerators []string
 	for _, sc := range scopes {
-		taskScripts, err := tasks.FindTaskScripts(sc.SourceTree, sc.Dir, tasks.WithPrefix("generate-"))
+		taskScripts, err := tasks.FindTaskScripts(sc.SourceTree(), sc.Dir(), tasks.WithPrefix("generate-"))
 		if err != nil {
 			continue
 		}

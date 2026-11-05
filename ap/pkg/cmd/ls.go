@@ -69,7 +69,7 @@ func RunLs(ctx context.Context, opt LsOptions) error {
 	}
 
 	for _, scope := range scopes {
-		dir := scope.Dir
+		dir := scope.Dir()
 		rel, err := filepath.Rel(opt.RepoRoot, dir)
 		name := rel
 		if err != nil {
@@ -87,7 +87,7 @@ func RunLs(ctx context.Context, opt LsOptions) error {
 			return fmt.Errorf("failed to load config: %w", err)
 		}
 		naming := images.ResolveImageNaming(cfg)
-		buildTasks, err := images.BuildTasks(scope.SourceTree, dir, false, "", naming)
+		buildTasks, err := images.BuildTasks(scope.SourceTree(), dir, false, "", naming)
 		if err == nil && buildTasks != nil {
 			all = append(all, buildTasks)
 		}

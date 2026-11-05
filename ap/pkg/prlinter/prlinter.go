@@ -30,7 +30,7 @@ type PRLintTask struct {
 	RepoRoot string
 }
 
-func (t *PRLintTask) Run(ctx context.Context, scope *tasks.APScope) error {
+func (t *PRLintTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
 	baseBranch, err := detectBaseBranch(ctx, t.RepoRoot)
 	if err != nil {
 		klog.V(2).Infof("Could not detect base branch: %v", err)
@@ -81,7 +81,7 @@ func Lint(ctx context.Context, repoRoot string) error {
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, tasks.NewScope(repoRoot, repoRoot, tree))
+	return t.Run(ctx, tasks.NewTaskContext(repoRoot, repoRoot, tree))
 }
 
 func detectBaseBranch(ctx context.Context, repoRoot string) (string, error) {

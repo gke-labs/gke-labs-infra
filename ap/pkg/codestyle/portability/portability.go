@@ -212,7 +212,7 @@ func NewTask(tree *sourcetree.SourceTree, dir, repoRoot string) (tasks.Task, err
 	}, nil
 }
 
-func (t *Task) Run(ctx context.Context, scope *tasks.APScope) error {
+func (t *Task) Run(ctx context.Context, scope *tasks.TaskContext) error {
 	allCheckedFiles := make(map[string]bool)
 	var allFindings []baseline.Finding
 
@@ -260,8 +260,8 @@ func (t *Task) Run(ctx context.Context, scope *tasks.APScope) error {
 		WriteBaseline:   t.WriteBaseline,
 		AllCheckedFiles: allCheckedFiles,
 		Mode:            string(t.Mode),
-		Stdout:          scope.GetStdout(),
-		Stderr:          scope.GetStderr(),
+		Stdout:          scope.Stdout(),
+		Stderr:          scope.Stderr(),
 	})
 	return err
 }

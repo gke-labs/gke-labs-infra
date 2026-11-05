@@ -98,8 +98,8 @@ type DockerBuildTask struct {
 	Naming       ImageNaming
 }
 
-func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.APScope) error {
-	imagesCfg, err := config.LoadImagesConfig(scope.RepoRoot)
+func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
+	imagesCfg, err := config.LoadImagesConfig(scope.RepoRoot())
 	if err != nil {
 		return err
 	}
@@ -107,7 +107,7 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.APScope) error {
 
 	naming := t.Naming
 	if naming.Tag == "" && naming.Prefix == "" {
-		cfg, err := config.Load(scope.RepoRoot)
+		cfg, err := config.Load(scope.RepoRoot())
 		if err != nil {
 			return err
 		}
@@ -131,7 +131,7 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	}
 	if buildxBin == "" {
 		var err error
-		buildxBin, err = ensureBuildx(ctx, scope.RepoRoot)
+		buildxBin, err = ensureBuildx(ctx, scope.RepoRoot())
 		if err != nil {
 			return fmt.Errorf("failed to ensure docker-buildx: %w", err)
 		}
@@ -139,7 +139,7 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.APScope) error {
 
 	dockerBin := t.DockerBin
 	if dockerBin == "" {
-		if d, err := ensureDocker(ctx, scope.RepoRoot); err == nil && d != "" {
+		if d, err := ensureDocker(ctx, scope.RepoRoot()); err == nil && d != "" {
 			dockerBin = d
 		} else {
 			dockerBin = "docker"
@@ -211,7 +211,7 @@ func (t *DockerBuildTask) supportsMultiPlatform(ctx context.Context, buildxBin s
 	return true
 }
 
-func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.APScope, root, fullImageName, relDockerfilePath string, naming ImageNaming, platforms []string) error {
+func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskContext, root, fullImageName, relDockerfilePath string, naming ImageNaming, platforms []string) error {
 	klog.Infof("Building image %s from %s using buildctl", fullImageName, root)
 
 	output := fmt.Sprintf("type=image,name=%s,push=%t", fullImageName, t.Push)
@@ -254,11 +254,11 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.APScope,
 		pfTask := &k8s.PortForwardTask{
 			Child: &tasks.FuncTask{
 				Name: "run-buildctl",
-				RunFn: func(ctx context.Context, scope *tasks.APScope) error {
+				RunFn: func(ctx context.Context, scope *tasks.TaskContext) error {
 					cmd := execCommandContext(ctx, "buildctl", buildctlArgs...)
 					cmd.Dir = root
-					cmd.Stdout = scope.GetStdout()
-					cmd.Stderr = scope.GetStderr()
+					cmd.Stdout = scope.Stdout()
+					cmd.Stderr = scope.Stderr()
 					cmd.Env = append(os.Environ(), "BUILDKIT_HOST=tcp://localhost:2375")
 					return cmd.Run()
 				},
@@ -268,17 +268,15 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.APScope,
 			LocalPort:  2375,
 			RemotePort: 2375,
 		}
-		childScope := *scope
-		childScope.RepoRoot = root
-		childScope.Dir = root
-		if err := pfTask.Run(ctx, &childScope); err != nil {
+		childScope := tasks.NewTaskContext(root, root, scope.SourceTree()).WithOutput(scope.Stdout(), scope.Stderr())
+		if err := pfTask.Run(ctx, childScope); err != nil {
 			return err
 		}
 	} else {
 		cmd := execCommandContext(ctx, "buildctl", buildctlArgs...)
 		cmd.Dir = root
-		cmd.Stdout = scope.GetStdout()
-		cmd.Stderr = scope.GetStderr()
+		cmd.Stdout = scope.Stdout()
+		cmd.Stderr = scope.Stderr()
 		cmd.Env = append(os.Environ(), "BUILDKIT_HOST="+t.BuildkitHost)
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("buildctl build failed for %s: %w", t.ImageName, err)
@@ -294,7 +292,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.APScope,
 	return nil
 }
 
-func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.APScope, buildxBin, dockerBin, root, fullImageName, actualImagePrefix, relDockerfilePath string, naming ImageNaming, platforms []string) error {
+func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContext, buildxBin, dockerBin, root, fullImageName, actualImagePrefix, relDockerfilePath string, naming ImageNaming, platforms []string) error {
 	klog.Infof("Building image %s from %s using docker buildx", fullImageName, root)
 
 	metaFile := filepath.Join(os.TempDir(), fmt.Sprintf("buildx-meta-%d.json", time.Now().UnixNano()))
@@ -331,8 +329,8 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.APScope, b
 
 	cmd := execCommandContext(ctx, buildxBin, args...)
 	cmd.Dir = root
-	cmd.Stdout = scope.GetStdout()
-	cmd.Stderr = scope.GetStderr()
+	cmd.Stdout = scope.Stdout()
+	cmd.Stderr = scope.Stderr()
 	cmd.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(buildxBin))
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("docker build failed for %s: %w", t.ImageName, err)
@@ -545,7 +543,7 @@ func Build(ctx context.Context, r *sourcetree.SourceTree, root string, push bool
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, tasks.NewScope(root, root, r))
+	return t.Run(ctx, tasks.NewTaskContext(root, root, r))
 }
 
 // HasImages returns true if there are any images to build under root.

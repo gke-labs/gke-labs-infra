@@ -408,7 +408,7 @@ type KubectlApplyTask struct {
 	KubectlBin        string
 }
 
-func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error {
+func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
 	kubectlBin := t.KubectlBin
 	if kubectlBin == "" && scope != nil {
 		var err error
@@ -423,7 +423,7 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error 
 
 	naming := t.Naming
 	if naming.Tag == "" && naming.Prefix == "" {
-		cfg, err := config.Load(scope.RepoRoot)
+		cfg, err := config.Load(scope.RepoRoot())
 		if err != nil {
 			return err
 		}
@@ -433,7 +433,7 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error 
 		}
 	}
 
-	relPath, err := filepath.Rel(scope.RepoRoot, t.ManifestPath)
+	relPath, err := filepath.Rel(scope.RepoRoot(), t.ManifestPath)
 	if err != nil {
 		return err
 	}
@@ -486,8 +486,8 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error 
 	applyArgs = append(applyArgs, "apply", "-f", "-")
 	cmd := exec.CommandContext(ctx, kubectlBin, applyArgs...)
 	cmd.Stdin = bytes.NewBufferString(replaced)
-	cmd.Stdout = scope.GetStdout()
-	cmd.Stderr = scope.GetStderr()
+	cmd.Stdout = scope.Stdout()
+	cmd.Stderr = scope.Stderr()
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("kubectl apply failed for %s: %w", relPath, err)
@@ -506,8 +506,8 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error 
 			}
 			waitArgs = append(waitArgs, "wait", "--for=condition=Established", "customresourcedefinition/"+name, "--timeout=60s")
 			waitCmd := exec.CommandContext(ctx, kubectlBin, waitArgs...)
-			waitCmd.Stdout = scope.GetStdout()
-			waitCmd.Stderr = scope.GetStderr()
+			waitCmd.Stdout = scope.Stdout()
+			waitCmd.Stderr = scope.Stderr()
 			if err := waitCmd.Run(); err != nil {
 				return fmt.Errorf("failed to wait for CRD %s: %w", name, err)
 			}
@@ -634,7 +634,7 @@ func Deploy(ctx context.Context, r *sourcetree.SourceTree, root string) error {
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, tasks.NewScope(root, root, r))
+	return t.Run(ctx, tasks.NewTaskContext(root, root, r))
 }
 
 func findManifests(r *sourcetree.SourceTree, root string) ([]string, error) {
