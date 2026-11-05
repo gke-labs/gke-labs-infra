@@ -61,6 +61,31 @@ func (opt *RootOptions) GetSourceTree() (*sourcetree.SourceTree, error) {
 	return r, nil
 }
 
+// resolveTarget resolves a single target path argument against the repository root and opt.Dir.
+func (opt *RootOptions) resolveTarget(r *sourcetree.SourceTree, target string) (string, error) {
+	baseDir := opt.Dir
+	if baseDir == "" {
+		baseDir = opt.RepoRoot
+	}
+
+	resolved := config.ResolveTargetPath(opt.RepoRoot, baseDir, target)
+	resolved = strings.TrimSuffix(resolved, string(filepath.Separator)+"...")
+	if resolved == opt.RepoRoot {
+		return opt.RepoRoot, nil
+	}
+
+	if !r.DirExists(resolved) && !r.FileExists(resolved) && resolved != opt.RepoRoot {
+		return "", fmt.Errorf("target path %q does not exist", target)
+	}
+
+	rel, err := filepath.Rel(opt.RepoRoot, resolved)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return "", fmt.Errorf("target path %q is outside repository root", target)
+	}
+
+	return resolved, nil
+}
+
 // Resolve resolves the target subtree path based on args.
 func (opt *RootOptions) Resolve(args []string) error {
 	if opt.RepoRoot == "" {
@@ -76,26 +101,9 @@ func (opt *RootOptions) Resolve(args []string) error {
 		return nil
 	}
 
-	baseDir := opt.Dir
-	if baseDir == "" {
-		baseDir = opt.RepoRoot
-	}
-
-	target := args[0]
-	resolved := config.ResolveTargetPath(opt.RepoRoot, baseDir, target)
-	resolved = strings.TrimSuffix(resolved, string(filepath.Separator)+"...")
-	if resolved == opt.RepoRoot {
-		opt.Dir = opt.RepoRoot
-		return nil
-	}
-
-	if !r.DirExists(resolved) && !r.FileExists(resolved) && resolved != opt.RepoRoot {
-		return fmt.Errorf("target path %q does not exist", target)
-	}
-
-	rel, err := filepath.Rel(opt.RepoRoot, resolved)
-	if err != nil || strings.HasPrefix(rel, "..") {
-		return fmt.Errorf("target path %q is outside repository root", target)
+	resolved, err := opt.resolveTarget(r, args[0])
+	if err != nil {
+		return err
 	}
 
 	opt.Dir = resolved
