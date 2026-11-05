@@ -74,7 +74,7 @@ skip:
   - "vendor/**"
 `,
 			files: map[string]string{
-				"sub/.ap/ap.yaml": `
+				"sub/.ap/go.yaml": `
 govulncheck:
   enabled: false
 `,
@@ -108,13 +108,13 @@ gofmt:
   enabled: true
 `,
 			files: map[string]string{
-				"sub1/.ap/ap.yaml": `
+				"sub1/.ap/go.yaml": `
 govulncheck:
   enabled: false
 govet:
   enabled: false
 `,
-				"sub1/sub2/.ap/ap.yaml": `
+				"sub1/sub2/.ap/go.yaml": `
 govulncheck:
   enabled: true
 `,
@@ -144,7 +144,7 @@ skip:
   - "build/**"
 `,
 			files: map[string]string{
-				"sub/.ap/ap.yaml": `
+				"sub/.ap/go.yaml": `
 skip:
   - "custom/**"
 `,
@@ -155,6 +155,34 @@ skip:
 				want := []string{"custom/**"}
 				if !reflect.DeepEqual(cfg.Skip, want) {
 					t.Errorf("expected skip %v, got %v", want, cfg.Skip)
+				}
+			},
+		},
+		{
+			name: "subtree ap.yaml with version is ignored",
+			baseGoYAML: `
+gofmt:
+  enabled: true
+govulncheck:
+  enabled: true
+`,
+			files: map[string]string{
+				"sub/.ap/ap.yaml": `
+version: latest
+`,
+				"sub/.ap/go.yaml": `
+govulncheck:
+  enabled: false
+`,
+				"sub/pkg/foo.go": "package pkg\n",
+			},
+			targetRelPath: "sub/pkg",
+			check: func(t *testing.T, cfg *Config) {
+				if cfg.IsGovulncheckEnabled() {
+					t.Errorf("expected govulncheck disabled")
+				}
+				if !cfg.IsGofmtEnabled() {
+					t.Errorf("expected gofmt enabled")
 				}
 			},
 		},
@@ -209,18 +237,18 @@ func TestEffective_UnknownKeyRejected(t *testing.T) {
 	if err := os.MkdirAll(subApDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(subApDir, "ap.yaml"), []byte("unknownKey: true\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(subApDir, "go.yaml"), []byte("unknownKey: true\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
 	_, err := Effective(repoRoot, subDir)
 	if err == nil {
-		t.Fatal("expected error parsing subtree ap.yaml with unknown key")
+		t.Fatal("expected error parsing subtree go.yaml with unknown key")
 	}
 	if !strings.Contains(err.Error(), "unknown key \"unknownKey\"") {
 		t.Errorf("expected error to mention unknown key, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), filepath.Join(subDir, ".ap", "ap.yaml")) {
+	if !strings.Contains(err.Error(), filepath.Join(subDir, ".ap", "go.yaml")) {
 		t.Errorf("expected error to mention file path, got: %v", err)
 	}
 }
@@ -255,7 +283,7 @@ lint:
     mode: warn
     baseline: .ap/local-baseline.txt
 `
-	if err := os.WriteFile(filepath.Join(subApDir, "ap.yaml"), []byte(subYAML), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(subApDir, "go.yaml"), []byte(subYAML), 0644); err != nil {
 		t.Fatal(err)
 	}
 
