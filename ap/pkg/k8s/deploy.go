@@ -393,7 +393,6 @@ type DeployTaskOptions struct {
 	CheckNamespace    func(ctx context.Context, namespace string) error
 	Naming            imageref.ImageNaming
 	KubeContext       string
-	KubectlBin        string
 }
 
 // KubectlApplyTask represents a task to apply a single k8s manifest.
@@ -405,17 +404,15 @@ type KubectlApplyTask struct {
 	CheckNamespace    func(ctx context.Context, namespace string) error
 	Naming            imageref.ImageNaming
 	KubeContext       string
-	KubectlBin        string
 }
 
 func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
-	kubectlBin := t.KubectlBin
-	if kubectlBin == "" && scope != nil {
-		var err error
-		kubectlBin, err = scope.EnsureKubectl(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to ensure kubectl: %w", err)
-		}
+	if scope == nil {
+		return fmt.Errorf("task context is required")
+	}
+	kubectlBin, err := scope.Tool(ctx, "kubectl")
+	if err != nil {
+		return fmt.Errorf("failed to ensure kubectl: %w", err)
 	}
 	if kubectlBin == "" {
 		return fmt.Errorf("kubectl binary is required")
@@ -615,7 +612,6 @@ func DeployTasksForManifests(manifests []string, opts ...DeployTaskOptions) task
 			CheckNamespace:    opt.CheckNamespace,
 			Naming:            opt.Naming,
 			KubeContext:       opt.KubeContext,
-			KubectlBin:        opt.KubectlBin,
 		})
 	}
 

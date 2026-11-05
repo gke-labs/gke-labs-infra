@@ -20,17 +20,10 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/imageref"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
-	toolKind "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kind"
 )
-
-var ensureKind = toolKind.EnsureKindForRepo
 
 // KindLoadTask loads docker images into a kind cluster using the tool-managed kind binary.
 type KindLoadTask struct {
-	// RepoRoot is the path to the repository root directory, used to locate
-	// tool configuration for resolving the pinned kind binary.
-	RepoRoot string
-
 	// ClusterName is the name of the kind cluster where images will be loaded.
 	ClusterName string
 
@@ -48,11 +41,10 @@ func (t *KindLoadTask) Run(ctx context.Context, scope *tasks.TaskContext) error 
 	for _, ref := range t.Images {
 		imagesToLoad = append(imagesToLoad, ref.String())
 	}
-	root := t.RepoRoot
-	if root == "" && scope != nil {
-		root = scope.RepoRoot()
+	if scope == nil {
+		return fmt.Errorf("task context is required")
 	}
-	kindBin, err := ensureKind(ctx, root)
+	kindBin, err := scope.Tool(ctx, "kind")
 	if err != nil {
 		return fmt.Errorf("failed to ensure kind tool: %w", err)
 	}
