@@ -179,12 +179,23 @@ func TestEnsureKubectl_Cached(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	var logBuf bytes.Buffer
+	klog.SetOutput(&logBuf)
+	klog.LogToStderr(false)
+	defer func() {
+		klog.SetOutput(os.Stderr)
+		klog.LogToStderr(true)
+	}()
+
 	gotBin, err := EnsureKubectl(t.Context(), "v1.37.2")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if gotBin != expectedBin {
 		t.Errorf("got bin %q, want %q", gotBin, expectedBin)
+	}
+	if logBuf.Len() > 0 {
+		t.Errorf("expected no log output at default verbosity when cached, got: %q", logBuf.String())
 	}
 }
 

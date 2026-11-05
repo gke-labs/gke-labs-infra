@@ -56,7 +56,7 @@ func EnsureKubectl(ctx context.Context, version string) (string, error) {
 		installDir := filepath.Join(cacheRoot, "tools", "kubectl", tag)
 		binPath := filepath.Join(installDir, "bin", binName)
 		if fileutils.IsExecutable(binPath) {
-			klog.Infof("Using kubectl %s", tag)
+			klog.V(2).Infof("Using kubectl %s", tag)
 			return binPath, nil
 		}
 	}
@@ -70,7 +70,7 @@ func EnsureKubectl(ctx context.Context, version string) (string, error) {
 	installDir := filepath.Join(cacheRoot, "tools", "kubectl", tag)
 	binPath := filepath.Join(installDir, "bin", binName)
 	if fileutils.IsExecutable(binPath) {
-		klog.Infof("Using kubectl %s", tag)
+		klog.V(2).Infof("Using kubectl %s", tag)
 		return binPath, nil
 	}
 
