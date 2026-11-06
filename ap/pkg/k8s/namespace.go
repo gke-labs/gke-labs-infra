@@ -334,12 +334,20 @@ func checkNamespaceExistsDefault(ctx context.Context, namespace, kubeContext, ku
 	return nil
 }
 
+// RetargetResult contains the rewritten YAML content and details about retargeted and cluster-scoped objects.
+type RetargetResult struct {
+	Content              string
+	ClusterScoped        []string
+	RetargetedNamespaces []string
+}
+
 // RetargetManifestNamespace rewrites namespaced objects in content to targetNamespace,
 // rewrites RoleBinding and ClusterRoleBinding ServiceAccount subjects whose namespace matches originalNamespace,
-// leaves cluster-scoped objects unchanged, and returns the modified YAML along with a slice of cluster-scoped objects.
-func RetargetManifestNamespace(content string, targetNamespace string, resolver ScopeResolver, originalNamespace string) (string, []string, error) {
+// leaves cluster-scoped objects unchanged, and returns a RetargetResult containing the modified YAML,
+// cluster-scoped objects, and distinct declared namespaces that were retargeted.
+func RetargetManifestNamespace(content string, targetNamespace string, resolver ScopeResolver, originalNamespace string) (*RetargetResult, error) {
 	if targetNamespace == "" {
-		return content, nil, nil
+		return &RetargetResult{Content: content}, nil
 	}
 
 	decoder := yaml.NewDecoder(strings.NewReader(content))
@@ -351,13 +359,13 @@ func RetargetManifestNamespace(content string, targetNamespace string, resolver 
 			break
 		}
 		if err != nil {
-			return "", nil, fmt.Errorf("failed to decode YAML: %w", err)
+			return nil, fmt.Errorf("failed to decode YAML: %w", err)
 		}
 		docs = append(docs, &doc)
 	}
 
 	if len(docs) == 0 {
-		return content, nil, nil
+		return &RetargetResult{Content: content}, nil
 	}
 
 	// If originalNamespace is not provided, detect it from namespaced objects in the manifest.
@@ -391,6 +399,8 @@ func RetargetManifestNamespace(content string, targetNamespace string, resolver 
 	}
 
 	var clusterScopedObjects []string
+	var retargetedNamespaces []string
+	seenRetargeted := make(map[string]bool)
 
 	for _, doc := range docs {
 		if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
@@ -409,7 +419,7 @@ func RetargetManifestNamespace(content string, targetNamespace string, resolver 
 		gvk := parseGVK(apiVersion, kind)
 		namespaced, err := resolver.IsNamespaced(gvk)
 		if err != nil {
-			return "", nil, fmt.Errorf("failed to determine scope for %s: %w", gvk.String(), err)
+			return nil, fmt.Errorf("failed to determine scope for %s: %w", gvk.String(), err)
 		}
 
 		name := getMetadataName(root)
@@ -417,6 +427,10 @@ func RetargetManifestNamespace(content string, targetNamespace string, resolver 
 
 		if namespaced {
 			setMetadataNamespace(root, targetNamespace)
+			if docOriginalNamespace != "" && docOriginalNamespace != targetNamespace && !seenRetargeted[docOriginalNamespace] {
+				seenRetargeted[docOriginalNamespace] = true
+				retargetedNamespaces = append(retargetedNamespaces, docOriginalNamespace)
+			}
 		} else {
 			objDesc := kind
 			if name != "" {
@@ -436,14 +450,18 @@ func RetargetManifestNamespace(content string, targetNamespace string, resolver 
 	encoder.SetIndent(2)
 	for _, doc := range docs {
 		if err := encoder.Encode(doc); err != nil {
-			return "", nil, fmt.Errorf("failed to encode YAML: %w", err)
+			return nil, fmt.Errorf("failed to encode YAML: %w", err)
 		}
 	}
 	if err := encoder.Close(); err != nil {
-		return "", nil, fmt.Errorf("failed to close YAML encoder: %w", err)
+		return nil, fmt.Errorf("failed to close YAML encoder: %w", err)
 	}
 
-	return buf.String(), clusterScopedObjects, nil
+	return &RetargetResult{
+		Content:              buf.String(),
+		ClusterScoped:        clusterScopedObjects,
+		RetargetedNamespaces: retargetedNamespaces,
+	}, nil
 }
 
 func getAPIVersionAndKind(root *yaml.Node) (string, string) {

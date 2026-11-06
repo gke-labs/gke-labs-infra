@@ -47,18 +47,21 @@ metadata:
 spec:
   replicas: 1
 `
-	got, clusterScoped, err := RetargetManifestNamespace(manifest, "corp-gke", defaultTestResolver, "")
+	res, err := RetargetManifestNamespace(manifest, "corp-gke", defaultTestResolver, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(clusterScoped) != 0 {
-		t.Errorf("expected 0 cluster-scoped objects, got: %v", clusterScoped)
+	if len(res.ClusterScoped) != 0 {
+		t.Errorf("expected 0 cluster-scoped objects, got: %v", res.ClusterScoped)
 	}
-	if !strings.Contains(got, "namespace: corp-gke") {
-		t.Errorf("expected 'namespace: corp-gke' in output, got:\n%s", got)
+	if len(res.RetargetedNamespaces) != 1 || res.RetargetedNamespaces[0] != "default" {
+		t.Errorf("expected retargetedNamespaces = ['default'], got: %v", res.RetargetedNamespaces)
 	}
-	if strings.Contains(got, "namespace: default") {
-		t.Errorf("expected original 'namespace: default' to be replaced, got:\n%s", got)
+	if !strings.Contains(res.Content, "namespace: corp-gke") {
+		t.Errorf("expected 'namespace: corp-gke' in output, got:\n%s", res.Content)
+	}
+	if strings.Contains(res.Content, "namespace: default") {
+		t.Errorf("expected original 'namespace: default' to be replaced, got:\n%s", res.Content)
 	}
 }
 
@@ -70,15 +73,18 @@ metadata:
 data:
   key: value
 `
-	got, clusterScoped, err := RetargetManifestNamespace(manifest, "corp-gke", defaultTestResolver, "")
+	res, err := RetargetManifestNamespace(manifest, "corp-gke", defaultTestResolver, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(clusterScoped) != 0 {
-		t.Errorf("expected 0 cluster-scoped objects, got: %v", clusterScoped)
+	if len(res.ClusterScoped) != 0 {
+		t.Errorf("expected 0 cluster-scoped objects, got: %v", res.ClusterScoped)
 	}
-	if !strings.Contains(got, "namespace: corp-gke") {
-		t.Errorf("expected 'namespace: corp-gke' to be added, got:\n%s", got)
+	if len(res.RetargetedNamespaces) != 0 {
+		t.Errorf("expected 0 retargeted namespaces, got: %v", res.RetargetedNamespaces)
+	}
+	if !strings.Contains(res.Content, "namespace: corp-gke") {
+		t.Errorf("expected 'namespace: corp-gke' to be added, got:\n%s", res.Content)
 	}
 }
 
@@ -92,15 +98,15 @@ rules:
   resources: ["pods"]
   verbs: ["get"]
 `
-	got, clusterScoped, err := RetargetManifestNamespace(manifest, "corp-gke", defaultTestResolver, "")
+	res, err := RetargetManifestNamespace(manifest, "corp-gke", defaultTestResolver, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(clusterScoped) != 1 || clusterScoped[0] != "ClusterRole/test-cr" {
-		t.Errorf("expected clusterScoped to contain 'ClusterRole/test-cr', got: %v", clusterScoped)
+	if len(res.ClusterScoped) != 1 || res.ClusterScoped[0] != "ClusterRole/test-cr" {
+		t.Errorf("expected clusterScoped to contain 'ClusterRole/test-cr', got: %v", res.ClusterScoped)
 	}
-	if strings.Contains(got, "namespace:") {
-		t.Errorf("cluster-scoped object should NOT have namespace, got:\n%s", got)
+	if strings.Contains(res.Content, "namespace:") {
+		t.Errorf("cluster-scoped object should NOT have namespace, got:\n%s", res.Content)
 	}
 }
 
@@ -123,28 +129,28 @@ roleRef:
   kind: ClusterRole
   name: test-cr
 `
-	got, clusterScoped, err := RetargetManifestNamespace(manifest, "corp-gke", defaultTestResolver, "default")
+	res, err := RetargetManifestNamespace(manifest, "corp-gke", defaultTestResolver, "default")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(clusterScoped) != 1 || clusterScoped[0] != "ClusterRoleBinding/test-crb" {
-		t.Errorf("expected clusterScoped to contain 'ClusterRoleBinding/test-crb', got: %v", clusterScoped)
+	if len(res.ClusterScoped) != 1 || res.ClusterScoped[0] != "ClusterRoleBinding/test-crb" {
+		t.Errorf("expected clusterScoped to contain 'ClusterRoleBinding/test-crb', got: %v", res.ClusterScoped)
 	}
 	// ClusterRoleBinding metadata itself should not have namespace
-	if strings.Contains(got, "metadata:\n  namespace:") || strings.Contains(got, "metadata:\n  name: test-crb\n  namespace:") {
-		t.Errorf("ClusterRoleBinding metadata should not have namespace, got:\n%s", got)
+	if strings.Contains(res.Content, "metadata:\n  namespace:") || strings.Contains(res.Content, "metadata:\n  name: test-crb\n  namespace:") {
+		t.Errorf("ClusterRoleBinding metadata should not have namespace, got:\n%s", res.Content)
 	}
 
 	// sa-rewritten subject should have namespace: corp-gke
-	if !strings.Contains(got, "name: sa-rewritten\n    namespace: corp-gke") &&
-		!strings.Contains(got, "name: sa-rewritten\n  namespace: corp-gke") &&
-		!strings.Contains(got, "namespace: corp-gke") {
-		t.Errorf("expected sa-rewritten subject to have namespace corp-gke, got:\n%s", got)
+	if !strings.Contains(res.Content, "name: sa-rewritten\n    namespace: corp-gke") &&
+		!strings.Contains(res.Content, "name: sa-rewritten\n  namespace: corp-gke") &&
+		!strings.Contains(res.Content, "namespace: corp-gke") {
+		t.Errorf("expected sa-rewritten subject to have namespace corp-gke, got:\n%s", res.Content)
 	}
 
 	// sa-untouched subject in kube-system must be untouched
-	if !strings.Contains(got, "namespace: kube-system") {
-		t.Errorf("expected sa-untouched in kube-system to remain unchanged, got:\n%s", got)
+	if !strings.Contains(res.Content, "namespace: kube-system") {
+		t.Errorf("expected sa-untouched in kube-system to remain unchanged, got:\n%s", res.Content)
 	}
 }
 
@@ -166,27 +172,27 @@ roleRef:
   kind: Role
   name: test-role
 `
-	got, clusterScoped, err := RetargetManifestNamespace(manifest, "corp-gke", defaultTestResolver, "")
+	res, err := RetargetManifestNamespace(manifest, "corp-gke", defaultTestResolver, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(clusterScoped) != 0 {
-		t.Errorf("expected 0 cluster-scoped objects, got: %v", clusterScoped)
+	if len(res.ClusterScoped) != 0 {
+		t.Errorf("expected 0 cluster-scoped objects, got: %v", res.ClusterScoped)
 	}
 
 	// RoleBinding itself should have namespace: corp-gke
-	if !strings.Contains(got, "namespace: corp-gke") {
-		t.Errorf("expected RoleBinding metadata to have namespace corp-gke, got:\n%s", got)
+	if !strings.Contains(res.Content, "namespace: corp-gke") {
+		t.Errorf("expected RoleBinding metadata to have namespace corp-gke, got:\n%s", res.Content)
 	}
 
 	// sa-local should have namespace: corp-gke
-	if strings.Contains(got, "name: sa-local\n  namespace: default") || strings.Contains(got, "name: sa-local\n    namespace: default") {
-		t.Errorf("sa-local should be rewritten to corp-gke, got:\n%s", got)
+	if strings.Contains(res.Content, "name: sa-local\n  namespace: default") || strings.Contains(res.Content, "name: sa-local\n    namespace: default") {
+		t.Errorf("sa-local should be rewritten to corp-gke, got:\n%s", res.Content)
 	}
 
 	// sa-system in kube-system must be untouched
-	if !strings.Contains(got, "namespace: kube-system") {
-		t.Errorf("expected sa-system in kube-system to remain unchanged, got:\n%s", got)
+	if !strings.Contains(res.Content, "namespace: kube-system") {
+		t.Errorf("expected sa-system in kube-system to remain unchanged, got:\n%s", res.Content)
 	}
 }
 
@@ -225,43 +231,46 @@ roleRef:
   kind: ClusterRole
   name: my-cr
 `
-	got, clusterScoped, err := RetargetManifestNamespace(manifest, "corp-gke", defaultTestResolver, "")
+	res, err := RetargetManifestNamespace(manifest, "corp-gke", defaultTestResolver, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Cluster-scoped objects: ClusterRole and ClusterRoleBinding
 	expectedClusterScoped := []string{"ClusterRole/my-cr", "ClusterRoleBinding/my-crb"}
-	if len(clusterScoped) != len(expectedClusterScoped) {
-		t.Fatalf("expected clusterScoped = %v, got %v", expectedClusterScoped, clusterScoped)
+	if len(res.ClusterScoped) != len(expectedClusterScoped) {
+		t.Fatalf("expected clusterScoped = %v, got %v", expectedClusterScoped, res.ClusterScoped)
 	}
 	for i, cs := range expectedClusterScoped {
-		if clusterScoped[i] != cs {
-			t.Errorf("clusterScoped[%d] = %q, want %q", i, clusterScoped[i], cs)
+		if res.ClusterScoped[i] != cs {
+			t.Errorf("clusterScoped[%d] = %q, want %q", i, res.ClusterScoped[i], cs)
 		}
+	}
+	if len(res.RetargetedNamespaces) != 1 || res.RetargetedNamespaces[0] != "default" {
+		t.Errorf("expected retargetedNamespaces = ['default'], got: %v", res.RetargetedNamespaces)
 	}
 
 	// In multi-doc, originalNamespace was automatically inferred as "default" from ServiceAccount
-	if !strings.Contains(got, "name: my-sa\n  namespace: corp-gke") &&
-		!strings.Contains(got, "namespace: corp-gke\n  name: my-sa") &&
-		!strings.Contains(got, "namespace: corp-gke") {
-		t.Errorf("expected ServiceAccount namespace rewritten to corp-gke, got:\n%s", got)
+	if !strings.Contains(res.Content, "name: my-sa\n  namespace: corp-gke") &&
+		!strings.Contains(res.Content, "namespace: corp-gke\n  name: my-sa") &&
+		!strings.Contains(res.Content, "namespace: corp-gke") {
+		t.Errorf("expected ServiceAccount namespace rewritten to corp-gke, got:\n%s", res.Content)
 	}
 
 	// Deployment had no namespace; it should now have namespace: corp-gke
-	if !strings.Contains(got, "name: my-deploy\n  namespace: corp-gke") &&
-		!strings.Contains(got, "namespace: corp-gke") {
-		t.Errorf("expected Deployment namespace corp-gke, got:\n%s", got)
+	if !strings.Contains(res.Content, "name: my-deploy\n  namespace: corp-gke") &&
+		!strings.Contains(res.Content, "namespace: corp-gke") {
+		t.Errorf("expected Deployment namespace corp-gke, got:\n%s", res.Content)
 	}
 
 	// ServiceAccount subject in ClusterRoleBinding was rewritten to corp-gke
-	if strings.Contains(got, "name: my-sa\n    namespace: default") || strings.Contains(got, "name: my-sa\n  namespace: default") {
-		t.Errorf("ClusterRoleBinding subject my-sa should be rewritten, got:\n%s", got)
+	if strings.Contains(res.Content, "name: my-sa\n    namespace: default") || strings.Contains(res.Content, "name: my-sa\n  namespace: default") {
+		t.Errorf("ClusterRoleBinding subject my-sa should be rewritten, got:\n%s", res.Content)
 	}
 
 	// other-sa in kube-system is untouched
-	if !strings.Contains(got, "namespace: kube-system") {
-		t.Errorf("other-sa in kube-system should remain untouched, got:\n%s", got)
+	if !strings.Contains(res.Content, "namespace: kube-system") {
+		t.Errorf("other-sa in kube-system should remain untouched, got:\n%s", res.Content)
 	}
 }
 
@@ -272,15 +281,18 @@ metadata:
   name: test-deploy
   namespace: default
 `
-	got, clusterScoped, err := RetargetManifestNamespace(manifest, "", defaultTestResolver, "")
+	res, err := RetargetManifestNamespace(manifest, "", defaultTestResolver, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(clusterScoped) != 0 {
-		t.Errorf("expected 0 cluster-scoped objects, got: %v", clusterScoped)
+	if len(res.ClusterScoped) != 0 {
+		t.Errorf("expected 0 cluster-scoped objects, got: %v", res.ClusterScoped)
 	}
-	if got != manifest {
-		t.Errorf("expected manifest to be completely unchanged when targetNamespace is empty, got:\n%s", got)
+	if len(res.RetargetedNamespaces) != 0 {
+		t.Errorf("expected 0 retargeted namespaces, got: %v", res.RetargetedNamespaces)
+	}
+	if res.Content != manifest {
+		t.Errorf("expected manifest to be completely unchanged when targetNamespace is empty, got:\n%s", res.Content)
 	}
 }
 
