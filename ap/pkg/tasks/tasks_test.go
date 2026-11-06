@@ -789,6 +789,135 @@ func TestTaskOutputPolicy(t *testing.T) {
 			t.Errorf("expected passing task text at -v=1, got:\n%s", vOut)
 		}
 	})
+
+	// When PrintOutput is enabled, passing task text is printed at default verbosity
+	t.Run("PrintOutputPrintsPassingOutput", func(t *testing.T) {
+		var pBuf syncBuffer
+		pScope := newScope(t, &pBuf).WithPrintOutput(true)
+		passTask, failTask := makeTasks()
+		pGroup := &Group{
+			Name:            "test-output-policy",
+			ContinueOnError: true,
+			Tasks:           []Task{passTask, failTask},
+		}
+		_ = pGroup.Run(t.Context(), pScope)
+		pOut := pBuf.String()
+		if !strings.Contains(pOut, "passing task text") {
+			t.Errorf("expected passing task text when PrintOutput is true, got:\n%s", pOut)
+		}
+		if !strings.Contains(pOut, "failing task text") {
+			t.Errorf("expected failing task text when PrintOutput is true, got:\n%s", pOut)
+		}
+	})
+
+	// When RunOptions.PrintOutput is true in tasks.Run, passing task output is printed
+	t.Run("RunOptionsPrintOutput", func(t *testing.T) {
+		var rBuf syncBuffer
+		rScope := newScope(t, &rBuf)
+		passTask, _ := makeTasks()
+		err := Run(t.Context(), rScope, []Task{passTask}, RunOptions{PrintOutput: true})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		rOut := rBuf.String()
+		if !strings.Contains(rOut, "passing task text") {
+			t.Errorf("expected passing task text with RunOptions.PrintOutput=true, got:\n%s", rOut)
+		}
+	})
+}
+
+func TestTaskOutputArtifacts(t *testing.T) {
+	artifactsDir := t.TempDir()
+
+	tree, err := sourcetree.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var outBuf syncBuffer
+	scope := NewTaskContext(t.TempDir(), t.TempDir(), tree).WithOutput(&outBuf, &outBuf).WithArtifactsDir(artifactsDir)
+
+	pass := &FuncTask{
+		Name: "task-pass-leaf",
+		RunFn: func(ctx context.Context, s *TaskContext) error {
+			fmt.Fprintln(s.Stdout(), "pass artifact log content")
+			return nil
+		},
+	}
+	fail := &FuncTask{
+		Name: "task-fail-leaf",
+		RunFn: func(ctx context.Context, s *TaskContext) error {
+			fmt.Fprintln(s.Stderr(), "fail artifact log content")
+			return errors.New("failed task")
+		},
+	}
+	slashTask := &FuncTask{
+		Name: "group/subtask-leaf",
+		RunFn: func(ctx context.Context, s *TaskContext) error {
+			fmt.Fprintln(s.Stdout(), "slash task output")
+			return nil
+		},
+	}
+
+	grp := &Group{
+		Name:            "artifact-test-group",
+		ContinueOnError: true,
+		Tasks:           []Task{pass, fail, slashTask},
+	}
+
+	_ = grp.Run(t.Context(), scope)
+
+	tasksDir := filepath.Join(artifactsDir, "tasks")
+	passLogPath := filepath.Join(tasksDir, "task-pass-leaf.log")
+	passContent, err := os.ReadFile(passLogPath)
+	if err != nil {
+		t.Fatalf("failed to read passing task log %s: %v", passLogPath, err)
+	}
+	if !strings.Contains(string(passContent), "pass artifact log content") {
+		t.Errorf("expected passing task log to contain 'pass artifact log content', got: %q", string(passContent))
+	}
+
+	failLogPath := filepath.Join(tasksDir, "task-fail-leaf.log")
+	failContent, err := os.ReadFile(failLogPath)
+	if err != nil {
+		t.Fatalf("failed to read failing task log %s: %v", failLogPath, err)
+	}
+	if !strings.Contains(string(failContent), "fail artifact log content") {
+		t.Errorf("expected failing task log to contain 'fail artifact log content', got: %q", string(failContent))
+	}
+
+	slashLogPath := filepath.Join(tasksDir, "group_subtask-leaf.log")
+	slashContent, err := os.ReadFile(slashLogPath)
+	if err != nil {
+		t.Fatalf("failed to read sanitized task log %s: %v", slashLogPath, err)
+	}
+	if !strings.Contains(string(slashContent), "slash task output") {
+		t.Errorf("expected slash task log to contain 'slash task output', got: %q", string(slashContent))
+	}
+}
+
+func TestTaskOutputArtifacts_Unset(t *testing.T) {
+	tree, err := sourcetree.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var outBuf syncBuffer
+	scope := NewTaskContext(t.TempDir(), t.TempDir(), tree).WithOutput(&outBuf, &outBuf).WithArtifactsDir("")
+
+	pass := &FuncTask{
+		Name: "task-no-artifacts",
+		RunFn: func(ctx context.Context, s *TaskContext) error {
+			fmt.Fprintln(s.Stdout(), "output without artifacts")
+			return nil
+		},
+	}
+
+	_ = RunTask(t.Context(), scope, pass)
+
+	if _, err := os.Stat(filepath.Join(t.TempDir(), "tasks")); !os.IsNotExist(err) {
+		t.Errorf("expected tasks directory not to exist when ARTIFACTS is empty")
+	}
 }
 
 func TestTaskLog_PerTaskBuffer(t *testing.T) {

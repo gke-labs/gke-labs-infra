@@ -19,6 +19,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -143,6 +146,12 @@ func newBufferLogger(w io.Writer, parent logr.Logger) logr.Logger {
 	})
 }
 
+func sanitizeLogTaskName(name string) string {
+	name = strings.ReplaceAll(name, "/", "_")
+	name = strings.ReplaceAll(name, "\\", "_")
+	return name
+}
+
 func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
 	buf := &syncBuffer{}
 	taskScope := scope.WithOutput(buf, buf)
@@ -164,8 +173,8 @@ func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
 	defer runnerMu.Unlock()
 
 	writef(out, "=== %s (%s, %.1fs)\n", task.GetName(), status, duration.Seconds())
-	if err != nil || scope.Log().V(1).Enabled() {
-		output := buf.Bytes()
+	output := buf.Bytes()
+	if err != nil || scope.Log().V(1).Enabled() || scope.PrintOutput() {
 		if len(output) > 0 {
 			if _, writeErr := out.Write(output); writeErr != nil {
 				scope.Log().V(2).Info("failed to write task output", "error", writeErr)
@@ -175,6 +184,20 @@ func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
 			}
 		}
 	}
+
+	if artifactsDir := scope.ArtifactsDir(); artifactsDir != "" {
+		tasksDir := filepath.Join(artifactsDir, "tasks")
+		if mkdirErr := os.MkdirAll(tasksDir, 0755); mkdirErr != nil {
+			scope.Log().Info("failed to create artifacts tasks directory", "level", "warning", "dir", tasksDir, "error", mkdirErr)
+		} else {
+			safeName := sanitizeLogTaskName(task.GetName())
+			logFile := filepath.Join(tasksDir, safeName+".log")
+			if writeErr := os.WriteFile(logFile, output, 0644); writeErr != nil {
+				scope.Log().Info("failed to write task artifact log", "level", "warning", "file", logFile, "error", writeErr)
+			}
+		}
+	}
+
 	return err
 }
 

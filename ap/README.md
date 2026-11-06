@@ -41,7 +41,7 @@ The generated workflow defines a concurrency group so that a new push to a pull 
 
 ### Presubmit Artifacts
 
-Presubmit scripts may write anything to `$ARTIFACTS` (set to `/tmp/artifacts` in generated GitHub Actions jobs), and it is uploaded as `artifacts-<job>` upon job completion (even on failure). If no files are written, the upload step completes without producing warnings or errors.
+Presubmit scripts may write anything to `$ARTIFACTS` (set to `/tmp/artifacts` in generated GitHub Actions jobs), and it is uploaded as `artifacts-<job>` upon job completion (even on failure). If no files are written, the upload step completes without producing warnings or errors. When `$ARTIFACTS` is set, `ap` also writes each leaf task's buffered output to `$ARTIFACTS/tasks/<task-name>.log`.
 
 ### Output Atomicity and Verification
 
@@ -278,6 +278,10 @@ ap <command>
 ### Task Output
 
 Every leaf task runs with buffered stdout/stderr. At default verbosity, `ap` prints a single status line per task (`=== <name> (ok|FAILED, 1.2s)`) and prints captured output only for tasks that failed. Use `-v=1` (or higher) to also print the output of successful tasks.
+
+The `ap e2e` command prints leaf task output at default verbosity, ensuring test results (such as `--- PASS` lines) remain visible in job logs.
+
+When `ARTIFACTS` is set (for example, in CI workflows where it points to `/tmp/artifacts`), every leaf task writes its buffered output to `$ARTIFACTS/tasks/<task-name>.log` regardless of whether the task passed or failed. This preserves complete task execution logs for post-run analysis and artifact downloads.
 
 ### Task Logging
 
