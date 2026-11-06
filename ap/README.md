@@ -279,6 +279,10 @@ ap <command>
 
 Every leaf task runs with buffered stdout/stderr. At default verbosity, `ap` prints a single status line per task (`=== <name> (ok|FAILED, 1.2s)`) and prints captured output only for tasks that failed. Use `-v=1` (or higher) to also print the output of successful tasks.
 
+### Task Logging
+
+Tasks should log via `tc.Log()` (or `scoped.Log(ctx)`), which returns a `logr.Logger` writing into that leaf task's output buffer. Log messages should be constant strings with structured key/value pairs (`log.Info("msg", "key", "val")`, `log.V(n).Info(...)`, `log.Error(err, "msg")`), and warnings should be logged as `log.Info(msg, "level", "warning")`. Because task log lines and command outputs share the same buffer, log lines stay synchronized with command output and follow the unified task output policy.
+
 Commands:
 - `init`: Initialize `.ap/` configuration for a repository
 - `ls`: List discovered tasks under the selected subtree

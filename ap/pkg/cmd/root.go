@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool"
 	"github.com/spf13/cobra"
@@ -119,6 +120,7 @@ func BuildRootCommand() *cobra.Command {
 		Short: "ap is a tool for managing gke-labs projects",
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			cmd.SilenceUsage = true
+			cmd.SetContext(scoped.WithLog(cmd.Context(), klog.Background()))
 			repoRoot, err := findRoots()
 			if err != nil {
 				return err

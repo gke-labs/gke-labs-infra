@@ -23,6 +23,8 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool"
+	"github.com/go-logr/logr"
+	"k8s.io/klog/v2"
 )
 
 var (
@@ -41,6 +43,7 @@ type TaskContext struct {
 
 	stdout io.Writer
 	stderr io.Writer
+	log    logr.Logger
 
 	// tools holds memoized resolved tool binary paths keyed by tool name.
 	tools map[string]string
@@ -100,6 +103,21 @@ func (s *TaskContext) Stderr() io.Writer {
 		return s.stderr
 	}
 	return os.Stderr
+}
+
+// Log returns the logger configured for this task context, or the default logger if unset.
+func (s *TaskContext) Log() logr.Logger {
+	if s.log.GetSink() != nil {
+		return s.log
+	}
+	return klog.Background()
+}
+
+// WithLog returns a shallow copy of the task context with the given logger.
+func (s *TaskContext) WithLog(log logr.Logger) *TaskContext {
+	clone := *s
+	clone.log = log
+	return &clone
 }
 
 // WithOutput returns a shallow copy of the task context with custom stdout and stderr writers.

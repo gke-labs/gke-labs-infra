@@ -65,4 +65,4 @@ When writing Kubernetes manifests, follow these guidelines:
 
 ## Task Output
 
-Every leaf task runs with buffered output, printing a status line per task (`=== <name> (ok|FAILED, <duration>)`) and emitting captured output only on failure (pass `-v=1` to print output for passing tasks).
+Every leaf task runs with buffered output, printing a status line per task (`=== <name> (ok|FAILED, <duration>)`) and emitting captured output only on failure (pass `-v=1` to print output for passing tasks). Tasks obtain a `logr.Logger` via `tc.Log()` or `scoped.Log(ctx)` that writes directly into this buffer using structured key/value pairs (warnings logged with `"level", "warning"`).

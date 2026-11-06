@@ -23,7 +23,6 @@ import (
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
-	"k8s.io/klog/v2"
 )
 
 // TaskScript represents a discoverable task script.
@@ -34,7 +33,7 @@ type TaskScript struct {
 }
 
 func (t *TaskScript) Run(ctx context.Context, scope *TaskContext) error {
-	klog.Infof("Running task: %s", t.Name)
+	scope.Log().Info("running task", "task", t.Name)
 	cmd := exec.CommandContext(ctx, t.Path)
 	cmd.Dir = t.Root
 	env, err := scope.ScriptEnv()

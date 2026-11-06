@@ -18,10 +18,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
-	"k8s.io/klog/v2"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
+	"github.com/go-logr/logr"
+	"github.com/go-logr/logr/funcr"
 )
 
 // RetryPolicy reports whether a failed attempt (0-based) should be retried, and after how long.
@@ -84,9 +87,68 @@ func RunTask(ctx context.Context, scope *TaskContext, task Task) error {
 
 var runnerMu sync.Mutex
 
+type bufferSink struct {
+	logr.LogSink
+	parent logr.LogSink
+}
+
+var _ logr.LogSink = bufferSink{}
+var _ logr.CallDepthLogSink = bufferSink{}
+
+func (s bufferSink) Enabled(level int) bool {
+	if s.parent != nil {
+		return s.parent.Enabled(level)
+	}
+	return false
+}
+
+func (s bufferSink) WithValues(keysAndValues ...any) logr.LogSink {
+	return bufferSink{
+		LogSink: s.LogSink.WithValues(keysAndValues...),
+		parent:  s.parent,
+	}
+}
+
+func (s bufferSink) WithName(name string) logr.LogSink {
+	return bufferSink{
+		LogSink: s.LogSink.WithName(name),
+		parent:  s.parent,
+	}
+}
+
+func (s bufferSink) WithCallDepth(depth int) logr.LogSink {
+	if cd, ok := s.LogSink.(logr.CallDepthLogSink); ok {
+		return bufferSink{
+			LogSink: cd.WithCallDepth(depth),
+			parent:  s.parent,
+		}
+	}
+	return s
+}
+
+func newBufferLogger(w io.Writer, parent logr.Logger) logr.Logger {
+	empty := ""
+	fnLog := funcr.New(func(prefix, args string) {
+		if prefix != "" {
+			writef(w, "%s: %s\n", prefix, args)
+		} else {
+			writef(w, "%s\n", args)
+		}
+	}, funcr.Options{
+		LogInfoLevel: &empty,
+	})
+	return logr.New(bufferSink{
+		LogSink: fnLog.GetSink(),
+		parent:  parent.GetSink(),
+	})
+}
+
 func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
 	buf := &syncBuffer{}
 	taskScope := scope.WithOutput(buf, buf)
+	taskLog := newBufferLogger(taskScope.Stderr(), scope.Log())
+	taskScope = taskScope.WithLog(taskLog)
+	ctx = scoped.WithLog(ctx, taskLog)
 	out := scope.Stdout()
 
 	start := time.Now()
@@ -102,11 +164,11 @@ func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
 	defer runnerMu.Unlock()
 
 	writef(out, "=== %s (%s, %.1fs)\n", task.GetName(), status, duration.Seconds())
-	if err != nil || klog.V(1).Enabled() {
+	if err != nil || scope.Log().V(1).Enabled() {
 		output := buf.Bytes()
 		if len(output) > 0 {
 			if _, writeErr := out.Write(output); writeErr != nil {
-				klog.V(2).Infof("failed to write task output: %v", writeErr)
+				scope.Log().V(2).Info("failed to write task output", "error", writeErr)
 			}
 			if !bytes.HasSuffix(output, []byte("\n")) {
 				writef(out, "\n")
@@ -134,7 +196,7 @@ func runTaskWithRetry(ctx context.Context, scope *TaskContext, task Task) error 
 		if !ok {
 			return fmt.Errorf("task %s failed: %w", task.GetName(), err)
 		}
-		klog.Warningf("task %s failed (attempt %d): %v; retrying in %v...", task.GetName(), attempt+1, err, wait)
+		scope.Log().Info("task failed, retrying", "level", "warning", "task", task.GetName(), "attempt", attempt+1, "error", err, "wait", wait)
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("task %s failed: %w", task.GetName(), ctx.Err())

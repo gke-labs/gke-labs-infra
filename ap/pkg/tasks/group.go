@@ -24,7 +24,7 @@ import (
 	"strings"
 	"sync"
 
-	"k8s.io/klog/v2"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 )
 
 type syncBuffer struct {
@@ -52,7 +52,7 @@ func (b *syncBuffer) String() string {
 
 func writef(w io.Writer, format string, args ...any) {
 	if _, err := fmt.Fprintf(w, format, args...); err != nil {
-		klog.V(2).Infof("failed to write output: %v", err)
+		scoped.Log(context.Background()).V(2).Info("failed to write output", "error", err)
 	}
 }
 
@@ -234,7 +234,7 @@ func Run(ctx context.Context, scope *TaskContext, ts []Task, opts RunOptions) er
 	defer func() {
 		if scope != nil && scope.SourceTree() != nil {
 			if saveErr := scope.SourceTree().Save(); saveErr != nil {
-				klog.V(2).Infof("failed to save sourcetree hash cache: %v", saveErr)
+				scope.Log().V(2).Info("failed to save sourcetree hash cache", "error", saveErr)
 			}
 		}
 	}()
