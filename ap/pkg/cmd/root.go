@@ -120,9 +120,6 @@ func BuildRootCommand() *cobra.Command {
 		Short: "ap is a tool for managing gke-labs projects",
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			cmd.SilenceUsage = true
-			if cmd.Context() == nil {
-				cmd.SetContext(context.Background())
-			}
 			cmd.SetContext(scoped.WithLog(cmd.Context(), klog.Background()))
 			repoRoot, err := findRoots()
 			if err != nil {
@@ -179,7 +176,6 @@ func requireRepoRoot(opt *RootOptions) error {
 
 // Execute runs the root command.
 func Execute(ctx context.Context) error {
-	ctx = scoped.WithLog(ctx, klog.Background())
 	rootCmd := BuildRootCommand()
 	return rootCmd.ExecuteContext(ctx)
 }

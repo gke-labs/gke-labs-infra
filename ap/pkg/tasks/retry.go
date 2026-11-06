@@ -87,37 +87,66 @@ func RunTask(ctx context.Context, scope *TaskContext, task Task) error {
 
 var runnerMu sync.Mutex
 
-func newBufferLogger(w io.Writer, verbosity int) logr.Logger {
+type bufferSink struct {
+	logr.LogSink
+	parent logr.LogSink
+}
+
+var _ logr.LogSink = bufferSink{}
+var _ logr.CallDepthLogSink = bufferSink{}
+
+func (s bufferSink) Enabled(level int) bool {
+	if s.parent != nil {
+		return s.parent.Enabled(level)
+	}
+	return false
+}
+
+func (s bufferSink) WithValues(keysAndValues ...any) logr.LogSink {
+	return bufferSink{
+		LogSink: s.LogSink.WithValues(keysAndValues...),
+		parent:  s.parent,
+	}
+}
+
+func (s bufferSink) WithName(name string) logr.LogSink {
+	return bufferSink{
+		LogSink: s.LogSink.WithName(name),
+		parent:  s.parent,
+	}
+}
+
+func (s bufferSink) WithCallDepth(depth int) logr.LogSink {
+	if cd, ok := s.LogSink.(logr.CallDepthLogSink); ok {
+		return bufferSink{
+			LogSink: cd.WithCallDepth(depth),
+			parent:  s.parent,
+		}
+	}
+	return s
+}
+
+func newBufferLogger(w io.Writer, parent logr.Logger) logr.Logger {
 	empty := ""
-	return funcr.New(func(prefix, args string) {
+	fnLog := funcr.New(func(prefix, args string) {
 		if prefix != "" {
 			writef(w, "%s: %s\n", prefix, args)
 		} else {
 			writef(w, "%s\n", args)
 		}
 	}, funcr.Options{
-		Verbosity:    verbosity,
 		LogInfoLevel: &empty,
 	})
-}
-
-func currentVerbosity(scope *TaskContext) int {
-	if scope == nil {
-		return 0
-	}
-	log := scope.Log()
-	for v := 50; v > 0; v-- {
-		if log.V(v).Enabled() {
-			return v
-		}
-	}
-	return 0
+	return logr.New(bufferSink{
+		LogSink: fnLog.GetSink(),
+		parent:  parent.GetSink(),
+	})
 }
 
 func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
 	buf := &syncBuffer{}
 	taskScope := scope.WithOutput(buf, buf)
-	taskLog := newBufferLogger(taskScope.Stderr(), currentVerbosity(scope))
+	taskLog := newBufferLogger(taskScope.Stderr(), scope.Log())
 	taskScope = taskScope.WithLog(taskLog)
 	ctx = scoped.WithLog(ctx, taskLog)
 	out := scope.Stdout()
