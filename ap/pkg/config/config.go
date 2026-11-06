@@ -144,7 +144,7 @@ func Load(repoRoot string) (*Config, error) {
 	configFile := filepath.Join(repoRoot, ".ap/go.yaml")
 
 	var config Config
-	if _, err := loadYAML(configFile, &config); err != nil {
+	if _, err := LoadYAML(configFile, &config); err != nil {
 		return nil, err
 	}
 
@@ -406,7 +406,7 @@ type HeadersConfig struct {
 func LoadHeaders(repoRoot string) (*HeadersConfig, error) {
 	configFile := filepath.Join(repoRoot, ".ap/headers.yaml")
 	var config HeadersConfig
-	if _, err := loadYAML(configFile, &config); err != nil {
+	if _, err := LoadYAML(configFile, &config); err != nil {
 		return nil, err
 	}
 
@@ -427,7 +427,7 @@ func LoadImagesConfig(root string) (*ImagesConfig, error) {
 	configFile := filepath.Join(root, ".ap/images.yaml")
 
 	var config ImagesConfig
-	if _, err := loadYAML(configFile, &config); err != nil {
+	if _, err := LoadYAML(configFile, &config); err != nil {
 		return nil, err
 	}
 

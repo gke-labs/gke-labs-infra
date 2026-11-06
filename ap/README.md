@@ -237,6 +237,12 @@ generate:
   auditGenerated: true
 ```
 
+`version` pins the version of `ap` invoked by generated wrappers and workflows.
+It accepts `!self` (to run `go run ./ap` within this repository), `latest`
+(to float to the latest release), or a valid Go module version string (such as
+`v0.1.0` or a pseudo-version like `v0.0.0-20261024111447-4ab120e48572`). Branch
+names and commit hashes are rejected on purpose.
+
 `presubmits.skipIfOnlyChanged` is an optional list of bash case globs
 matched against each repo-relative changed path (`*` also matches `/`).
 When every file changed by a pull request matches one of the patterns,

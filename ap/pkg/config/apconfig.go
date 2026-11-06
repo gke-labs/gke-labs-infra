@@ -46,7 +46,7 @@ type APConfig struct {
 func LoadAPConfig(root string) (*APConfig, error) {
 	configFile := filepath.Join(root, ".ap", "ap.yaml")
 	var cfg APConfig
-	found, err := loadYAML(configFile, &cfg)
+	found, err := LoadYAML(configFile, &cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +55,7 @@ func LoadAPConfig(root string) (*APConfig, error) {
 	}
 
 	if err := cfg.Validate(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s: %w", configFile, err)
 	}
 
 	return &cfg, nil
@@ -63,10 +63,6 @@ func LoadAPConfig(root string) (*APConfig, error) {
 
 // Validate checks the configuration for semantic errors.
 func (c *APConfig) Validate() error {
-	if c == nil {
-		return nil
-	}
-
 	if c.Version != "" && c.Version != "!self" && c.Version != "latest" && !semver.IsValid(c.Version) {
 		return fmt.Errorf("invalid version %q: must be '!self', 'latest', or a module version string", c.Version)
 	}

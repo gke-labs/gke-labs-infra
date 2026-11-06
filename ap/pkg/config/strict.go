@@ -42,10 +42,6 @@ func LoadYAML(configFile string, out any) (found bool, err error) {
 	return true, nil
 }
 
-func loadYAML(configFile string, out any) (found bool, err error) {
-	return LoadYAML(configFile, out)
-}
-
 // UnmarshalStrict unmarshals YAML data into obj, rejecting unknown fields.
 // An unknown key produces an error that names the full key path and,
 // if a close match is found, suggests the nearest valid key.

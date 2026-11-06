@@ -55,7 +55,7 @@ func Effective(repoRoot, dir string) (*Config, error) {
 
 	for _, goFile := range subtreeFiles {
 		var override Config
-		if _, err := loadYAML(goFile, &override); err != nil {
+		if _, err := LoadYAML(goFile, &override); err != nil {
 			return nil, err
 		}
 		effective.apply(&override)

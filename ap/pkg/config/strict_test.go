@@ -505,9 +505,9 @@ unknown_proto_key: "value"
 	}
 
 	var cfg protoConfig
-	_, err := loadYAML(configFile, &cfg)
+	_, err := LoadYAML(configFile, &cfg)
 	if err == nil {
-		t.Fatalf("expected loadYAML to fail on unknown key for proto.yaml")
+		t.Fatalf("expected LoadYAML to fail on unknown key for proto.yaml")
 	}
 	if !strings.Contains(err.Error(), ".ap/proto.yaml") {
 		t.Errorf("expected error to mention .ap/proto.yaml, got %v", err)

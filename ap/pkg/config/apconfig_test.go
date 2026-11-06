@@ -169,3 +169,41 @@ func TestLoadAPConfig_NonExistent(t *testing.T) {
 		t.Fatalf("expected nil config for non-existent config, got: %+v", cfg)
 	}
 }
+
+func TestLoadAPConfig_ValidationErrorIncludesPath(t *testing.T) {
+	tempDir := t.TempDir()
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.MkdirAll(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	configFile := filepath.Join(apDir, "ap.yaml")
+
+	// 1. Invalid version
+	if err := os.WriteFile(configFile, []byte("version: main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadAPConfig(tempDir)
+	if err == nil {
+		t.Fatalf("expected error for invalid version, got nil")
+	}
+	if !strings.Contains(err.Error(), configFile) {
+		t.Errorf("expected error to contain %s, got: %v", configFile, err)
+	}
+
+	// 2. Invalid skipIfOnlyChanged pattern
+	badPatternContent := `presubmits:
+  skipIfOnlyChanged:
+  - "docs/*;rm -rf"
+`
+	if err := os.WriteFile(configFile, []byte(badPatternContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = LoadAPConfig(tempDir)
+	if err == nil {
+		t.Fatalf("expected error for invalid skip pattern, got nil")
+	}
+	if !strings.Contains(err.Error(), configFile) {
+		t.Errorf("expected error to contain %s, got: %v", configFile, err)
+	}
+}
