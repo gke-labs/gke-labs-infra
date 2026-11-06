@@ -24,15 +24,24 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+// readYAMLFile reads configFile. If the file does not exist, it returns found=false, err=nil.
+func readYAMLFile(configFile string) (data []byte, found bool, err error) {
+	data, err = os.ReadFile(configFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("error reading %s: %w", configFile, err)
+	}
+	return data, true, nil
+}
+
 // LoadYAML reads a YAML file at configFile and unmarshals it into out using UnmarshalStrict.
 // If the file does not exist, it returns found=false, err=nil.
 func LoadYAML(configFile string, out any) (found bool, err error) {
-	data, err := os.ReadFile(configFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, fmt.Errorf("error reading %s: %w", configFile, err)
+	data, found, err := readYAMLFile(configFile)
+	if err != nil || !found {
+		return found, err
 	}
 
 	if err := UnmarshalStrict(data, out); err != nil {

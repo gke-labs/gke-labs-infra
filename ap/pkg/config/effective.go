@@ -49,20 +49,16 @@ func Effective(repoRoot, dir string) (*Config, error) {
 		subtreeFiles[i], subtreeFiles[j] = subtreeFiles[j], subtreeFiles[i]
 	}
 
-	var files []string
-	rootFile := filepath.Join(cleanRepoRoot, ".ap", "go.yaml")
-	if fi, err := os.Stat(rootFile); err == nil && !fi.IsDir() {
-		files = append(files, rootFile)
-	} else if err != nil && !os.IsNotExist(err) {
-		return nil, fmt.Errorf("error checking %s: %w", rootFile, err)
-	}
-	files = append(files, subtreeFiles...)
+	files := append([]string{filepath.Join(cleanRepoRoot, ".ap", "go.yaml")}, subtreeFiles...)
 
 	var mergedMap map[string]any
 	for _, f := range files {
-		data, err := os.ReadFile(f)
+		data, found, err := readYAMLFile(f)
 		if err != nil {
-			return nil, fmt.Errorf("error reading %s: %w", f, err)
+			return nil, err
+		}
+		if !found {
+			continue
 		}
 		var check Config
 		if err := UnmarshalStrict(data, &check); err != nil {
