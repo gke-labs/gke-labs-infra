@@ -41,9 +41,11 @@ type TaskContext struct {
 	dir        string
 	sourceTree *sourcetree.SourceTree
 
-	stdout io.Writer
-	stderr io.Writer
-	log    logr.Logger
+	stdout       io.Writer
+	stderr       io.Writer
+	log          logr.Logger
+	printOutput  bool
+	artifactsDir string
 
 	// tools holds memoized resolved tool binary paths keyed by tool name.
 	tools map[string]string
@@ -125,6 +127,43 @@ func (s *TaskContext) WithOutput(stdout, stderr io.Writer) *TaskContext {
 	clone := *s
 	clone.stdout = stdout
 	clone.stderr = stderr
+	return &clone
+}
+
+// PrintOutput returns whether leaf tasks should print their buffered output even on success.
+func (s *TaskContext) PrintOutput() bool {
+	if s == nil {
+		return false
+	}
+	return s.printOutput
+}
+
+// WithPrintOutput returns a shallow copy of the task context with the given printOutput setting.
+func (s *TaskContext) WithPrintOutput(printOutput bool) *TaskContext {
+	if s == nil {
+		return nil
+	}
+	clone := *s
+	clone.printOutput = printOutput
+	return &clone
+}
+
+// ArtifactsDir returns the directory where task artifacts should be written,
+// returning the configured directory or os.Getenv("ARTIFACTS") if unset.
+func (s *TaskContext) ArtifactsDir() string {
+	if s != nil && s.artifactsDir != "" {
+		return s.artifactsDir
+	}
+	return os.Getenv("ARTIFACTS")
+}
+
+// WithArtifactsDir returns a shallow copy of the task context with custom artifacts directory.
+func (s *TaskContext) WithArtifactsDir(dir string) *TaskContext {
+	if s == nil {
+		return nil
+	}
+	clone := *s
+	clone.artifactsDir = dir
 	return &clone
 }
 

@@ -220,6 +220,7 @@ var _ Parent = (*Group)(nil)
 type RunOptions struct {
 	DryRun          bool
 	ContinueOnError bool
+	PrintOutput     bool
 }
 
 // Run executes a list of tasks.
@@ -230,6 +231,9 @@ func Run(ctx context.Context, scope *TaskContext, ts []Task, opts RunOptions) er
 			PrintTree(out, task, 0)
 		}
 		return nil
+	}
+	if opts.PrintOutput && scope != nil {
+		scope = scope.WithPrintOutput(true)
 	}
 	defer func() {
 		if scope != nil && scope.SourceTree() != nil {

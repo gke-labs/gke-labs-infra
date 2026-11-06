@@ -76,5 +76,8 @@ func RunE2e(ctx context.Context, opt E2eOptions) error {
 		}
 	}
 
-	return tasks.Run(ctx, tasks.NewTaskContext(opt.RepoRoot, opt.RepoRoot, r), allTasks, tasks.RunOptions{DryRun: opt.DryRun})
+	return tasks.Run(ctx, tasks.NewTaskContext(opt.RepoRoot, opt.RepoRoot, r), allTasks, tasks.RunOptions{
+		DryRun:      opt.DryRun,
+		PrintOutput: true,
+	})
 }
