@@ -30,7 +30,6 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
-	"k8s.io/klog/v2"
 )
 
 var execCommandContext = exec.CommandContext
@@ -138,7 +137,7 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.TaskContext) err
 				"by running 'docker buildx create --use', or configure a single platform in '.ap/images.yaml'", platforms)
 		}
 	} else if !t.Push && len(platforms) > 1 {
-		klog.Infof("Building locally without pushing; falling back to native platform")
+		scope.Log().Info("building locally without pushing, falling back to native platform", "platforms", platforms)
 		platforms = nil
 	}
 
@@ -186,7 +185,7 @@ func (t *DockerBuildTask) supportsMultiPlatform(ctx context.Context, buildxBin s
 }
 
 func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskContext, root, fullImageName, relDockerfilePath string, naming ImageNaming, platforms []string) error {
-	klog.Infof("Building image %s from %s using buildctl", fullImageName, root)
+	scope.Log().Info("building image with buildctl", "image", fullImageName, "root", root)
 
 	output := fmt.Sprintf("type=image,name=%s,push=%t", fullImageName, t.Push)
 	if t.Push {
@@ -196,7 +195,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 	metaFile := filepath.Join(os.TempDir(), fmt.Sprintf("buildctl-meta-%d.json", time.Now().UnixNano()))
 	defer func() {
 		if err := os.Remove(metaFile); err != nil && !os.IsNotExist(err) {
-			klog.V(4).Infof("failed to remove metadata file %s: %v", metaFile, err)
+			scope.Log().V(4).Info("failed to remove metadata file", "path", metaFile, "error", err)
 		}
 	}()
 
@@ -267,12 +266,12 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 }
 
 func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContext, buildxBin, dockerBin, root, fullImageName, actualImagePrefix, relDockerfilePath string, naming ImageNaming, platforms []string) error {
-	klog.Infof("Building image %s from %s using docker buildx", fullImageName, root)
+	scope.Log().Info("building image with docker buildx", "image", fullImageName, "root", root)
 
 	metaFile := filepath.Join(os.TempDir(), fmt.Sprintf("buildx-meta-%d.json", time.Now().UnixNano()))
 	defer func() {
 		if err := os.Remove(metaFile); err != nil && !os.IsNotExist(err) {
-			klog.V(4).Infof("failed to remove metadata file %s: %v", metaFile, err)
+			scope.Log().V(4).Info("failed to remove metadata file", "path", metaFile, "error", err)
 		}
 	}()
 

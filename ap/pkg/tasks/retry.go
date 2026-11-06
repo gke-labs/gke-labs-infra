@@ -18,10 +18,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
-	"k8s.io/klog/v2"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
+	"github.com/go-logr/logr"
+	"github.com/go-logr/logr/funcr"
 )
 
 // RetryPolicy reports whether a failed attempt (0-based) should be retried, and after how long.
@@ -84,9 +87,39 @@ func RunTask(ctx context.Context, scope *TaskContext, task Task) error {
 
 var runnerMu sync.Mutex
 
+func newBufferLogger(w io.Writer, verbosity int) logr.Logger {
+	empty := ""
+	return funcr.New(func(prefix, args string) {
+		if prefix != "" {
+			writef(w, "%s: %s\n", prefix, args)
+		} else {
+			writef(w, "%s\n", args)
+		}
+	}, funcr.Options{
+		Verbosity:    verbosity,
+		LogInfoLevel: &empty,
+	})
+}
+
+func currentVerbosity(scope *TaskContext) int {
+	if scope == nil {
+		return 0
+	}
+	log := scope.Log()
+	for v := 50; v > 0; v-- {
+		if log.V(v).Enabled() {
+			return v
+		}
+	}
+	return 0
+}
+
 func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
 	buf := &syncBuffer{}
 	taskScope := scope.WithOutput(buf, buf)
+	taskLog := newBufferLogger(taskScope.Stderr(), currentVerbosity(scope))
+	taskScope = taskScope.WithLog(taskLog)
+	ctx = scoped.WithLog(ctx, taskLog)
 	out := scope.Stdout()
 
 	start := time.Now()
@@ -102,11 +135,11 @@ func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
 	defer runnerMu.Unlock()
 
 	writef(out, "=== %s (%s, %.1fs)\n", task.GetName(), status, duration.Seconds())
-	if err != nil || klog.V(1).Enabled() {
+	if err != nil || scope.Log().V(1).Enabled() {
 		output := buf.Bytes()
 		if len(output) > 0 {
 			if _, writeErr := out.Write(output); writeErr != nil {
-				klog.V(2).Infof("failed to write task output: %v", writeErr)
+				scope.Log().V(2).Info("failed to write task output", "error", writeErr)
 			}
 			if !bytes.HasSuffix(output, []byte("\n")) {
 				writef(out, "\n")
@@ -134,7 +167,7 @@ func runTaskWithRetry(ctx context.Context, scope *TaskContext, task Task) error 
 		if !ok {
 			return fmt.Errorf("task %s failed: %w", task.GetName(), err)
 		}
-		klog.Warningf("task %s failed (attempt %d): %v; retrying in %v...", task.GetName(), attempt+1, err, wait)
+		scope.Log().Info("task failed, retrying", "level", "warning", "task", task.GetName(), "attempt", attempt+1, "error", err, "wait", wait)
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("task %s failed: %w", task.GetName(), ctx.Err())

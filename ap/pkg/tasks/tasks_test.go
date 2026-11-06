@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"k8s.io/klog/v2"
 )
@@ -788,4 +789,59 @@ func TestTaskOutputPolicy(t *testing.T) {
 			t.Errorf("expected passing task text at -v=1, got:\n%s", vOut)
 		}
 	})
+}
+
+func TestTaskLog_PerTaskBuffer(t *testing.T) {
+	var taskABuf, taskBBuf string
+	taskA := &FuncTask{
+		Name: "task-a",
+		RunFn: func(ctx context.Context, tc *TaskContext) error {
+			tc.Log().Info("hello from task A")
+			if b, ok := tc.Stderr().(interface{ String() string }); ok {
+				taskABuf = b.String()
+			}
+			return nil
+		},
+	}
+	taskB := &FuncTask{
+		Name: "task-b",
+		RunFn: func(ctx context.Context, tc *TaskContext) error {
+			tc.Log().Info("hello from task B")
+			// Also verify scoped.Log(ctx) writes to the same task buffer
+			scoped.Log(ctx).Info("context message from task B")
+			if b, ok := tc.Stderr().(interface{ String() string }); ok {
+				taskBBuf = b.String()
+			}
+			return nil
+		},
+	}
+
+	var outBuf syncBuffer
+	scope := newTestScope(t).WithOutput(&outBuf, &outBuf)
+	grp := &Group{
+		Name:     "log-isolation-test",
+		Tasks:    []Task{taskA, taskB},
+		Parallel: true,
+	}
+
+	if err := grp.Run(t.Context(), scope); err != nil {
+		t.Fatalf("grp.Run() failed: %v", err)
+	}
+
+	if !strings.Contains(taskABuf, "hello from task A") {
+		t.Errorf("expected task A buffer to contain 'hello from task A', got:\n%s", taskABuf)
+	}
+	if strings.Contains(taskABuf, "hello from task B") {
+		t.Errorf("expected task A buffer to NOT contain 'hello from task B', got:\n%s", taskABuf)
+	}
+
+	if !strings.Contains(taskBBuf, "hello from task B") {
+		t.Errorf("expected task B buffer to contain 'hello from task B', got:\n%s", taskBBuf)
+	}
+	if !strings.Contains(taskBBuf, "context message from task B") {
+		t.Errorf("expected task B buffer to contain 'context message from task B', got:\n%s", taskBBuf)
+	}
+	if strings.Contains(taskBBuf, "hello from task A") {
+		t.Errorf("expected task B buffer to NOT contain 'hello from task A', got:\n%s", taskBBuf)
+	}
 }

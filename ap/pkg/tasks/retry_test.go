@@ -15,10 +15,9 @@
 package tasks
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"os"
+	"flag"
 	"strings"
 	"testing"
 	"time"
@@ -82,13 +81,10 @@ func (p *selectiveRetryPolicy) ShouldRetry(_ int, err error) (time.Duration, boo
 
 func TestRunTask_Retry(t *testing.T) {
 	t.Run("fails twice then succeeds", func(t *testing.T) {
-		var logBuf bytes.Buffer
-		klog.SetOutput(&logBuf)
-		klog.LogToStderr(false)
-		defer func() {
-			klog.SetOutput(os.Stderr)
-			klog.LogToStderr(true)
-		}()
+		fs := flag.NewFlagSet("klog", flag.ContinueOnError)
+		klog.InitFlags(fs)
+		_ = fs.Set("v", "1")
+		defer fs.Set("v", "0")
 
 		task := &fakeRetryableTask{
 			name:     "fake-task",
@@ -99,7 +95,8 @@ func TestRunTask_Retry(t *testing.T) {
 			},
 		}
 
-		scope := newTestScope(t)
+		var outBuf syncBuffer
+		scope := newTestScope(t).WithOutput(&outBuf, &outBuf)
 		start := time.Now()
 		err := RunTask(t.Context(), scope, task)
 		elapsed := time.Since(start)
@@ -114,30 +111,22 @@ func TestRunTask_Retry(t *testing.T) {
 			t.Errorf("expected elapsed >= 30ms, got %v", elapsed)
 		}
 
-		logOutput := logBuf.String()
-		if !strings.Contains(logOutput, "task fake-task failed (attempt 1)") {
+		logOutput := outBuf.String()
+		if !strings.Contains(logOutput, `"task"="fake-task"`) || !strings.Contains(logOutput, `"attempt"=1`) {
 			t.Errorf("expected log to contain retry warning for attempt 1, got: %s", logOutput)
 		}
-		if !strings.Contains(logOutput, "retrying in 10ms...") {
-			t.Errorf("expected log to contain 'retrying in 10ms...', got: %s", logOutput)
+		if !strings.Contains(logOutput, `"wait"="10ms"`) {
+			t.Errorf("expected log to contain '\"wait\"=\"10ms\"', got: %s", logOutput)
 		}
-		if !strings.Contains(logOutput, "task fake-task failed (attempt 2)") {
+		if !strings.Contains(logOutput, `"attempt"=2`) {
 			t.Errorf("expected log to contain retry warning for attempt 2, got: %s", logOutput)
 		}
-		if !strings.Contains(logOutput, "retrying in 20ms...") {
-			t.Errorf("expected log to contain 'retrying in 20ms...', got: %s", logOutput)
+		if !strings.Contains(logOutput, `"wait"="20ms"`) {
+			t.Errorf("expected log to contain '\"wait\"=\"20ms\"', got: %s", logOutput)
 		}
 	})
 
 	t.Run("exhausts retries and returns wrapped last error", func(t *testing.T) {
-		var logBuf bytes.Buffer
-		klog.SetOutput(&logBuf)
-		klog.LogToStderr(false)
-		defer func() {
-			klog.SetOutput(os.Stderr)
-			klog.LogToStderr(true)
-		}()
-
 		sentinelErr := errors.New("persistent failure")
 		task := &fakeRetryableTask{
 			name:     "fake-task",
@@ -149,7 +138,8 @@ func TestRunTask_Retry(t *testing.T) {
 			},
 		}
 
-		scope := newTestScope(t)
+		var outBuf syncBuffer
+		scope := newTestScope(t).WithOutput(&outBuf, &outBuf)
 		err := RunTask(t.Context(), scope, task)
 		if err == nil {
 			t.Fatal("expected RunTask to fail on persistent error, got nil")
@@ -167,24 +157,16 @@ func TestRunTask_Retry(t *testing.T) {
 			t.Errorf("expected error message to contain persistent failure, got: %v", err)
 		}
 
-		logOutput := logBuf.String()
-		if !strings.Contains(logOutput, "task fake-task failed (attempt 1)") {
+		logOutput := outBuf.String()
+		if !strings.Contains(logOutput, `"task"="fake-task"`) || !strings.Contains(logOutput, `"attempt"=1`) {
 			t.Errorf("expected log to contain retry warning for attempt 1, got: %s", logOutput)
 		}
-		if !strings.Contains(logOutput, "task fake-task failed (attempt 2)") {
+		if !strings.Contains(logOutput, `"attempt"=2`) {
 			t.Errorf("expected log to contain retry warning for attempt 2, got: %s", logOutput)
 		}
 	})
 
 	t.Run("policy refuses to retry specific error", func(t *testing.T) {
-		var logBuf bytes.Buffer
-		klog.SetOutput(&logBuf)
-		klog.LogToStderr(false)
-		defer func() {
-			klog.SetOutput(os.Stderr)
-			klog.LogToStderr(true)
-		}()
-
 		fatalErr := errors.New("non-retryable fatal error")
 		task := &fakeRetryableTask{
 			name:     "fake-task",
@@ -196,7 +178,8 @@ func TestRunTask_Retry(t *testing.T) {
 			},
 		}
 
-		scope := newTestScope(t)
+		var outBuf syncBuffer
+		scope := newTestScope(t).WithOutput(&outBuf, &outBuf)
 		err := RunTask(t.Context(), scope, task)
 		if err == nil {
 			t.Fatal("expected RunTask to fail immediately on refused error, got nil")
@@ -211,21 +194,13 @@ func TestRunTask_Retry(t *testing.T) {
 			t.Errorf("expected error message to contain task name, got: %v", err)
 		}
 
-		logOutput := logBuf.String()
-		if strings.Contains(logOutput, "retrying in") {
+		logOutput := outBuf.String()
+		if strings.Contains(logOutput, "retrying") {
 			t.Errorf("expected no retry warnings in log, got: %s", logOutput)
 		}
 	})
 
 	t.Run("context cancellation aborts retry", func(t *testing.T) {
-		var logBuf bytes.Buffer
-		klog.SetOutput(&logBuf)
-		klog.LogToStderr(false)
-		defer func() {
-			klog.SetOutput(os.Stderr)
-			klog.LogToStderr(true)
-		}()
-
 		ctx, cancel := context.WithCancel(t.Context())
 		task := &fakeRetryableTask{
 			name:     "fake-task",
@@ -241,7 +216,8 @@ func TestRunTask_Retry(t *testing.T) {
 			cancel()
 		}()
 
-		scope := newTestScope(t)
+		var outBuf syncBuffer
+		scope := newTestScope(t).WithOutput(&outBuf, &outBuf)
 		err := RunTask(ctx, scope, task)
 		if err == nil {
 			t.Fatal("expected error on cancelled context, got nil")
