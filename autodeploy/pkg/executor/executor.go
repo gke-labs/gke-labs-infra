@@ -28,6 +28,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+const (
+	PackageNameLabel      = "infra.labs.gke.io/package-name"
+	PackageNamespaceLabel = "infra.labs.gke.io/package-namespace"
+	DefaultJobNamespace   = "autodeploy-system"
+)
+
 // Runner defines the interface for running 'ap' commands.
 type Runner interface {
 	DeployFlow(ctx context.Context, pkg *v1alpha1.Package, commit string, args ...string) error
@@ -39,6 +45,16 @@ type APRunner struct {
 	ImagePrefix  string
 	ImageTag     string
 	BuildkitHost string
+	JobNamespace string
+}
+
+// JobName returns the Job name for a given package and commit.
+func JobName(packageName, commit string) string {
+	name := fmt.Sprintf("deploy-%s-%s", packageName, commit)
+	if len(name) > 63 {
+		name = name[:63]
+	}
+	return name
 }
 
 // DeployFlow runs the full build-test-deploy flow by creating a Kubernetes Job.
@@ -52,19 +68,28 @@ func (r *APRunner) DeployFlow(ctx context.Context, pkg *v1alpha1.Package, commit
 	script := fmt.Sprintf("git clone %s /src && cd /src && git checkout %s && ap build %s && ap test %s && ap deploy %s",
 		pkg.Spec.Repo, commit, argStr, argStr, argStr)
 
-	// Keep job name under 63 chars
-	jobName := fmt.Sprintf("deploy-%s-%s", pkg.Name, commit)
-	if len(jobName) > 63 {
-		jobName = jobName[:63]
+	jobName := JobName(pkg.Name, commit)
+	jobNamespace := r.JobNamespace
+	if jobNamespace == "" {
+		jobNamespace = DefaultJobNamespace
+	}
+
+	labels := map[string]string{
+		PackageNameLabel:      pkg.Name,
+		PackageNamespaceLabel: pkg.Namespace,
 	}
 
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobName,
-			Namespace: "autodeploy-system",
+			Namespace: jobNamespace,
+			Labels:    labels,
 		},
 		Spec: batchv1.JobSpec{
 			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+				},
 				Spec: corev1.PodSpec{
 					RestartPolicy:      corev1.RestartPolicyNever,
 					ServiceAccountName: "autodeploy-controller",
@@ -86,7 +111,7 @@ func (r *APRunner) DeployFlow(ctx context.Context, pkg *v1alpha1.Package, commit
 		},
 	}
 
-	klog.Infof("Creating Job %s in namespace autodeploy-system for package %s (commit %s)", jobName, pkg.Name, commit)
+	klog.Infof("Creating Job %s in namespace %s for package %s (commit %s)", jobName, jobNamespace, pkg.Name, commit)
 	if err := r.Client.Create(ctx, job); err != nil {
 		if !errors.IsAlreadyExists(err) {
 			return fmt.Errorf("failed to create Job: %w", err)
