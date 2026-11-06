@@ -17,6 +17,7 @@ package protoc
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -116,5 +117,11 @@ unknown_key: "value"
 	_, err := LoadConfig(tempDir)
 	if err == nil {
 		t.Fatal("expected error for unknown key, got nil")
+	}
+	if !strings.Contains(err.Error(), ".ap/proto.yaml") {
+		t.Errorf("expected error to mention .ap/proto.yaml, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), `"unknown_key"`) {
+		t.Errorf("expected error to name unknown key path \"unknown_key\", got: %v", err)
 	}
 }

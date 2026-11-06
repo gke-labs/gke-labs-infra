@@ -71,7 +71,7 @@ generate:
 	}
 }
 
-func TestLoadAPConfig_UnknownKey(t *testing.T) {
+func TestLoadAPConfig_UnknownField(t *testing.T) {
 	tempDir := t.TempDir()
 	apDir := filepath.Join(tempDir, ".ap")
 	if err := os.MkdirAll(apDir, 0755); err != nil {
@@ -90,7 +90,82 @@ unknownKey: "value"
 	if err == nil {
 		t.Fatalf("expected error for unknown key, got nil")
 	}
-	if !strings.Contains(err.Error(), "unknown key") {
-		t.Errorf("expected error to mention unknown key, got: %v", err)
+	if !strings.Contains(err.Error(), ".ap/ap.yaml") {
+		t.Errorf("expected error to mention .ap/ap.yaml, got %v", err)
+	}
+	if !strings.Contains(err.Error(), `"unknownKey"`) {
+		t.Errorf("expected error to name unknown key path \"unknownKey\", got: %v", err)
+	}
+}
+
+func TestLoadAPConfig_ValidateVersion(t *testing.T) {
+	tests := []struct {
+		name    string
+		version string
+		wantErr bool
+	}{
+		{name: "empty is valid", version: "", wantErr: false},
+		{name: "!self is valid", version: "!self", wantErr: false},
+		{name: "latest is valid", version: "latest", wantErr: false},
+		{name: "semver v0.1.0 is valid", version: "v0.1.0", wantErr: false},
+		{name: "semver v1.2.3 is valid", version: "v1.2.3", wantErr: false},
+		{name: "pseudo-version is valid", version: "v0.0.0-20261024111447-4ab120e48572", wantErr: false},
+		{name: "missing v prefix is invalid", version: "1.2.3", wantErr: true},
+		{name: "arbitrary string is invalid", version: "invalid", wantErr: true},
+		{name: "branch name is invalid", version: "main", wantErr: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &APConfig{Version: tc.version}
+			err := cfg.Validate()
+			if tc.wantErr && err == nil {
+				t.Fatalf("expected Validate() to fail for version %q, got nil", tc.version)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("expected Validate() to succeed for version %q, got: %v", tc.version, err)
+			}
+		})
+	}
+}
+
+func TestLoadAPConfig_ValidatePresubmits(t *testing.T) {
+	tests := []struct {
+		name     string
+		patterns []string
+		wantErr  bool
+	}{
+		{name: "valid globs", patterns: []string{"docs/*", "README.md", "*.md", "pkg/**"}, wantErr: false},
+		{name: "empty pattern is invalid", patterns: []string{""}, wantErr: true},
+		{name: "shell metacharacters are invalid", patterns: []string{"docs/*;rm -rf"}, wantErr: true},
+		{name: "spaces are invalid", patterns: []string{"docs / *"}, wantErr: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &APConfig{
+				Presubmits: &PresubmitConfig{
+					SkipIfOnlyChanged: tc.patterns,
+				},
+			}
+			err := cfg.Validate()
+			if tc.wantErr && err == nil {
+				t.Fatalf("expected Validate() to fail for patterns %v, got nil", tc.patterns)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("expected Validate() to succeed for patterns %v, got: %v", tc.patterns, err)
+			}
+		})
+	}
+}
+
+func TestLoadAPConfig_NonExistent(t *testing.T) {
+	tempDir := t.TempDir()
+	cfg, err := LoadAPConfig(tempDir)
+	if err != nil {
+		t.Fatalf("expected nil error for non-existent config, got: %v", err)
+	}
+	if cfg != nil {
+		t.Fatalf("expected nil config for non-existent config, got: %+v", cfg)
 	}
 }

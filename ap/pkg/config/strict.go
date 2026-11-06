@@ -16,12 +16,35 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"reflect"
 	"sort"
 	"strings"
 
 	"sigs.k8s.io/yaml"
 )
+
+// LoadYAML reads a YAML file at configFile and unmarshals it into out using UnmarshalStrict.
+// If the file does not exist, it returns found=false, err=nil.
+func LoadYAML(configFile string, out any) (found bool, err error) {
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("error reading %s: %w", configFile, err)
+	}
+
+	if err := UnmarshalStrict(data, out); err != nil {
+		return false, fmt.Errorf("error parsing %s: %w", configFile, err)
+	}
+
+	return true, nil
+}
+
+func loadYAML(configFile string, out any) (found bool, err error) {
+	return LoadYAML(configFile, out)
+}
 
 // UnmarshalStrict unmarshals YAML data into obj, rejecting unknown fields.
 // An unknown key produces an error that names the full key path and,

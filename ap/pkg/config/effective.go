@@ -54,13 +54,9 @@ func Effective(repoRoot, dir string) (*Config, error) {
 	}
 
 	for _, goFile := range subtreeFiles {
-		data, err := os.ReadFile(goFile)
-		if err != nil {
-			return nil, fmt.Errorf("error reading %s: %w", goFile, err)
-		}
 		var override Config
-		if err := UnmarshalStrict(data, &override); err != nil {
-			return nil, fmt.Errorf("error parsing %s: %w", goFile, err)
+		if _, err := loadYAML(goFile, &override); err != nil {
+			return nil, err
 		}
 		effective.apply(&override)
 	}

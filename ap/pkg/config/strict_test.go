@@ -426,3 +426,93 @@ platform:
 		t.Errorf("expected error to suggest \"platforms\", got %v", err)
 	}
 }
+
+func TestLoadAPConfig_UnknownKey(t *testing.T) {
+	tempDir := t.TempDir()
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.Mkdir(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	yamlContent := `
+verison: "!self"
+`
+	if err := os.WriteFile(filepath.Join(apDir, "ap.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadAPConfig(tempDir)
+	if err == nil {
+		t.Fatalf("expected LoadAPConfig to fail on unknown key")
+	}
+	if !strings.Contains(err.Error(), ".ap/ap.yaml") {
+		t.Errorf("expected error to mention .ap/ap.yaml, got %v", err)
+	}
+	if !strings.Contains(err.Error(), `"verison"`) {
+		t.Errorf("expected error to name \"verison\", got %v", err)
+	}
+	if !strings.Contains(err.Error(), `"version"`) {
+		t.Errorf("expected error to suggest \"version\", got %v", err)
+	}
+}
+
+func TestLoadAPConfig_UnknownNestedKey(t *testing.T) {
+	tempDir := t.TempDir()
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.Mkdir(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	yamlContent := `
+presubmits:
+  unknownPresubmitField: true
+`
+	if err := os.WriteFile(filepath.Join(apDir, "ap.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadAPConfig(tempDir)
+	if err == nil {
+		t.Fatalf("expected LoadAPConfig to fail on unknown nested key")
+	}
+	if !strings.Contains(err.Error(), ".ap/ap.yaml") {
+		t.Errorf("expected error to mention .ap/ap.yaml, got %v", err)
+	}
+	if !strings.Contains(err.Error(), `"presubmits.unknownPresubmitField"`) {
+		t.Errorf("expected error to name \"presubmits.unknownPresubmitField\", got %v", err)
+	}
+}
+
+func TestLoadYAML_ProtoYAML_UnknownKey(t *testing.T) {
+	tempDir := t.TempDir()
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.Mkdir(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	yamlContent := `
+protoc: "21.12"
+unknown_proto_key: "value"
+`
+	configFile := filepath.Join(apDir, "proto.yaml")
+	if err := os.WriteFile(configFile, []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	type protoConfig struct {
+		Protoc  string            `json:"protoc"`
+		Plugins map[string]string `json:"plugins"`
+	}
+
+	var cfg protoConfig
+	_, err := loadYAML(configFile, &cfg)
+	if err == nil {
+		t.Fatalf("expected loadYAML to fail on unknown key for proto.yaml")
+	}
+	if !strings.Contains(err.Error(), ".ap/proto.yaml") {
+		t.Errorf("expected error to mention .ap/proto.yaml, got %v", err)
+	}
+	if !strings.Contains(err.Error(), `"unknown_proto_key"`) {
+		t.Errorf("expected error to name \"unknown_proto_key\", got %v", err)
+	}
+}
