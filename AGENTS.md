@@ -50,3 +50,19 @@ Additionally, you should run the following commands to ensure that your changes 
 ```bash
 ap e2e
 ```
+
+## Scope
+
+- One idea, one issue, one PR. If a PR can be split into two ideas, split it; problems found during review that are outside the PR's idea become new issues.
+- A good PR changes at most 200 lines including tests; review cost grows roughly with the square of the diff. If the one idea needs more, say so on the issue before pushing and propose the cut.
+- Issues carry a line budget; an issue without one gets one before it is assigned.
+- Separate mechanical changes (moves, renames, reformatting) from behaviour changes: own PR or at least own first commit.
+- Stay in scope during review: fix what the review asks for; no unrequested improvements (compatibility shims, extra options, opportunistic refactors).
+- "No new tests" in an issue means none; otherwise tests are proportionate to the change.
+
+## Commit messages and PR descriptions
+
+- The git history is the permanent record; the PR description is not. Anything a future reader needs goes in code comments or the commit message.
+- Subject `area: imperative summary` (about 72 characters); body says why, not just what: symptom, root cause, why the change fixes it, alternatives considered for design changes, numbers and how they were measured for performance changes. If a reviewer had to ask, the answer belongs in the message.
+- Keep messages true to the final code. When review changes the approach, amend the original commit or add `fixup!` commits and leave them in place (do not squash them); never leave a message describing code that was later removed.
+- **The PR description is bookkeeping only: normally just `Fixes #N`.** Do not summarise or sell the change, do not paste commit messages, do not keep a changelog of review revisions in the description.
