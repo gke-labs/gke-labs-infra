@@ -39,5 +39,5 @@ A component that executes `ap` commands. Since `autodeploy` runs in K8s:
 ## Patterns and Conventions
 
 *   Use `k8s.io/client-go` and `sigs.k8s.io/controller-runtime` for Kubernetes interactions.
-*   Follow the task-based model described in the root `GEMINI.md`.
+*   Follow the task-based model described in the root `AGENTS.md`.
 *   Ensure high observability through logging and metrics.
