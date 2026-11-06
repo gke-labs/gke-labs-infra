@@ -16,7 +16,6 @@ package kubectl
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
@@ -43,17 +42,13 @@ func DefaultConfig() *Config {
 func LoadConfig(root string) (*Config, error) {
 	configFile := filepath.Join(root, ".ap/kubectl.yaml")
 
-	data, err := os.ReadFile(configFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("error reading %s: %w", configFile, err)
-	}
-
 	var cfg Config
-	if err := config.UnmarshalStrict(data, &cfg); err != nil {
-		return nil, fmt.Errorf("error parsing %s: %w", configFile, err)
+	found, err := config.LoadYAML(configFile, &cfg)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, nil
 	}
 
 	if err := cfg.ApplyDefaultsAndValidate(); err != nil {

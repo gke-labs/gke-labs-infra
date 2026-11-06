@@ -908,30 +908,7 @@ func loadPresubmitSkipPatterns(repoRoot string) ([]string, error) {
 		return nil, nil
 	}
 
-	patterns := cfg.Presubmits.SkipIfOnlyChanged
-	for _, p := range patterns {
-		if !presubmitSkipPatternOK(p) {
-			return nil, fmt.Errorf("%s: presubmits.skipIfOnlyChanged pattern %q: only letters, digits, and / . _ - * ? ! [ ] are allowed", filepath.Join(repoRoot, ".ap", "ap.yaml"), p)
-		}
-	}
-	return patterns, nil
-}
-
-// presubmitSkipPatternOK reports whether a skipIfOnlyChanged pattern
-// is safe to splice into the generated bash `case` statement.
-func presubmitSkipPatternOK(p string) bool {
-	if p == "" {
-		return false
-	}
-	for _, r := range p {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
-		case strings.ContainsRune("/._-*?![]", r):
-		default:
-			return false
-		}
-	}
-	return true
+	return cfg.Presubmits.SkipIfOnlyChanged, nil
 }
 
 // presubmitSkipGuardFromConfig renders the early-exit block spliced

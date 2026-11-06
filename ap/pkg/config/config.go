@@ -144,17 +144,8 @@ func Load(repoRoot string) (*Config, error) {
 	configFile := filepath.Join(repoRoot, ".ap/go.yaml")
 
 	var config Config
-	if _, err := os.Stat(configFile); err == nil {
-		data, err := os.ReadFile(configFile)
-		if err != nil {
-			return nil, fmt.Errorf("error reading %s: %w", configFile, err)
-		}
-
-		if err := UnmarshalStrict(data, &config); err != nil {
-			return nil, fmt.Errorf("error parsing %s: %w", configFile, err)
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("error checking %s: %w", configFile, err)
+	if _, err := LoadYAML(configFile, &config); err != nil {
+		return nil, err
 	}
 
 	if err := config.Validate(); err != nil {
@@ -415,17 +406,8 @@ type HeadersConfig struct {
 func LoadHeaders(repoRoot string) (*HeadersConfig, error) {
 	configFile := filepath.Join(repoRoot, ".ap/headers.yaml")
 	var config HeadersConfig
-	if _, err := os.Stat(configFile); err == nil {
-		data, err := os.ReadFile(configFile)
-		if err != nil {
-			return nil, fmt.Errorf("error reading %s: %w", configFile, err)
-		}
-
-		if err := UnmarshalStrict(data, &config); err != nil {
-			return nil, fmt.Errorf("error parsing %s: %w", configFile, err)
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("error checking %s: %w", configFile, err)
+	if _, err := LoadYAML(configFile, &config); err != nil {
+		return nil, err
 	}
 
 	if config.SkipGenerated == nil {
@@ -445,17 +427,8 @@ func LoadImagesConfig(root string) (*ImagesConfig, error) {
 	configFile := filepath.Join(root, ".ap/images.yaml")
 
 	var config ImagesConfig
-	if _, err := os.Stat(configFile); err == nil {
-		data, err := os.ReadFile(configFile)
-		if err != nil {
-			return nil, fmt.Errorf("error reading %s: %w", configFile, err)
-		}
-
-		if err := UnmarshalStrict(data, &config); err != nil {
-			return nil, fmt.Errorf("error parsing %s: %w", configFile, err)
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("error checking %s: %w", configFile, err)
+	if _, err := LoadYAML(configFile, &config); err != nil {
+		return nil, err
 	}
 
 	return &config, nil

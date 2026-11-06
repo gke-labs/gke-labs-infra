@@ -16,8 +16,10 @@ package config
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
+	"strings"
+
+	"golang.org/x/mod/semver"
 )
 
 // GenerateConfig represents generation and verification configuration.
@@ -43,18 +45,52 @@ type APConfig struct {
 // LoadAPConfig loads the configuration from .ap/ap.yaml using strict unmarshaling.
 func LoadAPConfig(root string) (*APConfig, error) {
 	configFile := filepath.Join(root, ".ap", "ap.yaml")
-	data, err := os.ReadFile(configFile)
+	var cfg APConfig
+	found, err := LoadYAML(configFile, &cfg)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("error reading %s: %w", configFile, err)
+		return nil, err
+	}
+	if !found {
+		return nil, nil
 	}
 
-	var cfg APConfig
-	if err := UnmarshalStrict(data, &cfg); err != nil {
-		return nil, fmt.Errorf("error parsing %s: %w", configFile, err)
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("%s: %w", configFile, err)
 	}
 
 	return &cfg, nil
+}
+
+// Validate checks the configuration for semantic errors.
+func (c *APConfig) Validate() error {
+	if c.Version != "" && c.Version != "!self" && c.Version != "latest" && !semver.IsValid(c.Version) {
+		return fmt.Errorf("invalid version %q: must be '!self', 'latest', or a module version string", c.Version)
+	}
+
+	if c.Presubmits != nil {
+		for _, p := range c.Presubmits.SkipIfOnlyChanged {
+			if !presubmitSkipPatternOK(p) {
+				return fmt.Errorf("presubmits.skipIfOnlyChanged pattern %q: only letters, digits, and / . _ - * ? ! [ ] are allowed", p)
+			}
+		}
+	}
+
+	return nil
+}
+
+// presubmitSkipPatternOK reports whether a skipIfOnlyChanged pattern
+// is safe to splice into the generated bash `case` statement.
+func presubmitSkipPatternOK(p string) bool {
+	if p == "" {
+		return false
+	}
+	for _, r := range p {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case strings.ContainsRune("/._-*?![]", r):
+		default:
+			return false
+		}
+	}
+	return true
 }
