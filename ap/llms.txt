@@ -62,3 +62,7 @@ When writing Kubernetes manifests, follow these guidelines:
 
 -   **Do not specify `imagePullPolicy`**: Kubernetes will automatically set a reasonable default (e.g., `Always` if the tag is `:latest`, `IfNotPresent` otherwise).
 -   **Image Naming**: The image name should map to the directory name under `images`. For example, a Dockerfile at `images/foo/Dockerfile` will result in an image named `${IMAGE_PREFIX}/foo`. In your manifest, you should specify the image as `foo` or `foo:latest`. `ap` will handle the prefixing during deployment.
+
+## Task Output
+
+Every leaf task runs with buffered output, printing a status line per task (`=== <name> (ok|FAILED, <duration>)`) and emitting captured output only on failure (pass `-v=1` to print output for passing tasks).

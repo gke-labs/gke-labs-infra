@@ -17,16 +17,19 @@ package tasks
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
+	"k8s.io/klog/v2"
 )
 
 func TestFindTaskScripts(t *testing.T) {
@@ -371,6 +374,11 @@ func TestParallelGroup(t *testing.T) {
 	// 1. Verify concurrency actually happens, bounded by the limit,
 	// and output blocks are whole and in completion order.
 	t.Run("ConcurrencyAndCompletionOrder", func(t *testing.T) {
+		fs := flag.NewFlagSet("klog", flag.ContinueOnError)
+		klog.InitFlags(fs)
+		_ = fs.Set("v", "1")
+		defer fs.Set("v", "0")
+
 		const limit = 2
 		var activeCount int64
 		var maxActive int64
@@ -582,12 +590,12 @@ func TestParallelGroup(t *testing.T) {
 		if !strings.Contains(outStr, "=== task-0 (FAILED,") {
 			t.Errorf("expected '=== task-0 (FAILED,' in output:\n%s", outStr)
 		}
-		// Must contain failure summary with task-0 output
-		if !strings.Contains(outStr, "=== FAILURE SUMMARY ===") {
-			t.Errorf("expected failure summary in output:\n%s", outStr)
+		// Must contain summary line with task-0
+		if !strings.Contains(outStr, "test-cancel-group: 1 of 3 failed: task-0") {
+			t.Errorf("expected failed task summary line in output:\n%s", outStr)
 		}
 		if !strings.Contains(outStr, "task-0 failed details") {
-			t.Errorf("expected task-0 failed details in failure summary:\n%s", outStr)
+			t.Errorf("expected task-0 failed details in output:\n%s", outStr)
 		}
 	})
 
@@ -650,11 +658,134 @@ func TestParallelGroup(t *testing.T) {
 		}
 
 		outStr := outBuf.String()
-		if !strings.Contains(outStr, "=== FAILURE SUMMARY ===") {
-			t.Errorf("expected failure summary in output:\n%s", outStr)
+		if !strings.Contains(outStr, "test-continue-group: 2 of 3 failed: task-a, task-c") {
+			t.Errorf("expected failed task summary line in output:\n%s", outStr)
 		}
 		if !strings.Contains(outStr, "task-a error output") || !strings.Contains(outStr, "task-c error output") {
-			t.Errorf("expected failed tasks output in failure summary:\n%s", outStr)
+			t.Errorf("expected failed tasks output in output:\n%s", outStr)
+		}
+		if strings.Contains(outStr, "task-b ok output") {
+			t.Errorf("expected passing task output to be omitted at default verbosity, got:\n%s", outStr)
+		}
+	})
+}
+
+func TestTaskOutputPolicy(t *testing.T) {
+	newScope := func(t *testing.T, out *syncBuffer) *TaskContext {
+		tree, err := sourcetree.Open(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return NewTaskContext(t.TempDir(), t.TempDir(), tree).WithOutput(out, out)
+	}
+
+	makeTasks := func() (Task, Task) {
+		pass := &FuncTask{
+			Name: "task-pass",
+			RunFn: func(ctx context.Context, s *TaskContext) error {
+				fmt.Fprintln(s.Stdout(), "passing task text")
+				return nil
+			},
+		}
+		fail := &FuncTask{
+			Name: "task-fail",
+			RunFn: func(ctx context.Context, s *TaskContext) error {
+				fmt.Fprintln(s.Stdout(), "failing task text")
+				return errors.New("boom")
+			},
+		}
+		return pass, fail
+	}
+
+	normalizeLines := func(s string) []string {
+		var lines []string
+		for _, l := range strings.Split(strings.TrimSpace(s), "\n") {
+			l = strings.TrimSpace(l)
+			if l == "" {
+				continue
+			}
+			if strings.HasPrefix(l, "=== ") && strings.HasSuffix(l, ")") {
+				if idx := strings.LastIndex(l, ", "); idx != -1 {
+					l = l[:idx] + ")"
+				}
+			}
+			lines = append(lines, l)
+		}
+		sort.Strings(lines)
+		return lines
+	}
+
+	// Sequential Group of two FuncTasks writing to tc.Stdout(), one failing;
+	// at default verbosity passing task text is absent, failing task text is present.
+	var seqBuf syncBuffer
+	seqScope := newScope(t, &seqBuf)
+	pass1, fail1 := makeTasks()
+	seqGroup := &Group{
+		Name:            "test-output-policy",
+		ContinueOnError: true,
+		Tasks:           []Task{pass1, fail1},
+	}
+	_ = seqGroup.Run(t.Context(), seqScope)
+	seqOut := seqBuf.String()
+
+	if strings.Contains(seqOut, "passing task text") {
+		t.Errorf("expected passing task text to be absent at default verbosity, got:\n%s", seqOut)
+	}
+	if !strings.Contains(seqOut, "=== task-pass (ok,") {
+		t.Errorf("expected passing task header in output, got:\n%s", seqOut)
+	}
+	if !strings.Contains(seqOut, "=== task-fail (FAILED,") {
+		t.Errorf("expected failing task header in output, got:\n%s", seqOut)
+	}
+	if !strings.Contains(seqOut, "failing task text") {
+		t.Errorf("expected failing task text to be present in output, got:\n%s", seqOut)
+	}
+
+	// The same group with Parallel: true yields the same set of lines.
+	var parBuf syncBuffer
+	parScope := newScope(t, &parBuf)
+	pass2, fail2 := makeTasks()
+	parGroup := &Group{
+		Name:            "test-output-policy",
+		Parallel:        true,
+		ContinueOnError: true,
+		Tasks:           []Task{pass2, fail2},
+	}
+	_ = parGroup.Run(t.Context(), parScope)
+	parOut := parBuf.String()
+
+	if strings.Contains(parOut, "passing task text") {
+		t.Errorf("expected passing task text to be absent in parallel at default verbosity, got:\n%s", parOut)
+	}
+	if !strings.Contains(parOut, "failing task text") {
+		t.Errorf("expected failing task text to be present in parallel, got:\n%s", parOut)
+	}
+
+	seqLines := normalizeLines(seqOut)
+	parLines := normalizeLines(parOut)
+	if strings.Join(seqLines, "\n") != strings.Join(parLines, "\n") {
+		t.Errorf("expected parallel group to yield same set of lines as sequential group:\nsequential lines:\n%v\nparallel lines:\n%v", seqLines, parLines)
+	}
+
+	// At -v=1, passing task text is also printed
+	t.Run("VerboseOnePrintsPassingOutput", func(t *testing.T) {
+		fs := flag.NewFlagSet("klog", flag.ContinueOnError)
+		klog.InitFlags(fs)
+		_ = fs.Set("v", "1")
+		defer fs.Set("v", "0")
+
+		var vBuf syncBuffer
+		vScope := newScope(t, &vBuf)
+		pass3, fail3 := makeTasks()
+		vGroup := &Group{
+			Name:            "test-output-policy",
+			ContinueOnError: true,
+			Tasks:           []Task{pass3, fail3},
+		}
+		_ = vGroup.Run(t.Context(), vScope)
+		vOut := vBuf.String()
+		if !strings.Contains(vOut, "passing task text") {
+			t.Errorf("expected passing task text at -v=1, got:\n%s", vOut)
 		}
 	})
 }
