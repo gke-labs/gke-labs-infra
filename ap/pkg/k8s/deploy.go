@@ -25,6 +25,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/applyset"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/imageref"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
@@ -393,6 +394,8 @@ type DeployTaskOptions struct {
 	CheckNamespace    func(ctx context.Context, namespace string) error
 	Naming            imageref.ImageNaming
 	KubeContext       string
+	ApplySetID        string
+	Membership        *applyset.Membership
 }
 
 // KubectlApplyTask represents a task to apply a single k8s manifest.
@@ -404,6 +407,8 @@ type KubectlApplyTask struct {
 	CheckNamespace    func(ctx context.Context, namespace string) error
 	Naming            imageref.ImageNaming
 	KubeContext       string
+	ApplySetID        string
+	Membership        *applyset.Membership
 }
 
 func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
@@ -471,6 +476,34 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 			klog.Warningf("Cluster-scoped object(s) left unchanged in %s: %s (names may collide between deployments into different namespaces)", relPath, strings.Join(clusterScoped, ", "))
 		}
 		replaced = retargeted
+	}
+
+	if t.ApplySetID != "" {
+		resolver := t.ScopeResolver
+		if resolver == nil {
+			var err error
+			resolver, err = GetDiscoveryScopeResolver(t.KubeContext, kubectlBin)
+			if err != nil {
+				return fmt.Errorf("failed to get discovery scope resolver: %w", err)
+			}
+		}
+
+		fallbackNS := t.Namespace
+		if fallbackNS == "" {
+			fallbackNS = "default"
+		}
+
+		stamped, appliedObjs, err := StampManifest(replaced, t.ApplySetID, resolver, fallbackNS)
+		if err != nil {
+			return fmt.Errorf("failed to stamp applyset label in %s: %w", relPath, err)
+		}
+		replaced = stamped
+
+		if t.Membership != nil {
+			for _, obj := range appliedObjs {
+				t.Membership.Add(obj.GroupKind, obj.Namespace)
+			}
+		}
 	}
 
 	var applyArgs []string
@@ -609,6 +642,8 @@ func DeployTasksForManifests(manifests []string, opts ...DeployTaskOptions) task
 			CheckNamespace:    opt.CheckNamespace,
 			Naming:            opt.Naming,
 			KubeContext:       opt.KubeContext,
+			ApplySetID:        opt.ApplySetID,
+			Membership:        opt.Membership,
 		})
 	}
 
