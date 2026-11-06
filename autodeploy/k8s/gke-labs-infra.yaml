@@ -1,9 +1,0 @@
-apiVersion: infra.labs.gke.io/v1alpha1
-kind: Package
-metadata:
-  name: gke-labs-infra
-  namespace: default
-spec:
-  repo: https://github.com/gke-labs/gke-labs-infra
-  branch: main
-  interval: 5m

@@ -65,8 +65,12 @@ func (r *APRunner) DeployFlow(ctx context.Context, pkg *v1alpha1.Package, commit
 	}
 
 	argStr := strings.Join(args, " ")
+	deployArgs := "-n " + pkg.Namespace
+	if argStr != "" {
+		deployArgs += " " + argStr
+	}
 	script := fmt.Sprintf("git clone %s /src && cd /src && git checkout %s && ap build %s && ap test %s && ap deploy %s",
-		pkg.Spec.Repo, commit, argStr, argStr, argStr)
+		pkg.Spec.Repo, commit, argStr, argStr, deployArgs)
 
 	jobName := JobName(pkg.Name, commit)
 	jobNamespace := r.JobNamespace
