@@ -40,6 +40,7 @@ When making changes to an AP-managed project, coding agents should follow this v
 3.  **Test**:
     -   Run `ap test` for unit and integration tests.
     -   Run `ap e2e` for end-to-end tests.
+        -   If a root has `tests/e2e` Go tests, `ap e2e` runs `RUN_E2E=1 go test -v -count=1 -timeout 30m ./tests/e2e/...`. A `dev/tasks/test-e2e*` script at the same root runs before them and is for setup only (build a binary, prepare a cluster, free disk space); it must not run the Go tests itself, or they run twice.
         -   If a kind worker's kubelet restarts in a loop while other nodes are Ready, check inotify limits; CI jobs that create more than one kind cluster should raise them with a visible `sudo sysctl -w` step.
 
 ## Deployment
