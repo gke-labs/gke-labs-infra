@@ -66,3 +66,27 @@ ap e2e
 - Subject `area: imperative summary` (about 72 characters); body says why, not just what: symptom, root cause, why the change fixes it, alternatives considered for design changes, numbers and how they were measured for performance changes. If a reviewer had to ask, the answer belongs in the message.
 - Keep messages true to the final code. When review changes the approach, amend the original commit or add `fixup!` commits and leave them in place (do not squash them); never leave a message describing code that was later removed.
 - **The PR description is bookkeeping only: normally just `Fixes #N`.** Do not summarise or sell the change, do not paste commit messages, do not keep a changelog of review revisions in the description.
+
+## Naming
+
+- Do not abbreviate identifiers (`header` not `hdr`, `buffer` not `buf`); exceptions are conventional Go only: `i`/`j`/`k` indices, one- or two-letter receivers, `ctx`/`err`/`ok`/`wg`/`mu`/`tx`, protocol or on-disk field names that are themselves abbreviations.
+- Names match signatures (`build...` returns bytes, `write...` takes a writer); names reflect side effects (`New...` only for fresh values); one name per concept.
+
+## Error handling
+
+- Never discard an error silently: return it wrapped with context, log it with context when best-effort, or handle a specific expected condition explicitly. `ap lint`'s `droppederrors` analyzer enforces this; new code must not grow the baseline.
+
+## Go API rules
+
+- No variadic parameters as a substitute for optional arguments; add the parameter and update every call site. Variadics are for genuine lists and functional options with a designed default.
+- No nil guards or defaulted nil contexts: callers pass `context.Background()` or a real context; a nil receiver or nil required argument is a bug to crash on, not a case to support.
+- No type aliases or compatibility wrappers to keep old names compiling; rename and update the callers so the diff shows the usage.
+- When related values travel together or a signature grows past three return values, introduce a small struct.
+- Prefer configuration in `.ap/*.yaml` over new flags or environment variables; `ap` reads no roots from the environment.
+- No `regexp` in `ap` for parsing; write the plain parse. `github.com/google/go-cmp` is for tests only (`ap lint`'s `testonlyimports` analyzer enforces this).
+- `ap` never mutates state outside `AP_CACHE_DIR` and the repository (no sysctls, no `~/.docker` or `~/.kube` writes); detect and warn instead.
+- Dependency injection only through the `scoped` context accessors (`scoped.HTTPClient`, `scoped.Log`, `scoped.Now`); no injectable package globals.
+
+## Logging
+
+- New and touched code logs through `tc.Log()` inside tasks or `scoped.Log(ctx)` elsewhere, constant messages with key/value pairs, warnings as `log.Info(msg, "level", "warning")`. No new package-level `klog.*` calls; existing call sites migrate per package in their own issues (#696–#702).
