@@ -403,7 +403,7 @@ customresourcedefinitions         crd,crds     apiextensions.k8s.io/v1          
 
 	var capturedCmdName string
 	resolver := NewKubectlScopeResolver()
-	resolver.KubectlBin = "/opt/tools/kubectl"
+	resolver.kubectlBin = "/opt/tools/kubectl"
 	resolver.execCmd = func(ctx context.Context, name string, args ...string) ([]byte, error) {
 		capturedCmdName = name
 		return []byte(mockOutput), nil

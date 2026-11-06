@@ -30,36 +30,10 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
-	toolDocker "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/docker"
 	"k8s.io/klog/v2"
 )
 
 var execCommandContext = exec.CommandContext
-
-var ensureBuildx = defaultEnsureBuildx
-var ensureDocker = defaultEnsureDocker
-
-func defaultEnsureDocker(ctx context.Context, repoRoot string) (string, error) {
-	cfg, err := toolDocker.LoadConfig(repoRoot)
-	if err != nil {
-		return "", err
-	}
-	if cfg == nil {
-		cfg = toolDocker.DefaultConfig()
-	}
-	return toolDocker.EnsureDocker(ctx, cfg.Docker)
-}
-
-func defaultEnsureBuildx(ctx context.Context, repoRoot string) (string, error) {
-	cfg, err := toolDocker.LoadConfig(repoRoot)
-	if err != nil {
-		return "", err
-	}
-	if cfg == nil {
-		cfg = toolDocker.DefaultConfig()
-	}
-	return toolDocker.EnsureDockerBuildx(ctx, cfg.Buildx)
-}
 
 // DefaultK8sBuildkitHost is the default buildkit host used for the k8s shorthand.
 const DefaultK8sBuildkitHost = "k8s://autodeploy-system/buildkit"
@@ -131,7 +105,7 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.TaskContext) err
 	}
 	if buildxBin == "" {
 		var err error
-		buildxBin, err = ensureBuildx(ctx, scope.RepoRoot())
+		buildxBin, err = scope.Tool(ctx, "docker-buildx")
 		if err != nil {
 			return fmt.Errorf("failed to ensure docker-buildx: %w", err)
 		}
@@ -139,7 +113,7 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.TaskContext) err
 
 	dockerBin := t.DockerBin
 	if dockerBin == "" {
-		if d, err := ensureDocker(ctx, scope.RepoRoot()); err == nil && d != "" {
+		if d, err := scope.Tool(ctx, "docker"); err == nil && d != "" {
 			dockerBin = d
 		} else {
 			dockerBin = "docker"

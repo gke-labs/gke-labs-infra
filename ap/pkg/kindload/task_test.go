@@ -15,7 +15,6 @@
 package kindload
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -171,19 +170,10 @@ exit 0
 			t.Fatal(err)
 		}
 
-		origEnsureKind := ensureKind
-		ensureKind = func(ctx context.Context, repoRoot string) (string, error) {
-			return fakeBin, nil
-		}
-		t.Cleanup(func() {
-			ensureKind = origEnsureKind
-		})
-
 		ref1 := &imageref.ImageRef{Prefix: "images.local", Name: "app1", Tag: "v1.0"}
 		ref2 := &imageref.ImageRef{Prefix: "images.local", Name: "app2", Tag: "latest-1234567890ab"}
 
 		task := &KindLoadTask{
-			RepoRoot:    tempDir,
 			ClusterName: "demo-cluster",
 			Images:      []*imageref.ImageRef{ref1, ref2},
 		}
@@ -192,7 +182,7 @@ exit 0
 		if err != nil {
 			t.Fatal(err)
 		}
-		scope := tasks.NewTaskContext(tempDir, tempDir, tree)
+		scope := tasks.NewTaskContext(tempDir, tempDir, tree).WithTool("kind", fakeBin)
 
 		if err := task.Run(t.Context(), scope); err != nil {
 			t.Fatalf("task.Run failed: %v", err)

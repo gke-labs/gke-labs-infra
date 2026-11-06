@@ -29,7 +29,6 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/kindload"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kubectl"
 	"github.com/spf13/cobra"
 )
 
@@ -41,7 +40,6 @@ type DeployOptions struct {
 	Namespace    string
 	Cluster      string
 	Targets      []string
-	KubectlBin   string
 
 	TargetCluster TargetCluster
 	kindCluster   string
@@ -313,7 +311,6 @@ func ResolveTargetCluster(clusterFlag string, currentContext string) (TargetClus
 }
 
 var execCommandContext = exec.CommandContext
-var ensureKubectl = kubectl.EnsureKubectlForRepo
 
 func getCurrentKubeContext(ctx context.Context, kubectlBin string) string {
 	cmd := execCommandContext(ctx, kubectlBin, "config", "current-context")
@@ -344,10 +341,10 @@ func BuildDeployPlan(opt DeployOptions, r *sourcetree.SourceTree, buildkitHost s
 		naming.KindMode = true
 	}
 	push := !opt.SkipPush && tc.KindCluster == ""
-	return buildDeployTasks(r, opt.plans, push, buildkitHost, opt.Namespace, tc, naming, opt.KubectlBin)
+	return buildDeployTasks(r, opt.plans, push, buildkitHost, opt.Namespace, tc, naming)
 }
 
-func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, buildkitHost string, namespace string, targetCluster TargetCluster, naming images.ImageNaming, kubectlBin string) ([]tasks.Task, error) {
+func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, buildkitHost string, namespace string, targetCluster TargetCluster, naming images.ImageNaming) ([]tasks.Task, error) {
 	repoRoot := r.RepoRoot()
 	var allTasks []tasks.Task
 
@@ -377,7 +374,6 @@ func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, b
 				imageRefs = append(imageRefs, naming.Ref(img))
 			}
 			group.Tasks = append(group.Tasks, &KindLoadTask{
-				RepoRoot:    repoRoot,
 				ClusterName: targetCluster.KindCluster,
 				Images:      imageRefs,
 			})
@@ -388,7 +384,6 @@ func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, b
 			OriginalNamespace: originalNamespace,
 			Naming:            naming,
 			KubeContext:       targetCluster.KubeContext,
-			KubectlBin:        kubectlBin,
 		})
 		group.Tasks = append(group.Tasks, deployTasks)
 
@@ -404,14 +399,15 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		return err
 	}
 
-	kubectlBin := opt.KubectlBin
-	if kubectlBin == "" {
-		var err error
-		kubectlBin, err = ensureKubectl(ctx, opt.RepoRoot)
-		if err != nil {
-			return fmt.Errorf("failed to ensure kubectl: %w", err)
-		}
-		opt.KubectlBin = kubectlBin
+	r, err := opt.GetSourceTree()
+	if err != nil {
+		return err
+	}
+
+	scope := tasks.NewTaskContext(opt.RepoRoot, opt.RepoRoot, r)
+	kubectlBin, err := scope.Tool(ctx, "kubectl")
+	if err != nil {
+		return fmt.Errorf("failed to ensure kubectl: %w", err)
 	}
 
 	if opt.Cluster != "" && opt.TargetCluster.KubeContext == "" {
@@ -442,11 +438,6 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		return err
 	}
 
-	r, err := opt.GetSourceTree()
-	if err != nil {
-		return err
-	}
-
 	cfg, err := config.Load(opt.RepoRoot)
 	if err != nil {
 		return err
@@ -458,6 +449,5 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		return err
 	}
 
-	scope := tasks.NewTaskContext(opt.RepoRoot, opt.RepoRoot, r)
 	return tasks.Run(ctx, scope, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
 }

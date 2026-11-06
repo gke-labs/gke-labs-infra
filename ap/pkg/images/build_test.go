@@ -446,18 +446,6 @@ func TestDockerBuildTask_Platforms(t *testing.T) {
 	origExec := execCommandContext
 	defer func() { execCommandContext = origExec }()
 
-	origEnsureBuildx := ensureBuildx
-	defer func() { ensureBuildx = origEnsureBuildx }()
-	ensureBuildx = func(ctx context.Context, repoRoot string) (string, error) {
-		return "docker-buildx", nil
-	}
-
-	origEnsureDocker := ensureDocker
-	defer func() { ensureDocker = origEnsureDocker }()
-	ensureDocker = func(ctx context.Context, repoRoot string) (string, error) {
-		return "docker", nil
-	}
-
 	execCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
 		if (name == "docker-buildx" || name == "docker") && len(args) > 0 && (args[0] == "inspect" || (args[0] == "buildx" && len(args) > 1 && args[1] == "inspect") || (args[0] == "image" && len(args) > 1 && args[1] == "inspect")) {
 			// Mock 'inspect' to simulate support/lack of support for multi-platform
@@ -480,7 +468,7 @@ func TestDockerBuildTask_Platforms(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := tasks.NewTaskContext(tmpDir, tmpDir, r)
+	scope := tasks.NewTaskContext(tmpDir, tmpDir, r).WithTool("docker-buildx", "docker-buildx").WithTool("docker", "docker")
 
 	calls = nil
 	if err := task.Run(t.Context(), scope); err != nil {
@@ -788,13 +776,6 @@ func TestDockerBuildTask_ToolDocker(t *testing.T) {
 	}
 
 	mockBuildxBin := "/custom/tools/docker-buildx/bin/docker-buildx"
-	ensureCalled := false
-	origEnsureBuildx := ensureBuildx
-	defer func() { ensureBuildx = origEnsureBuildx }()
-	ensureBuildx = func(ctx context.Context, repoRoot string) (string, error) {
-		ensureCalled = true
-		return mockBuildxBin, nil
-	}
 
 	task := &DockerBuildTask{
 		ImageName:  "test-img",
@@ -807,21 +788,17 @@ func TestDockerBuildTask_ToolDocker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := tasks.NewTaskContext(tmpDir, tmpDir, r)
+	scope := tasks.NewTaskContext(tmpDir, tmpDir, r).WithTool("docker-buildx", mockBuildxBin)
 
 	if err := task.Run(t.Context(), scope); err != nil {
 		t.Fatalf("unexpected error running task: %v", err)
 	}
 
-	if !ensureCalled {
-		t.Error("expected ensureBuildx to be called")
-	}
 	if executedCmd != mockBuildxBin {
 		t.Errorf("expected command %q, got %q", mockBuildxBin, executedCmd)
 	}
 
 	// Now test with explicit BuildxBin override on task
-	ensureCalled = false
 	explicitBin := "/override/bin/docker-buildx"
 	taskExplicit := &DockerBuildTask{
 		ImageName:  "test-img-explicit",
@@ -833,9 +810,6 @@ func TestDockerBuildTask_ToolDocker(t *testing.T) {
 
 	if err := taskExplicit.Run(t.Context(), scope); err != nil {
 		t.Fatalf("unexpected error running taskExplicit: %v", err)
-	}
-	if ensureCalled {
-		t.Error("expected ensureBuildx NOT to be called when BuildxBin is set")
 	}
 	if executedCmd != explicitBin {
 		t.Errorf("expected command %q, got %q", explicitBin, executedCmd)

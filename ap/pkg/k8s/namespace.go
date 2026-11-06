@@ -87,7 +87,7 @@ type KubectlScopeResolver struct {
 	byKind      map[string]bool
 	execCmd     func(ctx context.Context, name string, args ...string) ([]byte, error)
 	KubeContext string
-	KubectlBin  string
+	kubectlBin  string
 }
 
 // NewKubectlScopeResolver creates a new KubectlScopeResolver.
@@ -120,7 +120,7 @@ func (r *KubectlScopeResolver) IsNamespaced(gvk GroupVersionKind) (bool, error) 
 }
 
 func (r *KubectlScopeResolver) load(ctx context.Context) error {
-	bin := r.KubectlBin
+	bin := r.kubectlBin
 	if bin == "" {
 		return fmt.Errorf("kubectl binary is required")
 	}
@@ -217,7 +217,7 @@ func (r *KubectlScopeResolver) parseOutput(output string) error {
 func NewDiscoveryScopeResolver(kubeContext, kubectlBin string) (ScopeResolver, error) {
 	resolver := NewKubectlScopeResolver()
 	resolver.KubeContext = kubeContext
-	resolver.KubectlBin = kubectlBin
+	resolver.kubectlBin = kubectlBin
 	return resolver, nil
 }
 

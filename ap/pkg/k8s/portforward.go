@@ -38,7 +38,6 @@ type PortForwardTask struct {
 	Namespace  string
 	LocalPort  int
 	RemotePort int
-	KubectlBin string
 }
 
 func (t *PortForwardTask) Run(ctx context.Context, scope *tasks.TaskContext) (retErr error) {
@@ -77,13 +76,9 @@ func (t *PortForwardTask) Run(ctx context.Context, scope *tasks.TaskContext) (re
 		localPort = freePort
 	}
 
-	kubectlBin := t.KubectlBin
-	if kubectlBin == "" && scope != nil {
-		var err error
-		kubectlBin, err = scope.EnsureKubectl(ctx)
-		if err != nil {
-			return fmt.Errorf("failed to ensure kubectl: %w", err)
-		}
+	kubectlBin, err := scope.Tool(ctx, "kubectl")
+	if err != nil {
+		return fmt.Errorf("failed to ensure kubectl: %w", err)
 	}
 	if kubectlBin == "" {
 		return fmt.Errorf("kubectl binary is required")

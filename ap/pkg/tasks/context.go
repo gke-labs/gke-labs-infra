@@ -16,18 +16,17 @@ package tasks
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"sync"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kubectl"
 )
 
 var (
-	ensureKubectl      = kubectl.EnsureKubectlForRepo
-	kubectlResolveMu   sync.Mutex
+	toolResolveMu      sync.Mutex
 	scriptEnvResolveMu sync.Mutex
 )
 
@@ -43,9 +42,8 @@ type TaskContext struct {
 	stdout io.Writer
 	stderr io.Writer
 
-	// kubectlBin holds the resolved path to the kubectl binary for this task context.
-	// If empty, EnsureKubectl resolves it lazily and memoizes it here.
-	kubectlBin string
+	// tools holds memoized resolved tool binary paths keyed by tool name.
+	tools map[string]string
 
 	// scriptEnv holds the memoized environment with the tool bin directory prepended to PATH.
 	scriptEnv []string
@@ -69,6 +67,7 @@ func NewTaskContext(repoRoot, dir string, tree *sourcetree.SourceTree) *TaskCont
 		repoRoot:   repoRoot,
 		dir:        dir,
 		sourceTree: tree,
+		tools:      make(map[string]string),
 	}
 }
 
@@ -111,23 +110,38 @@ func (s *TaskContext) WithOutput(stdout, stderr io.Writer) *TaskContext {
 	return &clone
 }
 
-// EnsureKubectl returns the path to the pinned kubectl binary for this task context,
-// resolving and memoizing it if not yet set.
-func (s *TaskContext) EnsureKubectl(ctx context.Context) (string, error) {
-	kubectlResolveMu.Lock()
-	defer kubectlResolveMu.Unlock()
-	if s.kubectlBin != "" {
-		return s.kubectlBin, nil
+// WithTool returns a shallow copy of the task context with the given tool name pre-seeded to binPath.
+func (s *TaskContext) WithTool(name, binPath string) *TaskContext {
+	clone := *s
+	clone.tools = make(map[string]string, len(s.tools)+1)
+	for k, v := range s.tools {
+		clone.tools[k] = v
+	}
+	clone.tools[name] = binPath
+	return &clone
+}
+
+// Tool returns the path to the executable binary for the named tool,
+// resolving it from the tool registry and memoizing it if not yet set.
+func (s *TaskContext) Tool(ctx context.Context, name string) (string, error) {
+	toolResolveMu.Lock()
+	defer toolResolveMu.Unlock()
+	if bin, ok := s.tools[name]; ok {
+		return bin, nil
+	}
+	t, ok := tool.Lookup(name)
+	if !ok {
+		return "", fmt.Errorf("unknown tool %q", name)
 	}
 	root := s.repoRoot
 	if root == "" {
 		root = s.dir
 	}
-	bin, err := ensureKubectl(ctx, root)
+	bin, err := t.Ensure(ctx, root)
 	if err != nil {
 		return "", err
 	}
-	s.kubectlBin = bin
+	s.tools[name] = bin
 	return bin, nil
 }
 
