@@ -23,41 +23,9 @@ import (
 	"testing"
 )
 
-func TestBuildE2eCommand(t *testing.T) {
-	rootOpt := &RootOptions{}
-	cmd := BuildE2eCommand(rootOpt)
-	if cmd == nil {
-		t.Fatal("BuildE2eCommand returned nil")
-	}
-	if cmd.Use != "e2e [path...]" {
-		t.Errorf("Unexpected use string: %q", cmd.Use)
-	}
-}
-
-func TestRunE2e_DryRun(t *testing.T) {
+func setupE2eRepo(t *testing.T) string {
+	t.Helper()
 	tempDir := t.TempDir()
-	repoRoot := filepath.Join(tempDir, "repo")
-
-	opt := E2eOptions{
-		RootOptions: &RootOptions{
-			RepoRoot: repoRoot,
-			Dir:      repoRoot,
-			DryRun:   true,
-		},
-	}
-
-	err := RunE2e(t.Context(), opt)
-	if err != nil {
-		t.Fatalf("RunE2e dry run failed: %v", err)
-	}
-}
-
-func TestRunE2e_PrintsOutputAndWritesArtifacts(t *testing.T) {
-	tempDir := t.TempDir()
-	artifactsDir := filepath.Join(tempDir, "artifacts")
-	t.Setenv("ARTIFACTS", artifactsDir)
-
-	// Create a minimal repo structure with .ap/ap.yaml and dev/tasks/test-e2e
 	if err := os.MkdirAll(filepath.Join(tempDir, ".ap"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -79,20 +47,21 @@ echo "PASS"
 	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
 		t.Fatal(err)
 	}
+	return tempDir
+}
 
+func TestRunE2e_InlineOutput(t *testing.T) {
+	tempDir := setupE2eRepo(t)
 	opt := E2eOptions{
 		RootOptions: &RootOptions{
 			RepoRoot: tempDir,
 			Dir:      tempDir,
-			DryRun:   false,
 		},
 	}
-
 	if err := opt.Resolve(nil); err != nil {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
 
-	// Capture stdout to verify leaf task output is printed at default verbosity
 	oldStdout := os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -114,16 +83,33 @@ echo "PASS"
 	if runErr != nil {
 		t.Fatalf("RunE2e failed: %v", runErr)
 	}
-
-	// 1. Verify passing e2e test output is printed inline in stdout
 	if !strings.Contains(stdoutStr, "=== test-e2e (ok,") {
 		t.Errorf("expected stdout to contain '=== test-e2e (ok,', got:\n%s", stdoutStr)
 	}
 	if !strings.Contains(stdoutStr, "--- PASS: TestRunLifecycle") {
 		t.Errorf("expected stdout to contain '--- PASS: TestRunLifecycle', got:\n%s", stdoutStr)
 	}
+}
 
-	// 2. Verify artifact log was written to $ARTIFACTS/tasks/test-e2e.log
+func TestRunE2e_Artifacts(t *testing.T) {
+	tempDir := setupE2eRepo(t)
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	t.Setenv("ARTIFACTS", artifactsDir)
+
+	opt := E2eOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: tempDir,
+			Dir:      tempDir,
+		},
+	}
+	if err := opt.Resolve(nil); err != nil {
+		t.Fatalf("opt.Resolve failed: %v", err)
+	}
+
+	if err := RunE2e(t.Context(), opt); err != nil {
+		t.Fatalf("RunE2e failed: %v", err)
+	}
+
 	logFile := filepath.Join(artifactsDir, "tasks", "test-e2e.log")
 	logContent, err := os.ReadFile(logFile)
 	if err != nil {

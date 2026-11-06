@@ -69,10 +69,11 @@ func NewTaskContext(repoRoot, dir string, tree *sourcetree.SourceTree) *TaskCont
 		panic("tasks.NewTaskContext: tree cannot be nil")
 	}
 	return &TaskContext{
-		repoRoot:   repoRoot,
-		dir:        dir,
-		sourceTree: tree,
-		tools:      make(map[string]string),
+		repoRoot:     repoRoot,
+		dir:          dir,
+		sourceTree:   tree,
+		tools:        make(map[string]string),
+		artifactsDir: os.Getenv("ARTIFACTS"),
 	}
 }
 
@@ -132,36 +133,23 @@ func (s *TaskContext) WithOutput(stdout, stderr io.Writer) *TaskContext {
 
 // PrintOutput returns whether leaf tasks should print their buffered output even on success.
 func (s *TaskContext) PrintOutput() bool {
-	if s == nil {
-		return false
-	}
 	return s.printOutput
 }
 
 // WithPrintOutput returns a shallow copy of the task context with the given printOutput setting.
 func (s *TaskContext) WithPrintOutput(printOutput bool) *TaskContext {
-	if s == nil {
-		return nil
-	}
 	clone := *s
 	clone.printOutput = printOutput
 	return &clone
 }
 
-// ArtifactsDir returns the directory where task artifacts should be written,
-// returning the configured directory or os.Getenv("ARTIFACTS") if unset.
+// ArtifactsDir returns the directory where task artifacts should be written.
 func (s *TaskContext) ArtifactsDir() string {
-	if s != nil && s.artifactsDir != "" {
-		return s.artifactsDir
-	}
-	return os.Getenv("ARTIFACTS")
+	return s.artifactsDir
 }
 
 // WithArtifactsDir returns a shallow copy of the task context with custom artifacts directory.
 func (s *TaskContext) WithArtifactsDir(dir string) *TaskContext {
-	if s == nil {
-		return nil
-	}
 	clone := *s
 	clone.artifactsDir = dir
 	return &clone

@@ -828,7 +828,6 @@ func TestTaskOutputPolicy(t *testing.T) {
 
 func TestTaskOutputArtifacts(t *testing.T) {
 	artifactsDir := t.TempDir()
-	t.Setenv("ARTIFACTS", artifactsDir)
 
 	tree, err := sourcetree.Open(t.TempDir())
 	if err != nil {
@@ -836,7 +835,7 @@ func TestTaskOutputArtifacts(t *testing.T) {
 	}
 
 	var outBuf syncBuffer
-	scope := NewTaskContext(t.TempDir(), t.TempDir(), tree).WithOutput(&outBuf, &outBuf)
+	scope := NewTaskContext(t.TempDir(), t.TempDir(), tree).WithOutput(&outBuf, &outBuf).WithArtifactsDir(artifactsDir)
 
 	pass := &FuncTask{
 		Name: "task-pass-leaf",
@@ -898,15 +897,13 @@ func TestTaskOutputArtifacts(t *testing.T) {
 }
 
 func TestTaskOutputArtifacts_Unset(t *testing.T) {
-	t.Setenv("ARTIFACTS", "")
-
 	tree, err := sourcetree.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	var outBuf syncBuffer
-	scope := NewTaskContext(t.TempDir(), t.TempDir(), tree).WithOutput(&outBuf, &outBuf)
+	scope := NewTaskContext(t.TempDir(), t.TempDir(), tree).WithOutput(&outBuf, &outBuf).WithArtifactsDir("")
 
 	pass := &FuncTask{
 		Name: "task-no-artifacts",

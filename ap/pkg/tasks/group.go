@@ -221,6 +221,7 @@ type RunOptions struct {
 	DryRun          bool
 	ContinueOnError bool
 	PrintOutput     bool
+	ArtifactsDir    string
 }
 
 // Run executes a list of tasks.
@@ -232,8 +233,11 @@ func Run(ctx context.Context, scope *TaskContext, ts []Task, opts RunOptions) er
 		}
 		return nil
 	}
-	if opts.PrintOutput && scope != nil {
+	if opts.PrintOutput {
 		scope = scope.WithPrintOutput(true)
+	}
+	if opts.ArtifactsDir != "" {
+		scope = scope.WithArtifactsDir(opts.ArtifactsDir)
 	}
 	defer func() {
 		if scope != nil && scope.SourceTree() != nil {
