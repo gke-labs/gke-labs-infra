@@ -306,3 +306,114 @@ lint:
 		t.Errorf("expected IsLintSkipGenerated false")
 	}
 }
+
+func TestEffective_ExplicitEmptyOverride(t *testing.T) {
+	repoRoot := t.TempDir()
+	apDir := filepath.Join(repoRoot, ".ap")
+	if err := os.MkdirAll(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	baseYAML := `
+toolchain: go1.27.1
+lint:
+  unused:
+    mode: error
+`
+	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(baseYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	subDir := filepath.Join(repoRoot, "sub")
+	subApDir := filepath.Join(subDir, ".ap")
+	if err := os.MkdirAll(subApDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	subYAML := `
+toolchain: ""
+lint:
+  unused:
+    mode: ""
+`
+	if err := os.WriteFile(filepath.Join(subApDir, "go.yaml"), []byte(subYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Effective(repoRoot, subDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.Toolchain != "" {
+		t.Errorf("expected toolchain to be overridden to empty string, got %q", cfg.Toolchain)
+	}
+	if mode := cfg.Linter("unused").GetMode(); mode != "" {
+		t.Errorf("expected unused mode to be overridden to empty string, got %q", mode)
+	}
+}
+
+func TestDeepMerge_PointerSectionsMergePerKey(t *testing.T) {
+	dst := map[string]any{
+		"gofmt": map[string]any{
+			"enabled": true,
+			"future":  "default-val",
+		},
+	}
+	src := map[string]any{
+		"gofmt": map[string]any{
+			"enabled": false,
+		},
+	}
+
+	merged := deepMerge(dst, src)
+	gofmtMap, ok := merged["gofmt"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected gofmt to be map[string]any, got %T", merged["gofmt"])
+	}
+	if enabled, ok := gofmtMap["enabled"].(bool); !ok || enabled != false {
+		t.Errorf("expected gofmt.enabled to be false, got %v", gofmtMap["enabled"])
+	}
+	if future, ok := gofmtMap["future"].(string); !ok || future != "default-val" {
+		t.Errorf("expected gofmt.future to be preserved as 'default-val', got %v", gofmtMap["future"])
+	}
+}
+
+func TestEffective_PointerSectionsMergePerKey(t *testing.T) {
+	repoRoot := t.TempDir()
+	apDir := filepath.Join(repoRoot, ".ap")
+	if err := os.MkdirAll(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	baseYAML := `
+lint:
+  skipGenerated: true
+  skipTests: true
+`
+	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(baseYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	subDir := filepath.Join(repoRoot, "sub")
+	subApDir := filepath.Join(subDir, ".ap")
+	if err := os.MkdirAll(subApDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	subYAML := `
+lint:
+  skipGenerated: false
+`
+	if err := os.WriteFile(filepath.Join(subApDir, "go.yaml"), []byte(subYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Effective(repoRoot, subDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.IsLintSkipGenerated() != false {
+		t.Errorf("expected skipGenerated overridden to false")
+	}
+	if cfg.IsLintSkipTests() != true {
+		t.Errorf("expected skipTests to be preserved as true from base")
+	}
+}

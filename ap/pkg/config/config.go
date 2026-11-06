@@ -73,10 +73,6 @@ func (l *LintConfig) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	if l.linters == nil {
-		l.linters = make(map[string]LinterConfig)
-	}
-
 	for key, rawVal := range raw {
 		if key == "skipGenerated" || key == "skipTests" || key == "goos" {
 			continue
@@ -84,6 +80,9 @@ func (l *LintConfig) UnmarshalJSON(data []byte) error {
 		newFn, ok := linterRegistry[key]
 		if !ok {
 			continue
+		}
+		if l.linters == nil {
+			l.linters = make(map[string]LinterConfig)
 		}
 		cfg := newFn()
 		if len(rawVal) > 0 && string(rawVal) != "null" {
@@ -94,6 +93,32 @@ func (l *LintConfig) UnmarshalJSON(data []byte) error {
 		l.linters[key] = cfg
 	}
 	return nil
+}
+
+// MarshalJSON marshals the shared lint config fields and dynamic per-linter configurations.
+func (l *LintConfig) MarshalJSON() ([]byte, error) {
+	if l == nil {
+		return []byte("null"), nil
+	}
+	m := make(map[string]any)
+	if l.SkipGenerated != nil {
+		m["skipGenerated"] = l.SkipGenerated
+	}
+	if l.SkipTests != nil {
+		m["skipTests"] = l.SkipTests
+	}
+	if l.GOOS != nil {
+		m["goos"] = l.GOOS
+	}
+	for key, cfg := range l.linters {
+		if key == "skipGenerated" || key == "skipTests" || key == "goos" {
+			continue
+		}
+		if cfg != nil {
+			m[key] = cfg
+		}
+	}
+	return json.Marshal(m)
 }
 
 // LinterConfig represents common configuration options for a linter.
@@ -137,6 +162,22 @@ func (c *Config) Linter(name string) LinterConfig {
 		return lc
 	}
 	return (*CommonLinterConfig)(nil)
+}
+
+// DeepCopy returns a deep copy of c using JSON marshal and unmarshal.
+func (c *Config) DeepCopy() *Config {
+	if c == nil {
+		return nil
+	}
+	data, err := json.Marshal(c)
+	if err != nil {
+		panic(fmt.Sprintf("failed to marshal Config in DeepCopy: %v", err))
+	}
+	var out Config
+	if err := json.Unmarshal(data, &out); err != nil {
+		panic(fmt.Sprintf("failed to unmarshal Config in DeepCopy: %v", err))
+	}
+	return &out
 }
 
 // Load loads the configuration from .ap/go.yaml in the repository root.

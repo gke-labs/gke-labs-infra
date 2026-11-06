@@ -19,6 +19,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"sigs.k8s.io/yaml"
 )
 
 // Effective returns the effective configuration for dir, taking into account
@@ -30,12 +32,6 @@ func Effective(repoRoot, dir string) (*Config, error) {
 	if !filepath.IsAbs(cleanDir) {
 		cleanDir = filepath.Clean(filepath.Join(cleanRepoRoot, cleanDir))
 	}
-
-	base, err := Load(cleanRepoRoot)
-	if err != nil {
-		return nil, err
-	}
-	effective := base.clone()
 
 	// Collect enclosing subtree .ap/go.yaml files from dir up to repoRoot
 	var subtreeFiles []string
@@ -53,169 +49,81 @@ func Effective(repoRoot, dir string) (*Config, error) {
 		subtreeFiles[i], subtreeFiles[j] = subtreeFiles[j], subtreeFiles[i]
 	}
 
-	for _, goFile := range subtreeFiles {
-		var override Config
-		if _, err := LoadYAML(goFile, &override); err != nil {
-			return nil, err
+	var files []string
+	rootFile := filepath.Join(cleanRepoRoot, ".ap", "go.yaml")
+	if fi, err := os.Stat(rootFile); err == nil && !fi.IsDir() {
+		files = append(files, rootFile)
+	} else if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("error checking %s: %w", rootFile, err)
+	}
+	files = append(files, subtreeFiles...)
+
+	var mergedMap map[string]any
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			return nil, fmt.Errorf("error reading %s: %w", f, err)
 		}
-		effective.apply(&override)
+		var check Config
+		if err := UnmarshalStrict(data, &check); err != nil {
+			return nil, fmt.Errorf("error parsing %s: %w", f, err)
+		}
+		var fileMap map[string]any
+		if err := yaml.Unmarshal(data, &fileMap); err != nil {
+			return nil, fmt.Errorf("error parsing %s: %w", f, err)
+		}
+		if fileMap != nil {
+			mergedMap = deepMerge(mergedMap, fileMap)
+		}
+	}
+
+	if mergedMap == nil {
+		mergedMap = make(map[string]any)
+	}
+
+	mergedYAML, err := yaml.Marshal(mergedMap)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling merged config: %w", err)
+	}
+
+	var effective Config
+	if err := UnmarshalStrict(mergedYAML, &effective); err != nil {
+		return nil, err
 	}
 
 	if err := effective.Validate(); err != nil {
 		return nil, err
 	}
 
-	return effective, nil
+	return &effective, nil
 }
 
-func (c *Config) clone() *Config {
-	if c == nil {
-		return nil
+func deepMerge(dst, src map[string]any) map[string]any {
+	if dst == nil {
+		dst = make(map[string]any, len(src))
 	}
-	out := *c
-	if c.Gofmt != nil {
-		g := *c.Gofmt
-		out.Gofmt = &g
-	}
-	if c.Govet != nil {
-		g := *c.Govet
-		out.Govet = &g
-	}
-	if c.Govulncheck != nil {
-		g := *c.Govulncheck
-		out.Govulncheck = &g
-	}
-	if c.Tidy != nil {
-		t := *c.Tidy
-		out.Tidy = &t
-	}
-	if c.Skip != nil {
-		out.Skip = append([]string(nil), c.Skip...)
-	}
-	if c.Lint != nil {
-		out.Lint = c.Lint.clone()
-	}
-	return &out
-}
-
-func (l *LintConfig) clone() *LintConfig {
-	if l == nil {
-		return nil
-	}
-	out := *l
-	if l.GOOS != nil {
-		out.GOOS = append([]string(nil), l.GOOS...)
-	}
-	if l.linters != nil {
-		out.linters = make(map[string]LinterConfig, len(l.linters))
-		for k, v := range l.linters {
-			out.linters[k] = cloneLinter(v)
-		}
-	}
-	return &out
-}
-
-func cloneLinter(v LinterConfig) LinterConfig {
-	switch c := v.(type) {
-	case *CommonLinterConfig:
-		val := *c
-		return &val
-	case *DroppedErrorsConfig:
-		val := *c
-		if c.Exclude != nil {
-			val.Exclude = append([]string(nil), c.Exclude...)
-		}
-		return &val
-	default:
-		return v
-	}
-}
-
-func (c *Config) apply(o *Config) {
-	if o.Gofmt != nil {
-		c.Gofmt = o.Gofmt
-	}
-	if o.Govet != nil {
-		c.Govet = o.Govet
-	}
-	if o.Govulncheck != nil {
-		c.Govulncheck = o.Govulncheck
-	}
-	if o.Tidy != nil {
-		c.Tidy = o.Tidy
-	}
-	if o.Skip != nil {
-		c.Skip = o.Skip
-	}
-	if o.Toolchain != "" {
-		c.Toolchain = o.Toolchain
-	}
-	if o.Lint != nil {
-		if c.Lint == nil {
-			c.Lint = &LintConfig{}
-		}
-		c.Lint.apply(o.Lint)
-	}
-}
-
-func (l *LintConfig) apply(o *LintConfig) {
-	if o.SkipGenerated != nil {
-		l.SkipGenerated = o.SkipGenerated
-	}
-	if o.SkipTests != nil {
-		l.SkipTests = o.SkipTests
-	}
-	if o.GOOS != nil {
-		l.GOOS = o.GOOS
-	}
-	for name, cfg := range o.linters {
-		if cfg == nil {
-			continue
-		}
-		if l.linters == nil {
-			l.linters = make(map[string]LinterConfig)
-		}
-		if existing, ok := l.linters[name]; ok && existing != nil {
-			l.linters[name] = applyLinter(existing, cfg)
+	for k, vSrc := range src {
+		if vSrcMap, ok := toMap(vSrc); ok {
+			if vDstMap, ok := toMap(dst[k]); ok {
+				dst[k] = deepMerge(vDstMap, vSrcMap)
+			} else {
+				dst[k] = deepCopyMap(vSrcMap)
+			}
 		} else {
-			l.linters[name] = cfg
+			dst[k] = vSrc
 		}
 	}
+	return dst
 }
 
-func applyLinter(dst, src LinterConfig) LinterConfig {
-	switch d := dst.(type) {
-	case *CommonLinterConfig:
-		if s, ok := src.(*CommonLinterConfig); ok {
-			applyCommon(d, s)
-			return d
-		}
-	case *DroppedErrorsConfig:
-		if s, ok := src.(*DroppedErrorsConfig); ok {
-			applyCommon(&d.CommonLinterConfig, &s.CommonLinterConfig)
-			if s.Exclude != nil {
-				d.Exclude = s.Exclude
-			}
-			if s.UseDefaultExcludes != nil {
-				d.UseDefaultExcludes = s.UseDefaultExcludes
-			}
-			return d
+func deepCopyMap(src map[string]any) map[string]any {
+	out := make(map[string]any, len(src))
+	for k, v := range src {
+		if subMap, ok := toMap(v); ok {
+			out[k] = deepCopyMap(subMap)
+		} else {
+			out[k] = v
 		}
 	}
-	return src
-}
-
-func applyCommon(d, s *CommonLinterConfig) {
-	if s.Mode != "" {
-		d.Mode = s.Mode
-	}
-	if s.SkipGenerated != nil {
-		d.SkipGenerated = s.SkipGenerated
-	}
-	if s.SkipTests != nil {
-		d.SkipTests = s.SkipTests
-	}
-	if s.Baseline != "" {
-		d.Baseline = s.Baseline
-	}
+	return out
 }

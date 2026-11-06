@@ -21,6 +21,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"sigs.k8s.io/yaml"
 )
 
 func TestLoad(t *testing.T) {
@@ -720,5 +722,139 @@ platforms:
 		if p != expected[i] {
 			t.Errorf("at index %d: expected %s, got %s", i, expected[i], p)
 		}
+	}
+}
+
+func TestLintConfig_MarshalJSON_RoundTrip(t *testing.T) {
+	trueVal := true
+	falseVal := false
+	tests := []struct {
+		name string
+		cfg  *Config
+	}{
+		{
+			name: "empty config",
+			cfg:  &Config{},
+		},
+		{
+			name: "lint with droppederrors exclude and unused mode",
+			cfg: &Config{
+				Lint: &LintConfig{
+					linters: map[string]LinterConfig{
+						"droppedErrors": &DroppedErrorsConfig{
+							Exclude: []string{"fmt.Fprintln", "os.Remove"},
+						},
+						"unused": &CommonLinterConfig{
+							Mode: "warn",
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "lint named fields and multiple linters",
+			cfg: &Config{
+				Toolchain: "go1.27.3",
+				Skip:      []string{"vendor/**"},
+				Gofmt:     &GofmtConfig{Enabled: &trueVal},
+				Lint: &LintConfig{
+					SkipGenerated: &trueVal,
+					SkipTests:     &falseVal,
+					GOOS:          []string{"linux", "darwin"},
+					linters: map[string]LinterConfig{
+						"droppedErrors": &DroppedErrorsConfig{
+							CommonLinterConfig: CommonLinterConfig{
+								Mode:     "error",
+								Baseline: ".ap/droppederrors-baseline.txt",
+							},
+							Exclude:            []string{"fmt.Println"},
+							UseDefaultExcludes: &falseVal,
+						},
+						"unused": &CommonLinterConfig{
+							Mode:     "ignore",
+							Baseline: ".ap/unused-baseline.txt",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			data, err := yaml.Marshal(tc.cfg)
+			if err != nil {
+				t.Fatalf("yaml.Marshal failed: %v", err)
+			}
+
+			var got Config
+			if err := UnmarshalStrict(data, &got); err != nil {
+				t.Fatalf("UnmarshalStrict failed: %v\nYAML:\n%s", err, string(data))
+			}
+
+			if !reflect.DeepEqual(tc.cfg, &got) {
+				t.Errorf("round-trip mismatch:\nwant: %+v\ngot:  %+v", tc.cfg, &got)
+			}
+		})
+	}
+}
+
+func TestConfig_DeepCopy(t *testing.T) {
+	var nilCfg *Config
+	if nilCfg.DeepCopy() != nil {
+		t.Errorf("expected DeepCopy of nil Config to be nil")
+	}
+
+	trueVal := true
+	falseVal := false
+	orig := &Config{
+		Toolchain: "go1.27.3",
+		Skip:      []string{"vendor/**"},
+		Gofmt:     &GofmtConfig{Enabled: &trueVal},
+		Lint: &LintConfig{
+			SkipGenerated: &trueVal,
+			SkipTests:     &falseVal,
+			GOOS:          []string{"linux", "darwin"},
+			linters: map[string]LinterConfig{
+				"droppedErrors": &DroppedErrorsConfig{
+					CommonLinterConfig: CommonLinterConfig{
+						Mode: "error",
+					},
+					Exclude: []string{"fmt.Println"},
+				},
+				"unused": &CommonLinterConfig{
+					Mode: "warn",
+				},
+			},
+		},
+	}
+
+	copyCfg := orig.DeepCopy()
+	if !reflect.DeepEqual(orig, copyCfg) {
+		t.Fatalf("DeepCopy did not produce equal config:\norig:    %+v\ncopyCfg: %+v", orig, copyCfg)
+	}
+
+	// Verify deep mutation safety
+	copyCfg.Toolchain = "go1.28.0"
+	copyCfg.Skip[0] = "mutated"
+	copyCfg.Lint.GOOS[0] = "windows"
+	*copyCfg.Gofmt.Enabled = false
+	de := copyCfg.DroppedErrors()
+	de.Exclude[0] = "mutated"
+
+	if orig.Toolchain == "go1.28.0" {
+		t.Errorf("mutating copy affected orig.Toolchain")
+	}
+	if orig.Skip[0] == "mutated" {
+		t.Errorf("mutating copy affected orig.Skip")
+	}
+	if orig.Lint.GOOS[0] == "windows" {
+		t.Errorf("mutating copy affected orig.Lint.GOOS")
+	}
+	if *orig.Gofmt.Enabled == false {
+		t.Errorf("mutating copy affected orig.Gofmt.Enabled")
+	}
+	if orig.DroppedErrors().Exclude[0] == "mutated" {
+		t.Errorf("mutating copy affected orig.DroppedErrors().Exclude")
 	}
 }
