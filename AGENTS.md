@@ -90,3 +90,18 @@ ap e2e
 ## Logging
 
 - New and touched code logs through `tc.Log()` inside tasks or `scoped.Log(ctx)` elsewhere, constant messages with key/value pairs, warnings as `log.Info(msg, "level", "warning")`. No new package-level `klog.*` calls; existing call sites migrate per package in their own issues (#696–#702).
+
+## Writing
+
+- Use active voice. Write full sentences, one idea each. Define a term before using it and use the project's existing words. Say what the code does and why, not how it got that way.
+- Check all the prose in a change, starting from the diff (code comments, docstrings, commit messages, docs, error and log messages, flag help).
+- Do not oversell: no "optimal", "guaranteed", "zero", "always", "strictly" unless the statement is absolute and the text says why; report measurements with how and where they were taken; describe trade-offs as trade-offs.
+- Docs are part of done: a user-visible change updates `README.md` and `llms.txt` in the same PR.
+
+## Testing
+
+- Build test inputs from the real producer (constructors, templates, exported constants), not hand-copied string literals.
+- Test through public entry points; inject faults at the boundary (filesystem, network, fake API), not by mutating internal fields.
+- A bug found in review gets a regression test that reproduces the reported scenario.
+- Export shared label keys, annotation keys and ports once, and import them in production code and tests.
+- Use `t.Setenv`/`t.Chdir`/`t.TempDir`; tests must pass on macOS and Linux (symlinked temp directories, no GNU-only tools).
