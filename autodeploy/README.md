@@ -19,3 +19,13 @@
 ## Getting Started
 
 TODO: Add instructions on how to deploy `autodeploy` to a cluster.
+
+## Package Namespace Scoping
+
+A Package deploys into its own namespace: `autodeploy` runs `ap deploy -n <pkg.Namespace> <dir>` when deploying a package. Namespaced objects in the manifests are retargeted into the Package's namespace, while cluster-scoped objects (such as CRDs, ClusterRoles, and Namespaces) are applied as-is.
+
+### Known breakages
+
+*   **Multi-namespace components (`test-runner`)**: Components like `test-runner` want two namespaces (`test-runner` and `test-runner-sandboxes`, with a ServiceAccount in each). Because namespaced objects are retargeted into the Package's namespace, objects intended for secondary namespaces are retargeted into the primary Package namespace instead.
+*   **Dangling `kind: Namespace` manifests**: Manifests that carry their own `kind: Namespace` now create namespaces that nothing uses because namespaced workloads in those manifests are retargeted into the Package's namespace.
+

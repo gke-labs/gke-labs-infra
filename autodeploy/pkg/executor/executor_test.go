@@ -125,9 +125,35 @@ func TestAPRunner_DeployFlow(t *testing.T) {
 	if !strings.Contains(container.Command[2], "sub/dir") {
 		t.Errorf("expected command script to contain args, got: %s", container.Command[2])
 	}
+	wantDeploy := "ap deploy -n sample-ns sub/dir"
+	if !strings.Contains(container.Command[2], wantDeploy) {
+		t.Errorf("expected command script to contain %q, got: %s", wantDeploy, container.Command[2])
+	}
 
 	// Calling DeployFlow again for the same commit should be idempotent and not fail
 	if err := runner.DeployFlow(ctx, pkg, commit, "sub/dir"); err != nil {
 		t.Fatalf("idempotent DeployFlow failed: %v", err)
+	}
+
+	// Verify command script when no directory args are provided
+	pkgNoDir := &v1alpha1.Package{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "sample-pkg-no-dir",
+			Namespace: "sample-ns",
+		},
+		Spec: v1alpha1.PackageSpec{
+			Repo: "https://example.com/repo.git",
+		},
+	}
+	if err := runner.DeployFlow(ctx, pkgNoDir, "commit2"); err != nil {
+		t.Fatalf("DeployFlow without args failed: %v", err)
+	}
+	var jobNoDir batchv1.Job
+	if err := client.Get(ctx, types.NamespacedName{Namespace: DefaultJobNamespace, Name: JobName(pkgNoDir.Name, "commit2")}, &jobNoDir); err != nil {
+		t.Fatalf("failed to get created job: %v", err)
+	}
+	wantDeployNoDir := "ap deploy -n sample-ns"
+	if !strings.Contains(jobNoDir.Spec.Template.Spec.Containers[0].Command[2], wantDeployNoDir) {
+		t.Errorf("expected command script to contain %q, got: %s", wantDeployNoDir, jobNoDir.Spec.Template.Spec.Containers[0].Command[2])
 	}
 }
