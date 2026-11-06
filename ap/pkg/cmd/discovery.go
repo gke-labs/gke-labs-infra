@@ -25,7 +25,6 @@ import (
 	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
-	"k8s.io/klog/v2"
 )
 
 // DiscoverScopes discovers all tasks under the given directory subtree.
@@ -86,12 +85,6 @@ func DiscoverScopes(r *sourcetree.SourceTree, repoRoot, dir string) ([]*tasks.Ta
 		e2eDir := filepath.Join(d, "e2e")
 		if sub.HasGoTests(e2eDir) {
 			parentDir := filepath.Dir(d)
-			for _, st := range e2eScripts {
-				if ts, ok := st.(*tasks.TaskScript); ok && ts.Root == parentDir {
-					klog.Infof("running %s before go e2e tests in %s", ts.Path, parentDir)
-					break
-				}
-			}
 			buildDir := filepath.Join(repoRoot, ".build", "test-results", "go")
 			if artifactsDir := os.Getenv("ARTIFACTS"); artifactsDir != "" {
 				buildDir = filepath.Join(artifactsDir, "test-results", "go")

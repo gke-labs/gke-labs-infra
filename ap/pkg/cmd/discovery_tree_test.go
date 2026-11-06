@@ -309,7 +309,7 @@ func TestDiscoverScopes_ScriptAndGoE2e(t *testing.T) {
 		klog.LogToStderr(true)
 	}()
 
-	rootOpt := RootOptions{RepoRoot: tempDir}
+	rootOpt := RootOptions{RepoRoot: tempDir, DryRun: true}
 	if err := rootOpt.Resolve([]string{"//..."}); err != nil {
 		t.Fatalf("Resolve failed: %v", err)
 	}
@@ -335,6 +335,16 @@ func TestDiscoverScopes_ScriptAndGoE2e(t *testing.T) {
 	}
 	if goTask, ok := e2eTasks[1].(*golang.GoE2eTask); !ok || goTask.GetName() != "go-e2e-root" {
 		t.Fatalf("expected second task to be GoE2eTask go-e2e-root, got %T (%v)", e2eTasks[1], e2eTasks[1])
+	}
+
+	// DiscoverScopes must not emit the notice
+	if strings.Contains(logBuf.String(), "running") {
+		t.Fatalf("unexpected notice from DiscoverScopes: %s", logBuf.String())
+	}
+
+	// RunE2e emits the notice
+	if err := RunE2e(t.Context(), E2eOptions{RootOptions: &rootOpt}); err != nil {
+		t.Fatalf("RunE2e failed: %v", err)
 	}
 
 	scriptPath := filepath.Join(tempDir, "dev", "tasks", "test-e2e")
