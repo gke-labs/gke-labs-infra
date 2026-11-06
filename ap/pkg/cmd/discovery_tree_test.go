@@ -15,8 +15,11 @@
 package cmd
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
@@ -28,6 +31,7 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
+	"k8s.io/klog/v2"
 )
 
 func TestSingleWalkPerInvocation(t *testing.T) {
@@ -275,5 +279,67 @@ func TestSkipUniformlyInvisibleToAllConsumers(t *testing.T) {
 				t.Fatalf("scope BuildTasks included skipped task %s", bt.GetName())
 			}
 		}
+	}
+}
+
+func TestDiscoverScopes_E2ETasksOrderWithScriptAndGoTests(t *testing.T) {
+	sourcetree.ResetCache()
+	tempDir := t.TempDir()
+
+	files := map[string]string{
+		".git/config":           "",
+		"dev/tasks/test-e2e":    "#!/bin/bash\n",
+		"tests/e2e/e2e_test.go": "package e2e\n\nimport \"testing\"\n\nfunc TestE2E(t *testing.T) {}\n",
+	}
+
+	for rel, content := range files {
+		full := filepath.Join(tempDir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+			t.Fatalf("MkdirAll failed: %v", err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0755); err != nil {
+			t.Fatalf("WriteFile failed: %v", err)
+		}
+	}
+
+	var logBuf bytes.Buffer
+	klog.SetOutput(&logBuf)
+	klog.LogToStderr(false)
+	defer func() {
+		klog.SetOutput(os.Stderr)
+		klog.LogToStderr(true)
+	}()
+
+	rootOpt := RootOptions{RepoRoot: tempDir}
+	if err := rootOpt.Resolve([]string{"//..."}); err != nil {
+		t.Fatalf("Resolve failed: %v", err)
+	}
+	r, err := rootOpt.GetSourceTree()
+	if err != nil {
+		t.Fatalf("GetSourceTree failed: %v", err)
+	}
+
+	scopes, err := DiscoverScopes(r, rootOpt.RepoRoot, rootOpt.Dir)
+	if err != nil {
+		t.Fatalf("DiscoverScopes failed: %v", err)
+	}
+	if len(scopes) != 1 {
+		t.Fatalf("expected 1 scope, got %d", len(scopes))
+	}
+	scope := scopes[0]
+	if len(scope.E2ETasks) != 2 {
+		t.Fatalf("expected 2 E2ETasks, got %d", len(scope.E2ETasks))
+	}
+	if _, ok := scope.E2ETasks[0].(*tasks.TaskScript); !ok {
+		t.Errorf("expected E2ETasks[0] to be *tasks.TaskScript, got %T", scope.E2ETasks[0])
+	}
+	if _, ok := scope.E2ETasks[1].(*golang.GoE2eTask); !ok {
+		t.Errorf("expected E2ETasks[1] to be *golang.GoE2eTask, got %T", scope.E2ETasks[1])
+	}
+
+	scriptPath := filepath.Join(tempDir, "dev", "tasks", "test-e2e")
+	expectedLog := fmt.Sprintf("running %s before go e2e tests in %s", scriptPath, tempDir)
+	if count := strings.Count(logBuf.String(), expectedLog); count != 1 {
+		t.Errorf("expected log output to contain %q once, got %d in: %s", expectedLog, count, logBuf.String())
 	}
 }
