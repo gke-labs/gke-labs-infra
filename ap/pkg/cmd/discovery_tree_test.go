@@ -15,8 +15,11 @@
 package cmd
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
@@ -28,6 +31,7 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
+	"k8s.io/klog/v2"
 )
 
 func TestSingleWalkPerInvocation(t *testing.T) {
@@ -275,5 +279,80 @@ func TestSkipUniformlyInvisibleToAllConsumers(t *testing.T) {
 				t.Fatalf("scope BuildTasks included skipped task %s", bt.GetName())
 			}
 		}
+	}
+}
+
+func TestDiscoverScopes_ScriptAndGoE2e(t *testing.T) {
+	sourcetree.ResetCache()
+	tempDir := t.TempDir()
+
+	files := map[string]string{
+		".git/config":           "",
+		"dev/tasks/test-e2e":    "#!/bin/bash\n",
+		"tests/e2e/e2e_test.go": "package e2e\n\nimport \"testing\"\n\nfunc TestE2E(t *testing.T) {}\n",
+	}
+	for rel, content := range files {
+		full := filepath.Join(tempDir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+			t.Fatalf("MkdirAll failed: %v", err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0755); err != nil {
+			t.Fatalf("WriteFile failed: %v", err)
+		}
+	}
+
+	var logBuf bytes.Buffer
+	klog.SetOutput(&logBuf)
+	klog.LogToStderr(false)
+	defer func() {
+		klog.SetOutput(os.Stderr)
+		klog.LogToStderr(true)
+	}()
+
+	rootOpt := RootOptions{RepoRoot: tempDir, DryRun: true}
+	if err := rootOpt.Resolve([]string{"//..."}); err != nil {
+		t.Fatalf("Resolve failed: %v", err)
+	}
+	r, err := rootOpt.GetSourceTree()
+	if err != nil {
+		t.Fatalf("GetSourceTree failed: %v", err)
+	}
+
+	scopes, err := DiscoverScopes(r, rootOpt.RepoRoot, rootOpt.Dir)
+	if err != nil {
+		t.Fatalf("DiscoverScopes failed: %v", err)
+	}
+
+	if len(scopes) != 1 {
+		t.Fatalf("expected 1 scope, got %d", len(scopes))
+	}
+	e2eTasks := scopes[0].E2ETasks
+	if len(e2eTasks) != 2 {
+		t.Fatalf("expected 2 E2ETasks, got %d: %v", len(e2eTasks), e2eTasks)
+	}
+	if script, ok := e2eTasks[0].(*tasks.TaskScript); !ok || script.GetName() != "test-e2e" {
+		t.Fatalf("expected first task to be TaskScript test-e2e, got %T (%v)", e2eTasks[0], e2eTasks[0])
+	}
+	if goTask, ok := e2eTasks[1].(*golang.GoE2eTask); !ok || goTask.GetName() != "go-e2e-root" {
+		t.Fatalf("expected second task to be GoE2eTask go-e2e-root, got %T (%v)", e2eTasks[1], e2eTasks[1])
+	}
+
+	// DiscoverScopes must not emit the notice
+	if strings.Contains(logBuf.String(), "running") {
+		t.Fatalf("unexpected notice from DiscoverScopes: %s", logBuf.String())
+	}
+
+	// RunE2e emits the notice
+	if err := RunE2e(t.Context(), E2eOptions{RootOptions: &rootOpt}); err != nil {
+		t.Fatalf("RunE2e failed: %v", err)
+	}
+
+	scriptPath := filepath.Join(tempDir, "dev", "tasks", "test-e2e")
+	expectedLog := fmt.Sprintf("running %s before go e2e tests in %s", scriptPath, tempDir)
+	if !strings.Contains(logBuf.String(), expectedLog) {
+		t.Fatalf("expected log output to contain %q, got: %s", expectedLog, logBuf.String())
+	}
+	if strings.Count(logBuf.String(), expectedLog) != 1 {
+		t.Fatalf("expected log notice to appear once, appeared %d times", strings.Count(logBuf.String(), expectedLog))
 	}
 }

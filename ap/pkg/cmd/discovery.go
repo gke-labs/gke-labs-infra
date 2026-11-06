@@ -76,25 +76,15 @@ func DiscoverScopes(r *sourcetree.SourceTree, repoRoot, dir string) ([]*tasks.Ta
 	}
 
 	// Discover go e2e tasks
-	scriptRoots := make(map[string]bool)
-	for _, st := range e2eScripts {
-		if ts, ok := st.(*tasks.TaskScript); ok {
-			scriptRoots[ts.Root] = true
-		}
-	}
-
 	sub := r.Under(dir)
 	for _, d := range sub.Dirs() {
 		if filepath.Base(d) != "tests" {
 			continue
 		}
 
-		parentDir := filepath.Dir(d)
-		if scriptRoots[parentDir] {
-			continue
-		}
 		e2eDir := filepath.Join(d, "e2e")
 		if sub.HasGoTests(e2eDir) {
+			parentDir := filepath.Dir(d)
 			buildDir := filepath.Join(repoRoot, ".build", "test-results", "go")
 			if artifactsDir := os.Getenv("ARTIFACTS"); artifactsDir != "" {
 				buildDir = filepath.Join(artifactsDir, "test-results", "go")
