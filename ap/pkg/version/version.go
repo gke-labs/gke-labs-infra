@@ -56,3 +56,24 @@ func Run(_ context.Context, _ string) error {
 
 	return nil
 }
+
+// Version returns the version string of the binary (or revision, or "devel").
+func Version() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "devel"
+	}
+	if info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	for _, setting := range info.Settings {
+		if setting.Key == "vcs.revision" {
+			rev := setting.Value
+			if len(rev) > 12 {
+				rev = rev[:12]
+			}
+			return rev
+		}
+	}
+	return "devel"
+}
