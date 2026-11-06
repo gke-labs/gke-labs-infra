@@ -47,7 +47,7 @@ metadata:
 spec:
   replicas: 1
 `
-	got, clusterScoped, err := RetargetManifestNamespace(manifest, "corp-gke", defaultTestResolver, "")
+	got, clusterScoped, _, err := RetargetManifestNamespace(manifest, "corp-gke", defaultTestResolver, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -70,7 +70,7 @@ metadata:
 data:
   key: value
 `
-	got, clusterScoped, err := RetargetManifestNamespace(manifest, "corp-gke", defaultTestResolver, "")
+	got, clusterScoped, _, err := RetargetManifestNamespace(manifest, "corp-gke", defaultTestResolver, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -92,7 +92,7 @@ rules:
   resources: ["pods"]
   verbs: ["get"]
 `
-	got, clusterScoped, err := RetargetManifestNamespace(manifest, "corp-gke", defaultTestResolver, "")
+	got, clusterScoped, _, err := RetargetManifestNamespace(manifest, "corp-gke", defaultTestResolver, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -123,7 +123,7 @@ roleRef:
   kind: ClusterRole
   name: test-cr
 `
-	got, clusterScoped, err := RetargetManifestNamespace(manifest, "corp-gke", defaultTestResolver, "default")
+	got, clusterScoped, _, err := RetargetManifestNamespace(manifest, "corp-gke", defaultTestResolver, "default")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -166,7 +166,7 @@ roleRef:
   kind: Role
   name: test-role
 `
-	got, clusterScoped, err := RetargetManifestNamespace(manifest, "corp-gke", defaultTestResolver, "")
+	got, clusterScoped, _, err := RetargetManifestNamespace(manifest, "corp-gke", defaultTestResolver, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -225,7 +225,7 @@ roleRef:
   kind: ClusterRole
   name: my-cr
 `
-	got, clusterScoped, err := RetargetManifestNamespace(manifest, "corp-gke", defaultTestResolver, "")
+	got, clusterScoped, _, err := RetargetManifestNamespace(manifest, "corp-gke", defaultTestResolver, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -272,7 +272,7 @@ metadata:
   name: test-deploy
   namespace: default
 `
-	got, clusterScoped, err := RetargetManifestNamespace(manifest, "", defaultTestResolver, "")
+	got, clusterScoped, _, err := RetargetManifestNamespace(manifest, "", defaultTestResolver, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

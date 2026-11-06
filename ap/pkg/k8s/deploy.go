@@ -463,12 +463,15 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 			}
 		}
 
-		retargeted, clusterScoped, err := RetargetManifestNamespace(replaced, t.Namespace, resolver, t.OriginalNamespace)
+		retargeted, clusterScoped, retargetedNamespaces, err := RetargetManifestNamespace(replaced, t.Namespace, resolver, t.OriginalNamespace)
 		if err != nil {
 			return fmt.Errorf("failed to retarget namespace in %s: %w", relPath, err)
 		}
+		for _, declared := range retargetedNamespaces {
+			klog.Infof("retargeting %s: namespace %s -> %s", relPath, declared, t.Namespace)
+		}
 		if len(clusterScoped) > 0 {
-			klog.Warningf("Cluster-scoped object(s) left unchanged in %s: %s (names may collide between deployments into different namespaces)", relPath, strings.Join(clusterScoped, ", "))
+			klog.Infof("cluster-scoped, not retargeted: %s", strings.Join(clusterScoped, ", "))
 		}
 		replaced = retargeted
 	}

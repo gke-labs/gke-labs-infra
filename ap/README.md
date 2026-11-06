@@ -51,7 +51,7 @@ Running `ap generate --verify` (or `ap verify-generate`) perturbs each generated
 
 ## Deployment
 
-The `ap deploy` command builds container images and applies Kubernetes manifests. Built images deployed with `:latest` are pinned by digest (`tag@sha256`) in applied manifests so redeploying always rolls pods to the new image. When the current context is a kind cluster, `ap deploy` works with no `IMAGE_PREFIX`, building locally, loading images with `kind load docker-image` using a unique content-addressed tag, and applying. Use `--cluster=kind://<name>` to target a specific kind cluster, or `--cluster=<context>` to target a kubeconfig context.
+The `ap deploy` command builds container images and applies Kubernetes manifests. Built images deployed with `:latest` are pinned by digest (`tag@sha256`) in applied manifests so redeploying always rolls pods to the new image. When the current context is a kind cluster, `ap deploy` works with no `IMAGE_PREFIX`, building locally, loading images with `kind load docker-image` using a unique content-addressed tag, and applying. Use `--cluster=kind://<name>` to target a specific kind cluster, or `--cluster=<context>` to target a kubeconfig context. Passing `-n <namespace>` retargets namespaced objects to the target namespace, logging which manifests were retargeted and any cluster-scoped objects applied as-is.
 
 ## Configuration Files
 
