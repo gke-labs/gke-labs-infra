@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/applyset"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/imageref"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
@@ -39,10 +40,12 @@ type DeployOptions struct {
 	BuildkitHost string
 	Namespace    string
 	Cluster      string
+	ApplySet     string
 	Targets      []string
 
 	TargetCluster TargetCluster
 	kindCluster   string
+	parentRef     *applyset.ParentRef
 
 	plans []deployPlan
 }
@@ -69,6 +72,7 @@ func BuildDeployCommand(rootOpt *RootOptions) *cobra.Command {
 	cmd.Flags().StringVar(&opt.BuildkitHost, "buildkit-host", "", "Buildkit host to use (e.g. k8s://namespace/service)")
 	cmd.Flags().StringVarP(&opt.Namespace, "namespace", "n", "", "Target namespace for namespaced manifests")
 	cmd.Flags().StringVar(&opt.Cluster, "cluster", "", "Target cluster (kind://<name> or kubeconfig context)")
+	cmd.Flags().StringVar(&opt.ApplySet, "applyset", "", "ApplySet parent object ([RESOURCE[.GROUP]/]NAME)")
 
 	return cmd
 }
@@ -82,6 +86,14 @@ func (opt *DeployOptions) Resolve(args []string) error {
 
 	if err := k8s.ValidateNamespaceName(opt.Namespace); err != nil {
 		return err
+	}
+
+	if opt.ApplySet != "" {
+		parentRef, err := applyset.ParseParentRef(opt.ApplySet)
+		if err != nil {
+			return err
+		}
+		opt.parentRef = &parentRef
 	}
 
 	if opt.Cluster != "" {
@@ -340,13 +352,37 @@ func BuildDeployPlan(opt DeployOptions, r *sourcetree.SourceTree, buildkitHost s
 	if tc.KindCluster != "" {
 		naming.KindMode = true
 	}
+	parentRef := opt.parentRef
+	if parentRef != nil && parentRef.Namespace == "" && opt.Namespace != "" {
+		parentRef.Namespace = opt.Namespace
+	}
 	push := !opt.SkipPush && tc.KindCluster == ""
-	return buildDeployTasks(r, opt.plans, push, buildkitHost, opt.Namespace, tc, naming)
+	return buildDeployTasks(r, opt.plans, push, buildkitHost, opt.Namespace, tc, naming, parentRef)
 }
 
-func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, buildkitHost string, namespace string, targetCluster TargetCluster, naming images.ImageNaming) ([]tasks.Task, error) {
+func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, buildkitHost string, namespace string, targetCluster TargetCluster, naming images.ImageNaming, parentRef *applyset.ParentRef) ([]tasks.Task, error) {
 	repoRoot := r.RepoRoot()
 	var allTasks []tasks.Task
+
+	var verifyTask tasks.Task
+	var updateTask tasks.Task
+	var membership *applyset.Membership
+	var applySetID string
+
+	if parentRef != nil {
+		membership = &applyset.Membership{}
+		applySetID = parentRef.ID()
+		verifyTask = &k8s.VerifyApplySetParentTask{
+			Parent:      parentRef,
+			KubeContext: targetCluster.KubeContext,
+		}
+		updateTask = &k8s.UpdateApplySetParentTask{
+			Parent:      parentRef,
+			Membership:  membership,
+			KubeContext: targetCluster.KubeContext,
+		}
+		allTasks = append(allTasks, verifyTask)
+	}
 
 	var originalNamespace string
 	if namespace != "" {
@@ -384,10 +420,16 @@ func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, b
 			OriginalNamespace: originalNamespace,
 			Naming:            naming,
 			KubeContext:       targetCluster.KubeContext,
+			ApplySetID:        applySetID,
+			Membership:        membership,
 		})
 		group.Tasks = append(group.Tasks, deployTasks)
 
 		allTasks = append(allTasks, group)
+	}
+
+	if updateTask != nil {
+		allTasks = append(allTasks, updateTask)
 	}
 
 	return allTasks, nil
@@ -425,6 +467,12 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 	}
 	if opt.kindCluster != "" && opt.TargetCluster.KindCluster == "" {
 		opt.TargetCluster.KindCluster = opt.kindCluster
+	}
+
+	if opt.parentRef != nil {
+		if err := k8s.ResolveParentRef(opt.parentRef, opt.Namespace, opt.TargetCluster.KubeContext, kubectlBin); err != nil {
+			return err
+		}
 	}
 
 	if !opt.DryRun && opt.Namespace != "" {
