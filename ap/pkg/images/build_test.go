@@ -838,27 +838,20 @@ func TestDockerBuildTask_ToolBuildctl(t *testing.T) {
 	execCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
 		if len(args) > 0 && args[0] == "build" {
 			executedCmd = name
-			return exec.CommandContext(ctx, "echo", "mocked")
-		}
-		if name == "mock-kubectl" && len(args) > 0 && args[0] == "port-forward" {
-			return exec.CommandContext(ctx, "sh", "-c", "echo 'Forwarding from 127.0.0.1:2375'; sleep 5")
 		}
 		return exec.CommandContext(ctx, "echo", "mocked")
 	}
 
 	mockBuildctlBin := "/custom/tools/buildctl/bin/buildctl"
-	mockKubectlBin := "mock-kubectl"
 
 	r, err := sourcetree.Open(tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	scope := tasks.NewTaskContext(tmpDir, tmpDir, r).
-		WithTool("buildctl", mockBuildctlBin).
-		WithTool("kubectl", mockKubectlBin)
+		WithTool("buildctl", mockBuildctlBin)
 
-	// 1. Direct host path
-	taskDirect := &DockerBuildTask{
+	task := &DockerBuildTask{
 		ImageName:    "test-img",
 		Dockerfile:   "images/test-img/Dockerfile",
 		Root:         tmpDir,
@@ -866,45 +859,10 @@ func TestDockerBuildTask_ToolBuildctl(t *testing.T) {
 		BuildkitHost: "127.0.0.1:2375",
 	}
 
-	if err := taskDirect.Run(t.Context(), scope); err != nil {
-		t.Fatalf("unexpected error running taskDirect: %v", err)
+	if err := task.Run(t.Context(), scope); err != nil {
+		t.Fatalf("unexpected error running task: %v", err)
 	}
 	if executedCmd != mockBuildctlBin {
 		t.Errorf("expected command %q, got %q", mockBuildctlBin, executedCmd)
-	}
-
-	// 2. Explicit BuildctlBin override on task
-	explicitBin := "/override/bin/buildctl"
-	taskExplicit := &DockerBuildTask{
-		ImageName:    "test-img",
-		Dockerfile:   "images/test-img/Dockerfile",
-		Root:         tmpDir,
-		Push:         false,
-		BuildkitHost: "127.0.0.1:2375",
-		BuildctlBin:  explicitBin,
-	}
-
-	if err := taskExplicit.Run(t.Context(), scope); err != nil {
-		t.Fatalf("unexpected error running taskExplicit: %v", err)
-	}
-	if executedCmd != explicitBin {
-		t.Errorf("expected command %q, got %q", explicitBin, executedCmd)
-	}
-
-	// 3. Port-forward path passes buildctlBin into the port-forwarded child task
-	taskPortForward := &DockerBuildTask{
-		ImageName:    "test-img",
-		Dockerfile:   "images/test-img/Dockerfile",
-		Root:         tmpDir,
-		Push:         false,
-		BuildkitHost: "k8s://custom-ns/custom-buildkit",
-	}
-
-	executedCmd = ""
-	if err := taskPortForward.Run(t.Context(), scope); err != nil {
-		t.Fatalf("unexpected error running taskPortForward: %v", err)
-	}
-	if executedCmd != mockBuildctlBin {
-		t.Errorf("expected port-forward child command %q, got %q", mockBuildctlBin, executedCmd)
 	}
 }

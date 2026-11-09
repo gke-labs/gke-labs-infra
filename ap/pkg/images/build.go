@@ -68,7 +68,6 @@ type DockerBuildTask struct {
 	BuildkitHost string
 	DockerBin    string
 	BuildxBin    string
-	BuildctlBin  string
 	Naming       ImageNaming
 }
 
@@ -216,13 +215,9 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 		buildctlArgs = append(buildctlArgs, "--opt", "platform="+strings.Join(platforms, ","))
 	}
 
-	buildctlBin := t.BuildctlBin
-	if buildctlBin == "" {
-		var err error
-		buildctlBin, err = scope.Tool(ctx, "buildctl")
-		if err != nil {
-			return fmt.Errorf("failed to ensure buildctl: %w", err)
-		}
+	buildctlBin, err := scope.Tool(ctx, "buildctl")
+	if err != nil {
+		return fmt.Errorf("failed to ensure buildctl: %w", err)
 	}
 
 	if host, ok := strings.CutPrefix(t.BuildkitHost, "k8s://"); ok {
