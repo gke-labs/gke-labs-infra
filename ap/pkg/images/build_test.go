@@ -218,7 +218,7 @@ func TestBuildTasksForImages(t *testing.T) {
 	naming := ResolveImageNaming(nil)
 
 	// 1. Filter for image "a" only
-	taskA, err := BuildTasksForImages(r, tmpDir, false, "", []string{"a"}, naming)
+	taskA, err := BuildTasksForImages(r, tmpDir, false, "", []string{"a"}, naming, "")
 	if err != nil {
 		t.Fatalf("BuildTasksForImages failed: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestBuildTasksForImages(t *testing.T) {
 
 	// 2. Buildctl path with image "b" only
 	buildkitHost := "k8s://autodeploy-system/buildkit"
-	taskB, err := BuildTasksForImages(r, tmpDir, true, buildkitHost, []string{"b"}, naming)
+	taskB, err := BuildTasksForImages(r, tmpDir, true, buildkitHost, []string{"b"}, naming, "build-context")
 	if err != nil {
 		t.Fatalf("BuildTasksForImages with buildkit failed: %v", err)
 	}
@@ -260,9 +260,12 @@ func TestBuildTasksForImages(t *testing.T) {
 	if !btB.Push {
 		t.Errorf("expected Push=true, got %v", btB.Push)
 	}
+	if btB.KubeContext != "build-context" {
+		t.Errorf("expected KubeContext 'build-context', got %q", btB.KubeContext)
+	}
 
 	// 3. Filter with empty slice -> 0 tasks
-	taskEmpty, err := BuildTasksForImages(r, tmpDir, false, "", []string{}, naming)
+	taskEmpty, err := BuildTasksForImages(r, tmpDir, false, "", []string{}, naming, "")
 	if err != nil {
 		t.Fatalf("BuildTasksForImages with empty filter failed: %v", err)
 	}
@@ -275,7 +278,7 @@ func TestBuildTasksForImages(t *testing.T) {
 	}
 
 	// 4. Filter with nil slice -> 0 tasks (always filters)
-	taskNil, err := BuildTasksForImages(r, tmpDir, false, "", nil, naming)
+	taskNil, err := BuildTasksForImages(r, tmpDir, false, "", nil, naming, "")
 	if err != nil {
 		t.Fatalf("BuildTasksForImages with nil filter failed: %v", err)
 	}
@@ -285,6 +288,27 @@ func TestBuildTasksForImages(t *testing.T) {
 	}
 	if len(groupNil.Tasks) != 0 {
 		t.Errorf("expected 0 tasks for nil filter, got %d", len(groupNil.Tasks))
+	}
+
+	// 5. Port-forward threading with kubeContext for images.local push
+	taskPF, err := BuildTasksForImages(r, tmpDir, true, "", []string{"a"}, naming, "cluster-context")
+	if err != nil {
+		t.Fatalf("BuildTasksForImages failed: %v", err)
+	}
+	pfTask, ok := taskPF.(*k8s.PortForwardTask)
+	if !ok {
+		t.Fatalf("expected *k8s.PortForwardTask, got %T", taskPF)
+	}
+	if pfTask.KubeContext != "cluster-context" {
+		t.Errorf("expected PortForwardTask KubeContext 'cluster-context', got %q", pfTask.KubeContext)
+	}
+	groupPF, ok := pfTask.Child.(*tasks.Group)
+	if !ok || len(groupPF.Tasks) != 1 {
+		t.Fatalf("expected 1 task in port forward child group, got %v", pfTask.Child)
+	}
+	btPF, ok := groupPF.Tasks[0].(*DockerBuildTask)
+	if !ok || btPF.KubeContext != "cluster-context" {
+		t.Errorf("expected DockerBuildTask KubeContext 'cluster-context', got %+v", groupPF.Tasks[0])
 	}
 
 	// 5. BuildTasks (without filter) builds all images (a and b)

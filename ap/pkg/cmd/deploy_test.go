@@ -701,6 +701,101 @@ func TestBuildDeployPlan_DryRunClusterNonKind(t *testing.T) {
 	}
 }
 
+func TestBuildDeployPlan_PassesContextToBuildTasks(t *testing.T) {
+	tempDir := setupFixtureRepo(t)
+
+	opt := DeployOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: tempDir,
+			Dir:      tempDir,
+			DryRun:   true,
+		},
+		Cluster: "my-custom-context",
+	}
+	if err := opt.Resolve(nil); err != nil {
+		t.Fatalf("opt.Resolve failed: %v", err)
+	}
+	r, err := opt.GetSourceTree()
+	if err != nil {
+		t.Fatalf("opt.GetSourceTree failed: %v", err)
+	}
+
+	cfg, err := config.Load(tempDir)
+	if err != nil {
+		t.Fatalf("config.Load failed: %v", err)
+	}
+	naming := images.ResolveImageNaming(cfg)
+
+	allTasks, err := BuildDeployPlan(opt, r, "", naming)
+	if err != nil {
+		t.Fatalf("BuildDeployPlan failed: %v", err)
+	}
+
+	var registryPortForward *k8s.PortForwardTask
+	var buildTasks []*images.DockerBuildTask
+
+	for _, task := range allTasks {
+		if group, ok := task.(*tasks.Group); ok {
+			for _, child := range group.Tasks {
+				if pf, ok := child.(*k8s.PortForwardTask); ok {
+					registryPortForward = pf
+					child = pf.Child
+				}
+				if bg, ok := child.(*tasks.Group); ok && bg.Name == "build-images" {
+					for _, bt := range bg.Tasks {
+						if dbt, ok := bt.(*images.DockerBuildTask); ok {
+							buildTasks = append(buildTasks, dbt)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if registryPortForward == nil {
+		t.Fatal("expected registry PortForwardTask, got nil")
+	}
+	if registryPortForward.KubeContext != "my-custom-context" {
+		t.Errorf("registryPortForward.KubeContext = %q, want 'my-custom-context'", registryPortForward.KubeContext)
+	}
+
+	if len(buildTasks) == 0 {
+		t.Fatal("expected DockerBuildTasks, got none")
+	}
+	for _, bt := range buildTasks {
+		if bt.KubeContext != "my-custom-context" {
+			t.Errorf("DockerBuildTask.KubeContext = %q, want 'my-custom-context'", bt.KubeContext)
+		}
+	}
+
+	allTasksBuildkit, err := BuildDeployPlan(opt, r, "k8s://autodeploy-system/buildkit", naming)
+	if err != nil {
+		t.Fatalf("BuildDeployPlan with buildkit failed: %v", err)
+	}
+	var buildkitTasks []*images.DockerBuildTask
+	for _, task := range allTasksBuildkit {
+		if group, ok := task.(*tasks.Group); ok {
+			for _, child := range group.Tasks {
+				if bg, ok := child.(*tasks.Group); ok && bg.Name == "build-images" {
+					for _, bt := range bg.Tasks {
+						if dbt, ok := bt.(*images.DockerBuildTask); ok {
+							buildkitTasks = append(buildkitTasks, dbt)
+						}
+					}
+				}
+			}
+		}
+	}
+	if len(buildkitTasks) == 0 {
+		t.Fatal("expected DockerBuildTasks with buildkit, got none")
+	}
+	for _, bt := range buildkitTasks {
+		if bt.KubeContext != "my-custom-context" {
+			t.Errorf("DockerBuildTask with buildkit KubeContext = %q, want 'my-custom-context'", bt.KubeContext)
+		}
+	}
+}
+
 func TestDeploy_FixtureRepo_SelectK8s(t *testing.T) {
 	tempDir := setupFixtureRepo(t)
 

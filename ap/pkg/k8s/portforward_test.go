@@ -18,6 +18,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
@@ -96,5 +97,56 @@ func TestPickFreePort(t *testing.T) {
 	}
 	if port <= 0 || port > 65535 {
 		t.Errorf("pickFreePort() returned invalid port = %d", port)
+	}
+}
+
+func TestPortForwardTask_BuildArgs(t *testing.T) {
+	tests := []struct {
+		name      string
+		task      *PortForwardTask
+		localPort int
+		want      []string
+	}{
+		{
+			name: "without context",
+			task: &PortForwardTask{
+				Service:    "test-service",
+				Namespace:  "test-ns",
+				RemotePort: 80,
+			},
+			localPort: 5000,
+			want: []string{
+				"port-forward",
+				"-n", "test-ns",
+				"svc/test-service",
+				"5000:80",
+			},
+		},
+		{
+			name: "with context",
+			task: &PortForwardTask{
+				Service:     "test-service",
+				Namespace:   "test-ns",
+				RemotePort:  80,
+				KubeContext: "my-context",
+			},
+			localPort: 5000,
+			want: []string{
+				"--context", "my-context",
+				"port-forward",
+				"-n", "test-ns",
+				"svc/test-service",
+				"5000:80",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.task.buildArgs(tt.localPort)
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("buildArgs() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

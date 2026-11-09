@@ -69,6 +69,7 @@ type DockerBuildTask struct {
 	DockerBin    string
 	BuildxBin    string
 	Naming       ImageNaming
+	KubeContext  string
 }
 
 func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
@@ -236,10 +237,11 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 					return cmd.Run()
 				},
 			},
-			Service:    service,
-			Namespace:  namespace,
-			LocalPort:  2375,
-			RemotePort: 2375,
+			Service:     service,
+			Namespace:   namespace,
+			LocalPort:   2375,
+			RemotePort:  2375,
+			KubeContext: t.KubeContext,
 		}
 		childScope := tasks.NewTaskContext(root, root, scope.SourceTree()).WithOutput(scope.Stdout(), scope.Stderr())
 		if err := pfTask.Run(ctx, childScope); err != nil {
@@ -432,7 +434,7 @@ func FindImageNames(r *sourcetree.SourceTree, root string) ([]string, error) {
 }
 
 // BuildTasksForImages returns a task group for building only the specified docker images.
-func BuildTasksForImages(r *sourcetree.SourceTree, root string, push bool, buildkitHost string, imageNames []string, naming ImageNaming) (tasks.Task, error) {
+func BuildTasksForImages(r *sourcetree.SourceTree, root string, push bool, buildkitHost string, imageNames []string, naming ImageNaming, kubeContext string) (tasks.Task, error) {
 	if _, err := FindImageNames(r, root); err != nil {
 		return nil, err
 	}
@@ -476,6 +478,7 @@ func BuildTasksForImages(r *sourcetree.SourceTree, root string, push bool, build
 			Push:         push,
 			BuildkitHost: buildkitHost,
 			Naming:       naming,
+			KubeContext:  kubeContext,
 		})
 	}
 
@@ -491,11 +494,12 @@ func BuildTasksForImages(r *sourcetree.SourceTree, root string, push bool, build
 
 	if push && naming.Prefix == "images.local" && !strings.HasPrefix(buildkitHost, "k8s://") {
 		rootTask = &k8s.PortForwardTask{
-			Child:      rootTask,
-			Service:    "in-cluster-image-registry",
-			Namespace:  "in-cluster-image-registry-system",
-			LocalPort:  5000,
-			RemotePort: 80,
+			Child:       rootTask,
+			Service:     "in-cluster-image-registry",
+			Namespace:   "in-cluster-image-registry-system",
+			LocalPort:   5000,
+			RemotePort:  80,
+			KubeContext: kubeContext,
 		}
 	}
 
@@ -508,7 +512,7 @@ func BuildTasks(r *sourcetree.SourceTree, root string, push bool, buildkitHost s
 	if err != nil {
 		return nil, err
 	}
-	return BuildTasksForImages(r, root, push, buildkitHost, allImages, naming)
+	return BuildTasksForImages(r, root, push, buildkitHost, allImages, naming, "")
 }
 
 // Build builds docker images found in images/<name>/Dockerfile.
