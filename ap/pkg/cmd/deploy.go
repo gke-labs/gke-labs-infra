@@ -43,7 +43,7 @@ type DeployOptions struct {
 	ApplySet     string
 	Targets      []string
 
-	TargetCluster TargetCluster
+	TargetCluster k8s.KubeCluster
 	kindCluster   string
 	parentRef     *applyset.ParentRef
 
@@ -273,12 +273,6 @@ func buildDeployPlans(r *sourcetree.SourceTree, repoRoot, currentDir string, tar
 	}}, nil
 }
 
-// TargetCluster represents the resolved target Kubernetes cluster.
-type TargetCluster struct {
-	KubeContext string
-	KindCluster string
-}
-
 // ParseKindClusterFromContext extracts the kind cluster name if the context represents a kind cluster.
 // For example, "kind-foo" -> ("foo", true).
 func ParseKindClusterFromContext(contextName string) (string, bool) {
@@ -308,28 +302,27 @@ func ParseClusterFlag(val string) (string, error) {
 	return val, nil
 }
 
-// ResolveTargetCluster resolves the cluster flag and context into a TargetCluster.
-func ResolveTargetCluster(clusterFlag string, currentContext string) (TargetCluster, error) {
+// ResolveTargetCluster resolves the cluster flag and context into a k8s.KubeCluster.
+func ResolveTargetCluster(clusterFlag string, currentContext string) (k8s.KubeCluster, error) {
 	if clusterFlag != "" {
 		kCtx, err := ParseClusterFlag(clusterFlag)
 		if err != nil {
-			return TargetCluster{}, err
+			return k8s.KubeCluster{}, err
 		}
-		cluster, _ := ParseKindClusterFromContext(kCtx)
-		return TargetCluster{
-			KubeContext: kCtx,
-			KindCluster: cluster,
-		}, nil
+		if cluster, ok := ParseKindClusterFromContext(kCtx); ok {
+			return k8s.KindCluster(cluster), nil
+		}
+		return k8s.ClusterFromContext(kCtx), nil
 	}
-	cluster, _ := ParseKindClusterFromContext(currentContext)
-	return TargetCluster{
-		KindCluster: cluster,
-	}, nil
+	if cluster, ok := ParseKindClusterFromContext(currentContext); ok {
+		return k8s.CurrentKindCluster(cluster), nil
+	}
+	return k8s.CurrentCluster(), nil
 }
 
 var execCommandContext = exec.CommandContext
 
-func getCurrentKubeContext(ctx context.Context, kubectlBin string) string {
+func getCurrentContext(ctx context.Context, kubectlBin string) string {
 	cmd := execCommandContext(ctx, kubectlBin, "config", "current-context")
 	out, err := cmd.Output()
 	if err != nil {
@@ -344,28 +337,28 @@ type KindLoadTask = kindload.KindLoadTask
 // BuildDeployPlan constructs the task tree for deploying artifacts according to DeployOptions.
 func BuildDeployPlan(opt DeployOptions, r *sourcetree.SourceTree, buildkitHost string, naming images.ImageNaming) ([]tasks.Task, error) {
 	tc := opt.TargetCluster
-	if opt.Cluster != "" && tc.KubeContext == "" {
+	if opt.Cluster != "" && tc == (k8s.KubeCluster{}) {
 		resolved, err := ResolveTargetCluster(opt.Cluster, "")
 		if err != nil {
 			return nil, err
 		}
 		tc = resolved
 	}
-	if opt.kindCluster != "" && tc.KindCluster == "" {
-		tc.KindCluster = opt.kindCluster
+	if opt.kindCluster != "" && !tc.IsKind() {
+		tc = k8s.CurrentKindCluster(opt.kindCluster)
 	}
-	if tc.KindCluster != "" {
+	if tc.IsKind() {
 		naming.KindMode = true
 	}
 	parentRef := opt.parentRef
 	if parentRef != nil && parentRef.Namespace == "" && opt.Namespace != "" {
 		parentRef.Namespace = opt.Namespace
 	}
-	push := !opt.SkipPush && tc.KindCluster == ""
+	push := !opt.SkipPush && !tc.IsKind()
 	return buildDeployTasks(r, opt.plans, push, buildkitHost, opt.Namespace, tc, naming, parentRef)
 }
 
-func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, buildkitHost string, namespace string, targetCluster TargetCluster, naming images.ImageNaming, parentRef *applyset.ParentRef) ([]tasks.Task, error) {
+func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, buildkitHost string, namespace string, targetCluster k8s.KubeCluster, naming images.ImageNaming, parentRef *applyset.ParentRef) ([]tasks.Task, error) {
 	repoRoot := r.RepoRoot()
 	var allTasks []tasks.Task
 
@@ -378,13 +371,13 @@ func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, b
 		membership = &applyset.Membership{}
 		applySetID = parentRef.ID()
 		verifyTask = &k8s.VerifyApplySetParentTask{
-			Parent:      parentRef,
-			KubeContext: targetCluster.KubeContext,
+			Parent:  parentRef,
+			Cluster: targetCluster,
 		}
 		updateTask = &k8s.UpdateApplySetParentTask{
-			Parent:      parentRef,
-			Membership:  membership,
-			KubeContext: targetCluster.KubeContext,
+			Parent:     parentRef,
+			Membership: membership,
+			Cluster:    targetCluster,
 		}
 		allTasks = append(allTasks, verifyTask)
 	}
@@ -403,19 +396,19 @@ func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, b
 			Name: fmt.Sprintf("deploy-%s", filepath.Base(plan.dir)),
 		}
 
-		buildTasks, err := images.BuildTasksForImages(r, repoRoot, push, buildkitHost, plan.imageNames, naming, targetCluster.KubeContext)
+		buildTasks, err := images.BuildTasksForImages(r, repoRoot, push, buildkitHost, plan.imageNames, naming, targetCluster)
 		if err != nil {
 			return nil, fmt.Errorf("build failed during deploy for %s: %w", plan.dir, err)
 		}
 		group.Tasks = append(group.Tasks, buildTasks)
 
-		if targetCluster.KindCluster != "" && len(plan.imageNames) > 0 {
+		if targetCluster.IsKind() && len(plan.imageNames) > 0 {
 			var imageRefs []*imageref.ImageRef
 			for _, img := range plan.imageNames {
 				imageRefs = append(imageRefs, naming.Ref(img))
 			}
 			group.Tasks = append(group.Tasks, &KindLoadTask{
-				ClusterName: targetCluster.KindCluster,
+				ClusterName: targetCluster.KindClusterName(),
 				Images:      imageRefs,
 			})
 		}
@@ -424,7 +417,7 @@ func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, b
 			Namespace:         namespace,
 			OriginalNamespace: originalNamespace,
 			Naming:            naming,
-			KubeContext:       targetCluster.KubeContext,
+			Cluster:           targetCluster,
 			ApplySetID:        applySetID,
 			Membership:        membership,
 		})
@@ -457,31 +450,31 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		return fmt.Errorf("failed to ensure kubectl: %w", err)
 	}
 
-	if opt.Cluster != "" && opt.TargetCluster.KubeContext == "" {
+	if opt.Cluster != "" && opt.TargetCluster == (k8s.KubeCluster{}) {
 		tc, err := ResolveTargetCluster(opt.Cluster, "")
 		if err != nil {
 			return err
 		}
 		opt.TargetCluster = tc
-	} else if opt.Cluster == "" && opt.TargetCluster.KindCluster == "" && opt.kindCluster == "" {
-		tc, err := ResolveTargetCluster("", getCurrentKubeContext(ctx, kubectlBin))
+	} else if opt.Cluster == "" && !opt.TargetCluster.IsKind() && opt.kindCluster == "" {
+		tc, err := ResolveTargetCluster("", getCurrentContext(ctx, kubectlBin))
 		if err != nil {
 			return err
 		}
 		opt.TargetCluster = tc
 	}
-	if opt.kindCluster != "" && opt.TargetCluster.KindCluster == "" {
-		opt.TargetCluster.KindCluster = opt.kindCluster
+	if opt.kindCluster != "" && !opt.TargetCluster.IsKind() {
+		opt.TargetCluster = k8s.CurrentKindCluster(opt.kindCluster)
 	}
 
 	if opt.parentRef != nil {
-		if err := k8s.ResolveParentRef(opt.parentRef, opt.Namespace, opt.TargetCluster.KubeContext, kubectlBin); err != nil {
+		if err := k8s.ResolveParentRef(opt.parentRef, opt.Namespace, opt.TargetCluster, kubectlBin); err != nil {
 			return err
 		}
 	}
 
 	if !opt.DryRun && opt.Namespace != "" {
-		if err := k8s.DefaultCheckNamespaceCached(ctx, opt.Namespace, opt.TargetCluster.KubeContext, kubectlBin); err != nil {
+		if err := k8s.DefaultCheckNamespaceCached(ctx, opt.Namespace, opt.TargetCluster, kubectlBin); err != nil {
 			return err
 		}
 	}

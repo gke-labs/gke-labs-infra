@@ -181,8 +181,8 @@ func getMetadataLabel(root *yaml.Node, key string) (string, bool) {
 // and if custom resource, its CRD has the is-parent-type label.
 // It then claims the parent by writing the ApplySet ID label and tooling annotation.
 type VerifyApplySetParentTask struct {
-	Parent      *applyset.ParentRef
-	KubeContext string
+	Parent  *applyset.ParentRef
+	Cluster KubeCluster
 }
 
 func (t *VerifyApplySetParentTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
@@ -200,9 +200,7 @@ func (t *VerifyApplySetParentTask) Run(ctx context.Context, scope *tasks.TaskCon
 	}
 
 	var args []string
-	if t.KubeContext != "" {
-		args = append(args, "--context", t.KubeContext)
-	}
+	args = append(args, t.Cluster.KubectlArgs()...)
 	if t.Parent.Namespace != "" {
 		args = append(args, "-n", t.Parent.Namespace)
 	}
@@ -248,9 +246,7 @@ func (t *VerifyApplySetParentTask) Run(ctx context.Context, scope *tasks.TaskCon
 			crdName = fmt.Sprintf("%ss.%s", strings.ToLower(t.Parent.Kind), t.Parent.Group)
 		}
 		var crdArgs []string
-		if t.KubeContext != "" {
-			crdArgs = append(crdArgs, "--context", t.KubeContext)
-		}
+		crdArgs = append(crdArgs, t.Cluster.KubectlArgs()...)
 		crdArgs = append(crdArgs, "get", "customresourcedefinition", crdName, "-o", "json")
 		crdCmd := exec.CommandContext(ctx, kubectlBin, crdArgs...)
 		crdOut, crdErr := crdCmd.CombinedOutput()
@@ -272,9 +268,7 @@ func (t *VerifyApplySetParentTask) Run(ctx context.Context, scope *tasks.TaskCon
 
 	// Claim parent: write ID label and tooling annotation
 	var labelArgs []string
-	if t.KubeContext != "" {
-		labelArgs = append(labelArgs, "--context", t.KubeContext)
-	}
+	labelArgs = append(labelArgs, t.Cluster.KubectlArgs()...)
 	if t.Parent.Namespace != "" {
 		labelArgs = append(labelArgs, "-n", t.Parent.Namespace)
 	}
@@ -290,9 +284,7 @@ func (t *VerifyApplySetParentTask) Run(ctx context.Context, scope *tasks.TaskCon
 
 	tooling := fmt.Sprintf("ap/%s", version.Version())
 	var annotateArgs []string
-	if t.KubeContext != "" {
-		annotateArgs = append(annotateArgs, "--context", t.KubeContext)
-	}
+	annotateArgs = append(annotateArgs, t.Cluster.KubectlArgs()...)
 	if t.Parent.Namespace != "" {
 		annotateArgs = append(annotateArgs, "-n", t.Parent.Namespace)
 	}
@@ -330,9 +322,9 @@ func (t *VerifyApplySetParentTask) GetChildren() []tasks.Task {
 // UpdateApplySetParentTask updates the parent object with ApplySet
 // contains-group-kinds and additional-namespaces annotations.
 type UpdateApplySetParentTask struct {
-	Parent      *applyset.ParentRef
-	Membership  *applyset.Membership
-	KubeContext string
+	Parent     *applyset.ParentRef
+	Membership *applyset.Membership
+	Cluster    KubeCluster
 }
 
 func (t *UpdateApplySetParentTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
@@ -353,9 +345,7 @@ func (t *UpdateApplySetParentTask) Run(ctx context.Context, scope *tasks.TaskCon
 
 	// Annotate parent with contains-group-kinds and additional-namespaces
 	var annotateArgs []string
-	if t.KubeContext != "" {
-		annotateArgs = append(annotateArgs, "--context", t.KubeContext)
-	}
+	annotateArgs = append(annotateArgs, t.Cluster.KubectlArgs()...)
 	if t.Parent.Namespace != "" {
 		annotateArgs = append(annotateArgs, "-n", t.Parent.Namespace)
 	}
@@ -399,14 +389,14 @@ func (t *UpdateApplySetParentTask) GetChildren() []tasks.Task {
 // ResolveParentRef resolves the namespace and kind of parent using discovery.
 // If the parent is namespaced and deployNamespace is empty, it returns the error:
 // "namespace is required to use namespace-scoped ApplySet"
-func ResolveParentRef(parent *applyset.ParentRef, deployNamespace string, kubeContext string, kubectlBin string) error {
+func ResolveParentRef(parent *applyset.ParentRef, deployNamespace string, cluster KubeCluster, kubectlBin string) error {
 	if parent == nil {
 		return nil
 	}
 
 	var resolver ScopeResolver
 	if kubectlBin != "" {
-		r, err := GetDiscoveryScopeResolver(kubeContext, kubectlBin)
+		r, err := GetDiscoveryScopeResolver(cluster, kubectlBin)
 		if err != nil {
 			klog.V(2).Infof("could not get discovery scope resolver: %v", err)
 		} else {

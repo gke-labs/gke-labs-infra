@@ -125,10 +125,10 @@ func TestPortForwardTask_BuildArgs(t *testing.T) {
 		{
 			name: "with context",
 			task: &PortForwardTask{
-				Service:     "test-service",
-				Namespace:   "test-ns",
-				RemotePort:  80,
-				KubeContext: "my-context",
+				Service:    "test-service",
+				Namespace:  "test-ns",
+				RemotePort: 80,
+				Cluster:    ClusterFromContext("my-context"),
 			},
 			localPort: 5000,
 			want: []string{

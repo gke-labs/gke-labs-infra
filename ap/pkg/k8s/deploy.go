@@ -393,7 +393,7 @@ type DeployTaskOptions struct {
 	ScopeResolver     ScopeResolver
 	CheckNamespace    func(ctx context.Context, namespace string) error
 	Naming            imageref.ImageNaming
-	KubeContext       string
+	Cluster           KubeCluster
 	ApplySetID        string
 	Membership        *applyset.Membership
 }
@@ -406,7 +406,7 @@ type KubectlApplyTask struct {
 	ScopeResolver     ScopeResolver
 	CheckNamespace    func(ctx context.Context, namespace string) error
 	Naming            imageref.ImageNaming
-	KubeContext       string
+	Cluster           KubeCluster
 	ApplySetID        string
 	Membership        *applyset.Membership
 }
@@ -452,7 +452,7 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 		checkFn := t.CheckNamespace
 		if checkFn == nil {
 			checkFn = func(ctx context.Context, ns string) error {
-				return DefaultCheckNamespaceCached(ctx, ns, t.KubeContext, kubectlBin)
+				return DefaultCheckNamespaceCached(ctx, ns, t.Cluster, kubectlBin)
 			}
 		}
 		if err := checkFn(ctx, t.Namespace); err != nil {
@@ -462,7 +462,7 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 		resolver := t.ScopeResolver
 		if resolver == nil {
 			var err error
-			resolver, err = GetDiscoveryScopeResolver(t.KubeContext, kubectlBin)
+			resolver, err = GetDiscoveryScopeResolver(t.Cluster, kubectlBin)
 			if err != nil {
 				return fmt.Errorf("failed to get discovery scope resolver: %w", err)
 			}
@@ -485,7 +485,7 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 		resolver := t.ScopeResolver
 		if resolver == nil {
 			var err error
-			resolver, err = GetDiscoveryScopeResolver(t.KubeContext, kubectlBin)
+			resolver, err = GetDiscoveryScopeResolver(t.Cluster, kubectlBin)
 			if err != nil {
 				return fmt.Errorf("failed to get discovery scope resolver: %w", err)
 			}
@@ -510,9 +510,7 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 	}
 
 	var applyArgs []string
-	if t.KubeContext != "" {
-		applyArgs = append(applyArgs, "--context", t.KubeContext)
-	}
+	applyArgs = append(applyArgs, t.Cluster.KubectlArgs()...)
 	applyArgs = append(applyArgs, "apply", "-f", "-")
 	cmd := exec.CommandContext(ctx, kubectlBin, applyArgs...)
 	cmd.Stdin = bytes.NewBufferString(replaced)
@@ -531,9 +529,7 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 		for _, name := range crdNames {
 			klog.Infof("Waiting for CRD %s to be established...", name)
 			var waitArgs []string
-			if t.KubeContext != "" {
-				waitArgs = append(waitArgs, "--context", t.KubeContext)
-			}
+			waitArgs = append(waitArgs, t.Cluster.KubectlArgs()...)
 			waitArgs = append(waitArgs, "wait", "--for=condition=Established", "customresourcedefinition/"+name, "--timeout=60s")
 			waitCmd := exec.CommandContext(ctx, kubectlBin, waitArgs...)
 			waitCmd.Stdout = scope.Stdout()
@@ -644,7 +640,7 @@ func DeployTasksForManifests(manifests []string, opts ...DeployTaskOptions) task
 			ScopeResolver:     opt.ScopeResolver,
 			CheckNamespace:    opt.CheckNamespace,
 			Naming:            opt.Naming,
-			KubeContext:       opt.KubeContext,
+			Cluster:           opt.Cluster,
 			ApplySetID:        opt.ApplySetID,
 			Membership:        opt.Membership,
 		})
