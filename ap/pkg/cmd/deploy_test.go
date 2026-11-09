@@ -701,16 +701,35 @@ func TestBuildDeployPlan_DryRunClusterNonKind(t *testing.T) {
 	}
 }
 
+func collectBuildTasks(plan []tasks.Task) (*k8s.PortForwardTask, []*images.DockerBuildTask) {
+	var portForward *k8s.PortForwardTask
+	var buildTasks []*images.DockerBuildTask
+	for _, task := range plan {
+		if group, ok := task.(*tasks.Group); ok {
+			for _, child := range group.Tasks {
+				if pf, ok := child.(*k8s.PortForwardTask); ok {
+					portForward = pf
+					child = pf.Child
+				}
+				if bg, ok := child.(*tasks.Group); ok && bg.Name == "build-images" {
+					for _, bt := range bg.Tasks {
+						if dbt, ok := bt.(*images.DockerBuildTask); ok {
+							buildTasks = append(buildTasks, dbt)
+						}
+					}
+				}
+			}
+		}
+	}
+	return portForward, buildTasks
+}
+
 func TestBuildDeployPlan_PassesContextToBuildTasks(t *testing.T) {
 	tempDir := setupFixtureRepo(t)
 
 	opt := DeployOptions{
-		RootOptions: &RootOptions{
-			RepoRoot: tempDir,
-			Dir:      tempDir,
-			DryRun:   true,
-		},
-		Cluster: "my-custom-context",
+		RootOptions: &RootOptions{RepoRoot: tempDir, Dir: tempDir, DryRun: true},
+		Cluster:     "my-custom-context",
 	}
 	if err := opt.Resolve(nil); err != nil {
 		t.Fatalf("opt.Resolve failed: %v", err)
@@ -726,72 +745,29 @@ func TestBuildDeployPlan_PassesContextToBuildTasks(t *testing.T) {
 	}
 	naming := images.ResolveImageNaming(cfg)
 
-	allTasks, err := BuildDeployPlan(opt, r, "", naming)
-	if err != nil {
-		t.Fatalf("BuildDeployPlan failed: %v", err)
+	tests := []struct {
+		buildkitHost string
+		wantPF       bool
+	}{
+		{buildkitHost: "", wantPF: true},
+		{buildkitHost: "k8s://autodeploy-system/buildkit", wantPF: false},
 	}
-
-	var registryPortForward *k8s.PortForwardTask
-	var buildTasks []*images.DockerBuildTask
-
-	for _, task := range allTasks {
-		if group, ok := task.(*tasks.Group); ok {
-			for _, child := range group.Tasks {
-				if pf, ok := child.(*k8s.PortForwardTask); ok {
-					registryPortForward = pf
-					child = pf.Child
-				}
-				if bg, ok := child.(*tasks.Group); ok && bg.Name == "build-images" {
-					for _, bt := range bg.Tasks {
-						if dbt, ok := bt.(*images.DockerBuildTask); ok {
-							buildTasks = append(buildTasks, dbt)
-						}
-					}
-				}
+	for _, tt := range tests {
+		plan, err := BuildDeployPlan(opt, r, tt.buildkitHost, naming)
+		if err != nil {
+			t.Fatalf("BuildDeployPlan(%q) failed: %v", tt.buildkitHost, err)
+		}
+		portForward, buildTasks := collectBuildTasks(plan)
+		if tt.wantPF && (portForward == nil || portForward.KubeContext != "my-custom-context") {
+			t.Errorf("host %q: want registry PortForwardTask with context 'my-custom-context', got %v", tt.buildkitHost, portForward)
+		}
+		if len(buildTasks) == 0 {
+			t.Fatalf("host %q: expected DockerBuildTasks, got none", tt.buildkitHost)
+		}
+		for _, bt := range buildTasks {
+			if bt.KubeContext != "my-custom-context" {
+				t.Errorf("host %q: DockerBuildTask.KubeContext = %q, want 'my-custom-context'", tt.buildkitHost, bt.KubeContext)
 			}
-		}
-	}
-
-	if registryPortForward == nil {
-		t.Fatal("expected registry PortForwardTask, got nil")
-	}
-	if registryPortForward.KubeContext != "my-custom-context" {
-		t.Errorf("registryPortForward.KubeContext = %q, want 'my-custom-context'", registryPortForward.KubeContext)
-	}
-
-	if len(buildTasks) == 0 {
-		t.Fatal("expected DockerBuildTasks, got none")
-	}
-	for _, bt := range buildTasks {
-		if bt.KubeContext != "my-custom-context" {
-			t.Errorf("DockerBuildTask.KubeContext = %q, want 'my-custom-context'", bt.KubeContext)
-		}
-	}
-
-	allTasksBuildkit, err := BuildDeployPlan(opt, r, "k8s://autodeploy-system/buildkit", naming)
-	if err != nil {
-		t.Fatalf("BuildDeployPlan with buildkit failed: %v", err)
-	}
-	var buildkitTasks []*images.DockerBuildTask
-	for _, task := range allTasksBuildkit {
-		if group, ok := task.(*tasks.Group); ok {
-			for _, child := range group.Tasks {
-				if bg, ok := child.(*tasks.Group); ok && bg.Name == "build-images" {
-					for _, bt := range bg.Tasks {
-						if dbt, ok := bt.(*images.DockerBuildTask); ok {
-							buildkitTasks = append(buildkitTasks, dbt)
-						}
-					}
-				}
-			}
-		}
-	}
-	if len(buildkitTasks) == 0 {
-		t.Fatal("expected DockerBuildTasks with buildkit, got none")
-	}
-	for _, bt := range buildkitTasks {
-		if bt.KubeContext != "my-custom-context" {
-			t.Errorf("DockerBuildTask with buildkit KubeContext = %q, want 'my-custom-context'", bt.KubeContext)
 		}
 	}
 }
