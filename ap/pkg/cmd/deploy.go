@@ -56,7 +56,12 @@ func BuildDeployCommand(rootOpt *RootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "deploy [path...]",
 		Short: "Deploy artifacts",
-		Args:  cobra.ArbitraryArgs,
+		Long: `Deploy artifacts by building container images and applying Kubernetes manifests.
+
+Positional path arguments select either a directory to apply all manifests found under any k8s/ directory beneath it, or a single manifest file to apply only that file and build only its referenced images.
+
+Flags configure the target cluster (--cluster), target namespace (-n, --namespace), remote buildkit daemon (--buildkit-host), and whether to skip pushing images (--skip-push).`,
+		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := opt.Resolve(args); err != nil {
 				return err
