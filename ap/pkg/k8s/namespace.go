@@ -79,22 +79,36 @@ type ScopeResolver interface {
 	IsNamespaced(gvk GroupVersionKind) (bool, error)
 }
 
+// KindResolver resolves resource names (e.g. "packages") to Kind (e.g. "Package").
+type KindResolver interface {
+	KindForResource(resource, group string) (string, bool)
+}
+
+type resourceKey struct {
+	Resource string
+	Group    string
+}
+
 // KubectlScopeResolver implements ScopeResolver by querying discovery via "kubectl api-resources".
 type KubectlScopeResolver struct {
-	mu          sync.Mutex
-	loaded      bool
-	namespaced  map[GroupKind]bool
-	byKind      map[string]bool
-	execCmd     func(ctx context.Context, name string, args ...string) ([]byte, error)
-	KubeContext string
-	kubectlBin  string
+	mu                  sync.Mutex
+	loaded              bool
+	namespaced          map[GroupKind]bool
+	byKind              map[string]bool
+	kindByResource      map[string]string
+	kindByResourceGroup map[resourceKey]string
+	execCmd             func(ctx context.Context, name string, args ...string) ([]byte, error)
+	KubeContext         string
+	kubectlBin          string
 }
 
 // NewKubectlScopeResolver creates a new KubectlScopeResolver.
 func NewKubectlScopeResolver() *KubectlScopeResolver {
 	return &KubectlScopeResolver{
-		namespaced: make(map[GroupKind]bool),
-		byKind:     make(map[string]bool),
+		namespaced:          make(map[GroupKind]bool),
+		byKind:              make(map[string]bool),
+		kindByResource:      make(map[string]string),
+		kindByResourceGroup: make(map[resourceKey]string),
 	}
 }
 
@@ -205,12 +219,37 @@ func (r *KubectlScopeResolver) parseOutput(output string) error {
 			group = apiVerOrGroup
 		}
 
+		resourceName := strings.Fields(trimmed)[0]
 		r.namespaced[GroupKind{Group: group, Kind: kind}] = namespaced
 		r.byKind[kind] = namespaced
+		r.kindByResource[resourceName] = kind
+		r.kindByResourceGroup[resourceKey{Resource: resourceName, Group: group}] = kind
 	}
 
 	r.loaded = true
 	return nil
+}
+
+// KindForResource resolves a resource name (and optional group) to its Kind.
+func (r *KubectlScopeResolver) KindForResource(resource, group string) (string, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.loaded {
+		if err := r.load(context.Background()); err != nil {
+			return "", false
+		}
+	}
+
+	if group != "" {
+		if k, ok := r.kindByResourceGroup[resourceKey{Resource: resource, Group: group}]; ok {
+			return k, true
+		}
+	}
+	if k, ok := r.kindByResource[resource]; ok {
+		return k, true
+	}
+	return "", false
 }
 
 // NewDiscoveryScopeResolver creates a ScopeResolver using discovery from "kubectl api-resources".
@@ -223,6 +262,16 @@ func NewDiscoveryScopeResolver(kubeContext, kubectlBin string) (ScopeResolver, e
 
 // MapScopeResolver implements ScopeResolver using a simple map for testing or static resolution.
 type MapScopeResolver map[GroupVersionKind]bool
+
+// KindForResource resolves a resource name (and optional group) to its Kind.
+func (m MapScopeResolver) KindForResource(resource, group string) (string, bool) {
+	for gvk := range m {
+		if (group == "" || gvk.Group == group) && (strings.EqualFold(gvk.Kind, resource) || strings.EqualFold(gvk.Kind+"s", resource)) {
+			return gvk.Kind, true
+		}
+	}
+	return "", false
+}
 
 var (
 	discoveryResolverMu sync.Mutex

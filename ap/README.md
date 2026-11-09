@@ -67,6 +67,8 @@ For example, to deploy a controller from a single manifest to a non-kind cluster
 ap deploy path/to/k8s/controller.yaml -n my-namespace --cluster my-context --buildkit-host k8s
 ```
 
+Pass `--applyset=[RESOURCE[.GROUP]/]NAME` to track deployments using the KEP-3659 ApplySet specification. `ap deploy` stamps `applyset.kubernetes.io/part-of: <id>` on every applied object and updates the pre-existing parent object with the ApplySet ID label, tooling version (`ap/<version>`), and `contains-group-kinds` (and `additional-namespaces` when applicable) annotations. The deploy fails if the parent does not exist, carries a conflicting tooling annotation, or is namespace-scoped without `--namespace`.
+
 ## End-to-End Testing (e2e)
 
 If a root has `tests/e2e` Go tests, `ap e2e` runs `RUN_E2E=1 go test -v -count=1 -timeout 30m ./tests/e2e/...`. A `dev/tasks/test-e2e*` script at the same root runs before them and is for setup only (build a binary, prepare a cluster, free disk space); it must not run the Go tests itself, or they run twice.
