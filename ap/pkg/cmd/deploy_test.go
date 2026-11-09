@@ -40,6 +40,12 @@ func TestBuildDeployCommand(t *testing.T) {
 	if cmd.Use != "deploy [path...]" {
 		t.Errorf("Unexpected use string: %q", cmd.Use)
 	}
+	if cmd.Long == "" {
+		t.Error("expected cmd.Long to be set")
+	}
+	if !strings.Contains(cmd.Long, "k8s/") {
+		t.Errorf("expected cmd.Long to describe path selection, got %q", cmd.Long)
+	}
 
 	skipPushFlag := cmd.Flags().Lookup("skip-push")
 	if skipPushFlag == nil {

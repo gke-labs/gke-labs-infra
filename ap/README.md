@@ -51,7 +51,21 @@ Running `ap generate --verify` (or `ap verify-generate`) perturbs each generated
 
 ## Deployment
 
-The `ap deploy` command builds container images and applies Kubernetes manifests. Built images deployed with `:latest` are pinned by digest (`tag@sha256`) in applied manifests so redeploying always rolls pods to the new image. When the current context is a kind cluster, `ap deploy` works with no `IMAGE_PREFIX`, building locally, loading images with `kind load docker-image` using a unique content-addressed tag, and applying. Use `--cluster=kind://<name>` to target a specific kind cluster, or `--cluster=<context>` to target a kubeconfig context. Passing `-n <namespace>` retargets namespaced objects to the target namespace, logging which manifests were retargeted and any cluster-scoped objects applied as-is.
+The `ap deploy` command builds container images and applies Kubernetes manifests. Built images deployed with `:latest` are pinned by digest (`tag@sha256`) in applied manifests so redeploying always rolls pods to the new image.
+
+Positional path arguments select what to deploy: `ap deploy <dir>` applies every manifest under any `k8s/` directory beneath `<dir>` (including example manifests), whereas `ap deploy <dir>/k8s/<file>.yaml` applies a single file and builds only the images that file references.
+
+When the current context is a kind cluster, `ap deploy` works with no `IMAGE_PREFIX`, building locally, loading images with `kind load docker-image` using a unique content-addressed tag, and applying. Use `--cluster=kind://<name>` to target a specific kind cluster, or `--cluster=<context>` to target a kubeconfig context. Passing `-n <namespace>` retargets namespaced objects to the target namespace, logging which manifests were retargeted and any cluster-scoped objects applied as-is.
+
+For non-kind clusters, configure building with a remote BuildKit daemon using `--buildkit-host` or the `BUILDKIT_HOST` environment variable (e.g. `k8s://namespace/service`). The shorthand `--buildkit-host k8s` or `BUILDKIT_HOST=k8s` expands to `k8s://autodeploy-system/buildkit`. The buildkit path uses the pinned `buildctl`. `IMAGE_PREFIX` defaults to `images.local`, which assumes the in-cluster image registry and its node agent. Pass `--skip-push` to skip pushing built images to the registry.
+
+`ap deploy` applies manifests as written, apart from image references and the `-n` namespace; it does not install CRDs that the manifests do not contain, and it does not create Secrets.
+
+For example, to deploy a controller from a single manifest to a non-kind cluster using in-cluster buildkit and registry:
+
+```bash
+ap deploy path/to/k8s/controller.yaml -n my-namespace --cluster my-context --buildkit-host k8s
+```
 
 ## End-to-End Testing (e2e)
 
