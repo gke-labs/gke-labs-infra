@@ -362,7 +362,7 @@ func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, b
 			Name: fmt.Sprintf("deploy-%s", filepath.Base(plan.dir)),
 		}
 
-		buildTasks, err := images.BuildTasksForImages(r, repoRoot, push, buildkitHost, plan.imageNames, naming)
+		buildTasks, err := images.BuildTasksForImages(r, repoRoot, push, buildkitHost, plan.imageNames, naming, targetCluster.KubeContext)
 		if err != nil {
 			return nil, fmt.Errorf("build failed during deploy for %s: %w", plan.dir, err)
 		}

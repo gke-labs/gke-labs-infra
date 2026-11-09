@@ -33,11 +33,26 @@ import (
 
 // PortForwardTask wraps another task and ensures a port-forward is running while it executes.
 type PortForwardTask struct {
-	Child      tasks.Task
-	Service    string
-	Namespace  string
-	LocalPort  int
-	RemotePort int
+	Child       tasks.Task
+	Service     string
+	Namespace   string
+	LocalPort   int
+	RemotePort  int
+	KubeContext string
+}
+
+func (t *PortForwardTask) buildArgs(localPort int) []string {
+	var args []string
+	if t.KubeContext != "" {
+		args = append(args, "--context", t.KubeContext)
+	}
+	args = append(args,
+		"port-forward",
+		"-n", t.Namespace,
+		"svc/"+t.Service,
+		fmt.Sprintf("%d:%d", localPort, t.RemotePort),
+	)
+	return args
 }
 
 func (t *PortForwardTask) Run(ctx context.Context, scope *tasks.TaskContext) (retErr error) {
@@ -86,10 +101,7 @@ func (t *PortForwardTask) Run(ctx context.Context, scope *tasks.TaskContext) (re
 
 	klog.Infof("Starting port-forward to %s/%s (%d:%d)...", t.Namespace, t.Service, localPort, t.RemotePort)
 
-	pfCmd := exec.CommandContext(ctx, kubectlBin, "port-forward",
-		"-n", t.Namespace,
-		"svc/"+t.Service,
-		fmt.Sprintf("%d:%d", localPort, t.RemotePort))
+	pfCmd := exec.CommandContext(ctx, kubectlBin, t.buildArgs(localPort)...)
 
 	var stdout, stderr syncBuffer
 	pfCmd.Stdout = &stdout

@@ -218,7 +218,7 @@ func TestBuildTasksForImages(t *testing.T) {
 	naming := ResolveImageNaming(nil)
 
 	// 1. Filter for image "a" only
-	taskA, err := BuildTasksForImages(r, tmpDir, false, "", []string{"a"}, naming)
+	taskA, err := BuildTasksForImages(r, tmpDir, false, "", []string{"a"}, naming, "")
 	if err != nil {
 		t.Fatalf("BuildTasksForImages failed: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestBuildTasksForImages(t *testing.T) {
 
 	// 2. Buildctl path with image "b" only
 	buildkitHost := "k8s://autodeploy-system/buildkit"
-	taskB, err := BuildTasksForImages(r, tmpDir, true, buildkitHost, []string{"b"}, naming)
+	taskB, err := BuildTasksForImages(r, tmpDir, true, buildkitHost, []string{"b"}, naming, "")
 	if err != nil {
 		t.Fatalf("BuildTasksForImages with buildkit failed: %v", err)
 	}
@@ -262,7 +262,7 @@ func TestBuildTasksForImages(t *testing.T) {
 	}
 
 	// 3. Filter with empty slice -> 0 tasks
-	taskEmpty, err := BuildTasksForImages(r, tmpDir, false, "", []string{}, naming)
+	taskEmpty, err := BuildTasksForImages(r, tmpDir, false, "", []string{}, naming, "")
 	if err != nil {
 		t.Fatalf("BuildTasksForImages with empty filter failed: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestBuildTasksForImages(t *testing.T) {
 	}
 
 	// 4. Filter with nil slice -> 0 tasks (always filters)
-	taskNil, err := BuildTasksForImages(r, tmpDir, false, "", nil, naming)
+	taskNil, err := BuildTasksForImages(r, tmpDir, false, "", nil, naming, "")
 	if err != nil {
 		t.Fatalf("BuildTasksForImages with nil filter failed: %v", err)
 	}
