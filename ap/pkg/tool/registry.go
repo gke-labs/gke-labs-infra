@@ -31,6 +31,7 @@ import (
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/buildctl"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/docker"
 	gotool "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kind"
@@ -132,6 +133,10 @@ func loadKindConfig(repoRoot string) (*kind.Config, error) {
 
 func loadKubectlConfig(repoRoot string) (*kubectl.Config, error) {
 	return loadToolConfig(repoRoot, kubectl.LoadConfig, kubectl.DefaultConfig)
+}
+
+func loadBuildctlConfig(repoRoot string) (*buildctl.Config, error) {
+	return loadToolConfig(repoRoot, buildctl.LoadConfig, buildctl.DefaultConfig)
 }
 
 func loadProtocConfig(repoRoot string) (*protoc.Config, error) {
@@ -272,6 +277,37 @@ var registry = []*Tool{
 		},
 		Update: func(ctx context.Context, repoRoot string) error {
 			return kubectl.Update(ctx, repoRoot)
+		},
+	},
+	{
+		Name:       "buildctl",
+		Short:      "Run buildctl with pinned binary",
+		UpdateFlag: "buildctl",
+		UpdateDesc: "Update buildctl versions in ap/pkg/tool/buildctl/versions.yaml",
+		Ensure: func(ctx context.Context, repoRoot string) (string, error) {
+			cfg, err := loadBuildctlConfig(repoRoot)
+			if err != nil {
+				return "", err
+			}
+			return buildctl.EnsureBuildctl(ctx, cfg.Buildctl)
+		},
+		Prepare: func(ctx context.Context, repoRoot string, args []string) (*Invocation, error) {
+			cfg, err := loadBuildctlConfig(repoRoot)
+			if err != nil {
+				return nil, err
+			}
+			buildctlBin, err := buildctl.EnsureBuildctl(ctx, cfg.Buildctl)
+			if err != nil {
+				return nil, fmt.Errorf("failed to prepare buildctl: %w", err)
+			}
+			return &Invocation{
+				Binary: buildctlBin,
+				Args:   args,
+				Env:    fileutils.PrependPath(os.Environ(), filepath.Dir(buildctlBin)),
+			}, nil
+		},
+		Update: func(ctx context.Context, repoRoot string) error {
+			return buildctl.Update(ctx, repoRoot)
 		},
 	},
 	{

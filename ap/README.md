@@ -14,7 +14,7 @@ Commands operate on a subtree of the repository: either the positional target wh
 
 ### Subtree Configuration Overrides
 
-A `.ap/` directory in a subtree can override configuration options for files beneath it. The effective configuration for a path is the base configuration at `<repo>/.ap/` with keys overridden by the nearest enclosing subtree `.ap/go.yaml`, walking up to the root. Only keys present in a subtree file override; absent keys inherit, and lists such as `skip` replace rather than merge. An explicitly written key always wins (for example, `mode: ""` or `toolchain: ""` in a subtree file overrides rather than being treated as unset), and mapping sections (such as `gofmt:`) merge per key instead of replacing the whole section. Overrides apply to per-module and per-directory settings (`gofmt`, `govet`, `govulncheck`, `tidy`, `skip`, `lint` analyzer modes and baselines, and `toolchain`), while tool version files (`protoc.yaml`, `docker.yaml`, `kind.yaml`, `kubectl.yaml`) and `.ap/ap.yaml` remain root-only. A subtree `.ap/` directory does not change discovery, build context, image naming, or generated presubmits. For example, to disable `govulncheck` in a subtree, create a `.ap/go.yaml` in that subtree:
+A `.ap/` directory in a subtree can override configuration options for files beneath it. The effective configuration for a path is the base configuration at `<repo>/.ap/` with keys overridden by the nearest enclosing subtree `.ap/go.yaml`, walking up to the root. Only keys present in a subtree file override; absent keys inherit, and lists such as `skip` replace rather than merge. An explicitly written key always wins (for example, `mode: ""` or `toolchain: ""` in a subtree file overrides rather than being treated as unset), and mapping sections (such as `gofmt:`) merge per key instead of replacing the whole section. Overrides apply to per-module and per-directory settings (`gofmt`, `govet`, `govulncheck`, `tidy`, `skip`, `lint` analyzer modes and baselines, and `toolchain`), while tool version files (`protoc.yaml`, `docker.yaml`, `kind.yaml`, `kubectl.yaml`, `buildctl.yaml`) and `.ap/ap.yaml` remain root-only. A subtree `.ap/` directory does not change discovery, build context, image naming, or generated presubmits. For example, to disable `govulncheck` in a subtree, create a `.ap/go.yaml` in that subtree:
 ```yaml
 govulncheck:
   enabled: false
@@ -213,13 +213,26 @@ kubectl: "v1.37.2"
 - Pinned binaries are downloaded and cached in `~/.cache/ap/tools/kubectl/<tag>/bin/`.
 - `ap tool kubectl` automatically uses this pinned version without requiring a manual download.
 
+### buildctl.yaml
+
+Configures `buildctl` pinning for `ap tool buildctl` and image builds using BuildKit.
+
+Example `.ap/buildctl.yaml`:
+```yaml
+buildctl: "v0.34.2"
+```
+
+- `buildctl`: Pinned version of the `buildctl` binary (defaults to the newest version in `versions.yaml`, e.g. `"v0.34.2"`).
+- Pinned binaries are downloaded and cached in `~/.cache/ap/tools/buildctl/<tag>/bin/`.
+- `ap build`, `ap deploy`, and `ap tool buildctl` automatically use this pinned version without requiring a manual download.
+
 ### Updating Tool Versions
 
-Run `ap tool update-versions` to refresh baked-in release tables (`ap/pkg/tool/protoc/versions.yaml`, `ap/pkg/tool/docker/versions.yaml`, `ap/pkg/tool/kind/versions.yaml`, `ap/pkg/tool/kubectl/versions.yaml`, and `ap/pkg/tool/go/versions.yaml`) with verified checksums. Flags allow skipping individual tools (all default to `true`): `--protoc`, `--docker`, `--buildx`, `--kind`, `--kubectl`, and `--go` (e.g. `ap tool update-versions --docker=false` skips the slower Docker tarball downloads).
+Run `ap tool update-versions` to refresh baked-in release tables (`ap/pkg/tool/protoc/versions.yaml`, `ap/pkg/tool/docker/versions.yaml`, `ap/pkg/tool/kind/versions.yaml`, `ap/pkg/tool/kubectl/versions.yaml`, `ap/pkg/tool/buildctl/versions.yaml`, and `ap/pkg/tool/go/versions.yaml`) with verified checksums. Flags allow skipping individual tools (all default to `true`): `--protoc`, `--docker`, `--buildx`, `--kind`, `--kubectl`, `--buildctl`, and `--go` (e.g. `ap tool update-versions --docker=false` skips the slower Docker tarball downloads).
 
 ### Tool Installation and Busybox Dispatch
 
-`ap` can be invoked under the name of any tool it manages (`kind`, `kubectl`, `docker`, `docker-buildx`, `protoc`, `go`) to behave as `ap tool <name> -- <args...>`. On Unix, `ap` uses `syscall.Exec` of the pinned binary so signals, stdio, and exit codes pass straight through without an intermediate wrapper process. Running `ap tool install [dir]` creates or refreshes symlinks pointing to `ap` for all registered tools in `${REPO_ROOT}/.build/bin` (or `AP_CACHE_DIR/bin` outside a repository) or in a specified directory on `PATH`, giving developers and CI jobs every pinned tool automatically. Before executing any discovered task script (`dev/tasks/test-*`, `test-e2e*`, `build-*`, `generate-*`, etc.), `ap` ensures those symlinks exist in `${REPO_ROOT}/.build/bin` and prepends that directory to `PATH`. Task scripts should call tools by name and never download them; `ap` provides them on `PATH`. Tasks obtain pinned tools through the task context, never by calling the installers.
+`ap` can be invoked under the name of any tool it manages (`kind`, `kubectl`, `buildctl`, `docker`, `docker-buildx`, `protoc`, `go`) to behave as `ap tool <name> -- <args...>`. On Unix, `ap` uses `syscall.Exec` of the pinned binary so signals, stdio, and exit codes pass straight through without an intermediate wrapper process. Running `ap tool install [dir]` creates or refreshes symlinks pointing to `ap` for all registered tools in `${REPO_ROOT}/.build/bin` (or `AP_CACHE_DIR/bin` outside a repository) or in a specified directory on `PATH`, giving developers and CI jobs every pinned tool automatically. Before executing any discovered task script (`dev/tasks/test-*`, `test-e2e*`, `build-*`, `generate-*`, etc.), `ap` ensures those symlinks exist in `${REPO_ROOT}/.build/bin` and prepends that directory to `PATH`. Task scripts should call tools by name and never download them; `ap` provides them on `PATH`. Tasks obtain pinned tools through the task context, never by calling the installers.
 
 ### ap.yaml
 

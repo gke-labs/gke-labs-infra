@@ -6,7 +6,7 @@
 
 - The git repository root (containing `.git`) is the only root; configuration is read from `<repo>/.ap/`.
 - Commands operate on a subtree of the repository: either the positional target when specified (e.g., `ap e2e autodeploy`, `ap deploy <dir>`), the subtree of the current working directory, or the whole repository when run from the root.
-- Subtree overrides: A `.ap/` directory in a subtree can override configuration options for files beneath it. The effective configuration for a path is the base configuration with keys overridden by the nearest enclosing subtree `.ap/go.yaml`, walking up to the root (only present keys override, absent keys inherit, lists such as `skip` replace, explicitly written keys win, mapping sections merge per key). Overrides apply to `gofmt`, `govet`, `govulncheck`, `tidy`, `skip`, `lint` (analyzer modes and baselines), and `toolchain`, while tool version files (`protoc.yaml`, `docker.yaml`, `kind.yaml`, `kubectl.yaml`) and `.ap/ap.yaml` remain root-only. Subtree `.ap/` directories do not change discovery, build context, image naming, or generated presubmits. Example subtree `.ap/go.yaml`:
+- Subtree overrides: A `.ap/` directory in a subtree can override configuration options for files beneath it. The effective configuration for a path is the base configuration with keys overridden by the nearest enclosing subtree `.ap/go.yaml`, walking up to the root (only present keys override, absent keys inherit, lists such as `skip` replace, explicitly written keys win, mapping sections merge per key). Overrides apply to `gofmt`, `govet`, `govulncheck`, `tidy`, `skip`, `lint` (analyzer modes and baselines), and `toolchain`, while tool version files (`protoc.yaml`, `docker.yaml`, `kind.yaml`, `kubectl.yaml`, `buildctl.yaml`) and `.ap/ap.yaml` remain root-only. Subtree `.ap/` directories do not change discovery, build context, image naming, or generated presubmits. Example subtree `.ap/go.yaml`:
   ```yaml
   govulncheck:
     enabled: false
@@ -53,7 +53,7 @@ When making changes to an AP-managed project, coding agents should follow this v
 
 ## Tool Management
 
-- `ap tool install [dir]` creates symlinks for managed tools (`kind`, `kubectl`, `docker`, `docker-buildx`, `protoc`, `go`) pointing to `ap` for busybox-style dispatch to pinned tool binaries. In a repository, it defaults to `${REPO_ROOT}/.build/bin`. Discovered task scripts have `${REPO_ROOT}/.build/bin` prepended to `PATH` automatically. Scripts should call tools by name and never download them; `ap` provides them on `PATH`.
+- `ap tool install [dir]` creates symlinks for managed tools (`kind`, `kubectl`, `buildctl`, `docker`, `docker-buildx`, `protoc`, `go`) pointing to `ap` for busybox-style dispatch to pinned tool binaries. In a repository, it defaults to `${REPO_ROOT}/.build/bin`. Discovered task scripts have `${REPO_ROOT}/.build/bin` prepended to `PATH` automatically. Scripts should call tools by name and never download them; `ap` provides them on `PATH`.
 - `ap bash <script> [args...]` runs a bash script from the repository root with `${REPO_ROOT}/.build/bin` on `PATH` and `REPO_ROOT` exported (`#!/usr/bin/env -S ap bash`, requires coreutils 8.30+).
     -   Scripts should assume bash 4+, and `ap bash` warns when the local bash is older.
 

@@ -68,6 +68,7 @@ type DockerBuildTask struct {
 	BuildkitHost string
 	DockerBin    string
 	BuildxBin    string
+	BuildctlBin  string
 	Naming       ImageNaming
 }
 
@@ -215,6 +216,15 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 		buildctlArgs = append(buildctlArgs, "--opt", "platform="+strings.Join(platforms, ","))
 	}
 
+	buildctlBin := t.BuildctlBin
+	if buildctlBin == "" {
+		var err error
+		buildctlBin, err = scope.Tool(ctx, "buildctl")
+		if err != nil {
+			return fmt.Errorf("failed to ensure buildctl: %w", err)
+		}
+	}
+
 	if host, ok := strings.CutPrefix(t.BuildkitHost, "k8s://"); ok {
 		// handle port forward
 		parts := strings.Split(host, "/")
@@ -227,11 +237,11 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 		pfTask := &k8s.PortForwardTask{
 			Child: &tasks.FuncTask{
 				Name: "run-buildctl",
-				RunFn: func(ctx context.Context, scope *tasks.TaskContext) error {
-					cmd := execCommandContext(ctx, "buildctl", buildctlArgs...)
+				RunFn: func(ctx context.Context, childScope *tasks.TaskContext) error {
+					cmd := execCommandContext(ctx, buildctlBin, buildctlArgs...)
 					cmd.Dir = root
-					cmd.Stdout = scope.Stdout()
-					cmd.Stderr = scope.Stderr()
+					cmd.Stdout = childScope.Stdout()
+					cmd.Stderr = childScope.Stderr()
 					cmd.Env = append(os.Environ(), "BUILDKIT_HOST=tcp://localhost:2375")
 					return cmd.Run()
 				},
@@ -241,12 +251,12 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 			LocalPort:  2375,
 			RemotePort: 2375,
 		}
-		childScope := tasks.NewTaskContext(root, root, scope.SourceTree()).WithOutput(scope.Stdout(), scope.Stderr())
+		childScope := scope.WithOutput(scope.Stdout(), scope.Stderr())
 		if err := pfTask.Run(ctx, childScope); err != nil {
 			return err
 		}
 	} else {
-		cmd := execCommandContext(ctx, "buildctl", buildctlArgs...)
+		cmd := execCommandContext(ctx, buildctlBin, buildctlArgs...)
 		cmd.Dir = root
 		cmd.Stdout = scope.Stdout()
 		cmd.Stderr = scope.Stderr()

@@ -1,0 +1,36 @@
+buildctl:
+    - version: v0.34.2
+      assets:
+        darwin-amd64: sha256:e93be26829578f6bc7cfdb7f8b0b6ee1f7641757e6147989edea1433ff3530ce
+        darwin-arm64: sha256:a1e588828f21424dc686441091e5d04c2d2957d385d14a65d43cf823ff3ee508
+        linux-amd64: sha256:b9f18b8e37eb450e9e5df03117045237cdd12d3c4a0034ffeeaa857852a15e13
+        linux-arm64: sha256:a4ad483a33b2f1544c5ccce1c5956c559e1a6e84b8bf6cedd847d695885237a3
+        windows-amd64: sha256:346b4dc3383cd8b0be4e8717043e8a079365dc0af5f3108fd6fc197e0dfe6cde
+    - version: v0.34.1
+      assets:
+        darwin-amd64: sha256:c3d951356ade9e721f9e7b852eda5b6e0c57abd06e3bb697d3a7c015b114f7ae
+        darwin-arm64: sha256:ea6f38837b556209f5905fc1971ea9897b45e019438a3ab4c2614b9f40554601
+        linux-amd64: sha256:a59539daf547fe0958efe2d07e41c0a6944e1112a66d7e519ec1cf5b673ef15b
+        linux-arm64: sha256:c8c97b84baf89dfe0ea85063ac24ad88eb909979ea476ce3ef9e8e11e60ebef8
+        windows-amd64: sha256:943a70e1e95e07b3c0ae776a964866574bb8a6533176377d7084a3999298ddd3
+    - version: v0.34.0
+      assets:
+        darwin-amd64: sha256:0a11beb091549a04aa34066800e05fa44d5e4c95a24ff5a066fbfc639585a91d
+        darwin-arm64: sha256:3eee1b54b362af2e1e4e9ad8314bf2751e9447ecbd1455eb9207af0c3a40baf2
+        linux-amd64: sha256:14813b1fb2a40082114e6d386c6fc5e7dd5298176ce7ee1a18bc33e73e109ac3
+        linux-arm64: sha256:0619ca3e3205a32ea2beb115e0242136e4a0716cc1917ba0ceaa4ef4d52382c9
+        windows-amd64: sha256:600d20956b941284bf6421d6354ba6b2b462cc1697ae66b944bc5f6be367e0ae
+    - version: v0.33.1
+      assets:
+        darwin-amd64: sha256:12a44c095ab1cb8e9e323123b1fe113d6ee10d58436014b99cb07b364c6914a4
+        darwin-arm64: sha256:0ab4904eaf9dfae8ac24271c8f8f3d86794e4dbef6543772899dc0bb6a8e41a9
+        linux-amd64: sha256:4e044bcd62a0c0bbe6a8c94d73989de2bfe4c04dbc0f9d6021cf96b72cd1d965
+        linux-arm64: sha256:4e1ba91f139761f249a1fa6c71e632dfdbdafeda416176ecadefbb95225e56c4
+        windows-amd64: sha256:28258c3333197ec2d29a080078673816e4cdd9c6dfac7807ea84f25b6853b064
+    - version: v0.33.0
+      assets:
+        darwin-amd64: sha256:3c51f59d731c2882226f564c56ff3fe2a726b9bded6c4626c6868862c986a08c
+        darwin-arm64: sha256:730ac4ffd6f4a88dc404fc675aeaf4cfee414915036042847f0a60861cc8790c
+        linux-amd64: sha256:b6242896d343100808dcbe37565caf381e0a444a6a83d7255926bb1519248ead
+        linux-arm64: sha256:e5acfb5929f967fde3b925ddb39f79fd481a0e96774c641fab3a0e83950d7bfa
+        windows-amd64: sha256:5b4bc24d425f4dfdecf575d386ebf19db12b5f46fef9e95a776bcbaf3b4e486f

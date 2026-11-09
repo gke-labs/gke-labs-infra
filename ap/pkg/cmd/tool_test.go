@@ -181,8 +181,8 @@ func TestToolUpdateVersions_Command(t *testing.T) {
 	if !strings.Contains(out, "update-versions") {
 		t.Errorf("expected help output to mention update-versions, got: %s", out)
 	}
-	if !strings.Contains(out, "--protoc") || !strings.Contains(out, "--docker") || !strings.Contains(out, "--buildx") || !strings.Contains(out, "--kind") || !strings.Contains(out, "--kubectl") || !strings.Contains(out, "--go") {
-		t.Errorf("expected help output to mention --protoc, --docker, --buildx, --kind, --kubectl, and --go flags, got: %s", out)
+	if !strings.Contains(out, "--protoc") || !strings.Contains(out, "--docker") || !strings.Contains(out, "--buildx") || !strings.Contains(out, "--kind") || !strings.Contains(out, "--kubectl") || !strings.Contains(out, "--buildctl") || !strings.Contains(out, "--go") {
+		t.Errorf("expected help output to mention --protoc, --docker, --buildx, --kind, --kubectl, --buildctl, and --go flags, got: %s", out)
 	}
 }
 
@@ -344,6 +344,49 @@ func TestToolKubectl_DryRun(t *testing.T) {
 	}
 	if !strings.Contains(output, "--client") {
 		t.Errorf("expected output to contain '--client', got: %s", output)
+	}
+}
+
+func TestToolBuildctl_DryRun(t *testing.T) {
+	tempCache := t.TempDir()
+	t.Setenv("AP_CACHE_DIR", tempCache)
+
+	tempDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tempDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(tempDir)
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.MkdirAll(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(apDir, "buildctl.yaml"), []byte("buildctl: \"v0.34.2\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	buf := new(bytes.Buffer)
+	rootCmd := BuildRootCommand()
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"tool", "buildctl", "--dry-run", "--", "--version"})
+
+	err := rootCmd.ExecuteContext(t.Context())
+	output := buf.String()
+
+	if err != nil {
+		t.Fatalf("unexpected error running ap tool buildctl --dry-run: %v\nOutput: %s", err, output)
+	}
+
+	binName := "buildctl"
+	if runtime.GOOS == "windows" {
+		binName = "buildctl.exe"
+	}
+	expectedPrefix := fmt.Sprintf("[dry-run] %s", filepath.Join(tempCache, "tools", "buildctl", "v0.34.2", "bin", binName))
+	if !strings.HasPrefix(output, expectedPrefix) {
+		t.Errorf("expected dry-run output to start with %q, got: %s", expectedPrefix, output)
+	}
+	if !strings.Contains(output, "--version") {
+		t.Errorf("expected output to contain '--version', got: %s", output)
 	}
 }
 
@@ -580,7 +623,7 @@ func TestToolInstall(t *testing.T) {
 		t.Fatalf("expected installed ap at %s to be executable", expectedAp)
 	}
 
-	expectedTools := []string{"kind", "kubectl", "docker", "docker-buildx", "protoc", "go"}
+	expectedTools := []string{"kind", "kubectl", "buildctl", "docker", "docker-buildx", "protoc", "go"}
 	for _, toolName := range expectedTools {
 		linkPath := filepath.Join(tempDir, toolName)
 		fi, err := os.Lstat(linkPath)

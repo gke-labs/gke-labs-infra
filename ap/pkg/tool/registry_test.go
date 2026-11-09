@@ -65,6 +65,7 @@ func TestResolveTool(t *testing.T) {
 		// Registered tool names
 		{argv0: "kind", wantName: "kind", wantResolve: true},
 		{argv0: "kubectl", wantName: "kubectl", wantResolve: true},
+		{argv0: "buildctl", wantName: "buildctl", wantResolve: true},
 		{argv0: "docker", wantName: "docker", wantResolve: true},
 		{argv0: "docker-buildx", wantName: "docker-buildx", wantResolve: true},
 		{argv0: "protoc", wantName: "protoc", wantResolve: true},
@@ -73,6 +74,7 @@ func TestResolveTool(t *testing.T) {
 		// Executable paths with directories
 		{argv0: "/usr/local/bin/kind", wantName: "kind", wantResolve: true},
 		{argv0: "/usr/local/bin/kubectl", wantName: "kubectl", wantResolve: true},
+		{argv0: "/usr/local/bin/buildctl", wantName: "buildctl", wantResolve: true},
 		{argv0: "/usr/bin/docker", wantName: "docker", wantResolve: true},
 		{argv0: "/opt/bin/docker-buildx", wantName: "docker-buildx", wantResolve: true},
 		{argv0: "./bin/protoc", wantName: "protoc", wantResolve: true},
@@ -81,12 +83,14 @@ func TestResolveTool(t *testing.T) {
 		// Windows .exe extensions
 		{argv0: "kind.exe", wantName: "kind", wantResolve: true},
 		{argv0: "kubectl.exe", wantName: "kubectl", wantResolve: true},
+		{argv0: "buildctl.exe", wantName: "buildctl", wantResolve: true},
 		{argv0: "docker.exe", wantName: "docker", wantResolve: true},
 		{argv0: "docker-buildx.exe", wantName: "docker-buildx", wantResolve: true},
 		{argv0: "protoc.exe", wantName: "protoc", wantResolve: true},
 		{argv0: "go.exe", wantName: "go", wantResolve: true},
 		{argv0: "C:\\tools\\bin\\kind.exe", wantName: "kind", wantResolve: true},
 		{argv0: "C:\\tools\\bin\\kubectl.exe", wantName: "kubectl", wantResolve: true},
+		{argv0: "C:\\tools\\bin\\buildctl.exe", wantName: "buildctl", wantResolve: true},
 		{argv0: "C:\\tools\\bin\\docker.exe", wantName: "docker", wantResolve: true},
 		{argv0: "C:\\tools\\bin\\go.exe", wantName: "go", wantResolve: true},
 
