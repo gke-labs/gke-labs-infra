@@ -134,25 +134,14 @@ func (g *GitHubReleases) Digest(ctx context.Context, tag, goos, goarch string) (
 
 // KubernetesRelease fetches versions, assets, and digests from dl.k8s.io.
 type KubernetesRelease struct {
-	Binary  string // binary name, defaults to "kubectl"
 	BaseURL string // optional override for https://dl.k8s.io/release
 }
 
 func (k *KubernetesRelease) baseURL() string {
-	if k != nil && k.BaseURL != "" {
+	if k.BaseURL != "" {
 		return strings.TrimRight(k.BaseURL, "/")
 	}
-	if env := os.Getenv("KUBECTL_DOWNLOAD_BASE_URL"); env != "" {
-		return strings.TrimRight(env, "/")
-	}
 	return "https://dl.k8s.io/release"
-}
-
-func (k *KubernetesRelease) feedURL() string {
-	if env := os.Getenv("KUBECTL_RELEASE_FEED_URL"); env != "" {
-		return env
-	}
-	return k.baseURL() + "/stable.txt"
 }
 
 // Versions reads the stable tag from https://dl.k8s.io/release/stable.txt (one entry).
@@ -163,7 +152,7 @@ func (k *KubernetesRelease) Versions(ctx context.Context) ([]string, error) {
 		defer cancel()
 	}
 
-	url := k.feedURL()
+	url := fmt.Sprintf("%s/stable.txt", k.baseURL())
 	txt, err := fetchText(ctx, url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch stable version from %s: %w", url, err)
@@ -178,11 +167,8 @@ func (k *KubernetesRelease) Versions(ctx context.Context) ([]string, error) {
 // AssetURL returns the download URL for the binary on dl.k8s.io.
 func (k *KubernetesRelease) AssetURL(tag, goos, goarch string) string {
 	bin := "kubectl"
-	if k != nil && k.Binary != "" {
-		bin = k.Binary
-	}
-	if goos == "windows" && !strings.HasSuffix(bin, ".exe") {
-		bin += ".exe"
+	if goos == "windows" {
+		bin = "kubectl.exe"
 	}
 	normTag := NormalizeTag(tag)
 	return fmt.Sprintf("%s/%s/bin/%s/%s/%s", k.baseURL(), normTag, goos, goarch, bin)
