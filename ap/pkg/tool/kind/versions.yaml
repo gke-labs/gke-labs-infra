@@ -1,36 +1,36 @@
 kind:
     - version: v0.33.0
       assets:
-        kind-darwin-amd64: sha256:5a99f26f57246dc9319dd294803313197a0f34d33c525b3ea8b655db5916ece0
-        kind-darwin-arm64: sha256:0c8c7dbe5e23594a198b786c4bc13dacc101fa6196b0cb0b23a1ca44e61f4b4f
-        kind-linux-amd64: sha256:aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
-        kind-linux-arm64: sha256:20022bee6cfcd5086cb7234d218e3454e6090022f2a8f55d1fa7fcf42c3867a2
-        kind-windows-amd64: sha256:4b22adaa135368c5a465d56bbd8e520cbea87272a06ca00b6078e7b81515c9fc
+        darwin-amd64: sha256:5a99f26f57246dc9319dd294803313197a0f34d33c525b3ea8b655db5916ece0
+        darwin-arm64: sha256:0c8c7dbe5e23594a198b786c4bc13dacc101fa6196b0cb0b23a1ca44e61f4b4f
+        linux-amd64: sha256:aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d
+        linux-arm64: sha256:20022bee6cfcd5086cb7234d218e3454e6090022f2a8f55d1fa7fcf42c3867a2
+        windows-amd64: sha256:4b22adaa135368c5a465d56bbd8e520cbea87272a06ca00b6078e7b81515c9fc
     - version: v0.32.0
       assets:
-        kind-darwin-amd64: sha256:295ac6d0d634c9819c9907df45e3017d1f13166bd13c3404c45e79f7faa47498
-        kind-darwin-arm64: sha256:dca67911095a110c2b5c36e26df6cac860c602033e456c0db47be498cdef1ebb
-        kind-linux-amd64: sha256:50030de23cf40a18505f20426f6a8506bedf13c6e509244bd1fa9463721b0f54
-        kind-linux-arm64: sha256:b92cd615e97585de8ddade28ed5cd7feb4248d717c233eea5b03c37298900f5d
-        kind-windows-amd64: sha256:0bcb2d1cfedc1912d664014db716937e8a0e843e91c6807b4db2025dbc8989fa
+        darwin-amd64: sha256:295ac6d0d634c9819c9907df45e3017d1f13166bd13c3404c45e79f7faa47498
+        darwin-arm64: sha256:dca67911095a110c2b5c36e26df6cac860c602033e456c0db47be498cdef1ebb
+        linux-amd64: sha256:50030de23cf40a18505f20426f6a8506bedf13c6e509244bd1fa9463721b0f54
+        linux-arm64: sha256:b92cd615e97585de8ddade28ed5cd7feb4248d717c233eea5b03c37298900f5d
+        windows-amd64: sha256:0bcb2d1cfedc1912d664014db716937e8a0e843e91c6807b4db2025dbc8989fa
     - version: v0.31.0
       assets:
-        kind-darwin-amd64: sha256:a8b3cf77b2ad77aec5bf710d1a2589d9117576132af812885cad41e9dede4d4e
-        kind-darwin-arm64: sha256:88bf554fe9da6311c9f8c2d082613c002911a476f6b5090e9420b35d84e70c5c
-        kind-linux-amd64: sha256:eb244cbafcc157dff60cf68693c14c9a75c4e6e6fedaf9cd71c58117cb93e3fa
-        kind-linux-arm64: sha256:8e1014e87c34901cc422a1445866835d1e666f2a61301c27e722bdeab5a1f7e4
-        kind-windows-amd64: sha256:2c3a9ff954de16244380778683cf99e271bfc2fac9c6c4e797e4623c45e59d9d
+        darwin-amd64: sha256:a8b3cf77b2ad77aec5bf710d1a2589d9117576132af812885cad41e9dede4d4e
+        darwin-arm64: sha256:88bf554fe9da6311c9f8c2d082613c002911a476f6b5090e9420b35d84e70c5c
+        linux-amd64: sha256:eb244cbafcc157dff60cf68693c14c9a75c4e6e6fedaf9cd71c58117cb93e3fa
+        linux-arm64: sha256:8e1014e87c34901cc422a1445866835d1e666f2a61301c27e722bdeab5a1f7e4
+        windows-amd64: sha256:2c3a9ff954de16244380778683cf99e271bfc2fac9c6c4e797e4623c45e59d9d
     - version: v0.30.0
       assets:
-        kind-darwin-amd64: sha256:4f0b6e3b88bdc66d922c08469f05ef507d4903dd236e6319199bb9c868eed274
-        kind-darwin-arm64: sha256:ceaf40df1d1551c481fb50e3deb5c3deecad5fd599df5469626b70ddf52a1518
-        kind-linux-amd64: sha256:517ab7fc89ddeed5fa65abf71530d90648d9638ef0c4cde22c2c11f8097b8889
-        kind-linux-arm64: sha256:7ea2de9d2d190022ed4a8a4e3ac0636c8a455e460b9a13ccf19f15d07f4f00eb
-        kind-windows-amd64: sha256:a75fed2b6964d877461cc145b37e997ac0f59a63bd02a750134ac25378f78ce7
+        darwin-amd64: sha256:4f0b6e3b88bdc66d922c08469f05ef507d4903dd236e6319199bb9c868eed274
+        darwin-arm64: sha256:ceaf40df1d1551c481fb50e3deb5c3deecad5fd599df5469626b70ddf52a1518
+        linux-amd64: sha256:517ab7fc89ddeed5fa65abf71530d90648d9638ef0c4cde22c2c11f8097b8889
+        linux-arm64: sha256:7ea2de9d2d190022ed4a8a4e3ac0636c8a455e460b9a13ccf19f15d07f4f00eb
+        windows-amd64: sha256:a75fed2b6964d877461cc145b37e997ac0f59a63bd02a750134ac25378f78ce7
     - version: v0.29.0
       assets:
-        kind-darwin-amd64: sha256:3eb0d4de25b854f34ea8ce8a3cbe15054fc03bc962b03e96fd10664b829fb6ed
-        kind-darwin-arm64: sha256:314d8f1428842fd1ba2110fd0052a0f0b3ab5773ab1bdcdad1ff036e913310c9
-        kind-linux-amd64: sha256:c72eda46430f065fb45c5f70e7c957cc9209402ef309294821978677c8fb3284
-        kind-linux-arm64: sha256:03d45095dbd9cc1689f179a3e5e5da24b77c2d1b257d7645abf1b4174bebcf2a
-        kind-windows-amd64: sha256:7ea3e9af902ddc4ed773704ab932175bfec8eafffff27c4cad6c2f397cd6e4ee
+        darwin-amd64: sha256:3eb0d4de25b854f34ea8ce8a3cbe15054fc03bc962b03e96fd10664b829fb6ed
+        darwin-arm64: sha256:314d8f1428842fd1ba2110fd0052a0f0b3ab5773ab1bdcdad1ff036e913310c9
+        linux-amd64: sha256:c72eda46430f065fb45c5f70e7c957cc9209402ef309294821978677c8fb3284
+        linux-arm64: sha256:03d45095dbd9cc1689f179a3e5e5da24b77c2d1b257d7645abf1b4174bebcf2a
+        windows-amd64: sha256:7ea3e9af902ddc4ed773704ab932175bfec8eafffff27c4cad6c2f397cd6e4ee

@@ -126,10 +126,6 @@ func loadDockerConfig(repoRoot string) (*docker.Config, error) {
 	return loadToolConfig(repoRoot, docker.LoadConfig, docker.DefaultConfig)
 }
 
-func loadKindConfig(repoRoot string) (*kind.Config, error) {
-	return loadToolConfig(repoRoot, kind.LoadConfig, kind.DefaultConfig)
-}
-
 func loadKubectlConfig(repoRoot string) (*kubectl.Config, error) {
 	return loadToolConfig(repoRoot, kubectl.LoadConfig, kubectl.DefaultConfig)
 }
@@ -212,37 +208,7 @@ var registry = []*Tool{
 			return docker.Update(ctx, repoRoot, docker.UpdateOptions{Docker: false, Buildx: true})
 		},
 	},
-	{
-		Name:       "kind",
-		Short:      "Run kind with pinned binary",
-		UpdateFlag: "kind",
-		UpdateDesc: "Update kind versions in ap/pkg/tool/kind/versions.yaml",
-		Ensure: func(ctx context.Context, repoRoot string) (string, error) {
-			cfg, err := loadKindConfig(repoRoot)
-			if err != nil {
-				return "", err
-			}
-			return kind.EnsureKind(ctx, cfg.Kind)
-		},
-		Prepare: func(ctx context.Context, repoRoot string, args []string) (*Invocation, error) {
-			cfg, err := loadKindConfig(repoRoot)
-			if err != nil {
-				return nil, err
-			}
-			kindBin, err := kind.EnsureKind(ctx, cfg.Kind)
-			if err != nil {
-				return nil, fmt.Errorf("failed to prepare kind: %w", err)
-			}
-			return &Invocation{
-				Binary: kindBin,
-				Args:   args,
-				Env:    fileutils.PrependPath(os.Environ(), filepath.Dir(kindBin)),
-			}, nil
-		},
-		Update: func(ctx context.Context, repoRoot string) error {
-			return kind.Update(ctx, repoRoot)
-		},
-	},
+	NewTool(kind.Spec),
 	{
 		Name:       "kubectl",
 		Short:      "Run kubectl with pinned binary",
