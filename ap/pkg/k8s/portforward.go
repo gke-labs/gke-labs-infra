@@ -33,19 +33,17 @@ import (
 
 // PortForwardTask wraps another task and ensures a port-forward is running while it executes.
 type PortForwardTask struct {
-	Child       tasks.Task
-	Service     string
-	Namespace   string
-	LocalPort   int
-	RemotePort  int
-	KubeContext string
+	Child      tasks.Task
+	Service    string
+	Namespace  string
+	LocalPort  int
+	RemotePort int
+	Cluster    KubeCluster
 }
 
 func (t *PortForwardTask) buildArgs(localPort int) []string {
 	var args []string
-	if t.KubeContext != "" {
-		args = append(args, "--context", t.KubeContext)
-	}
+	args = append(args, t.Cluster.KubectlArgs()...)
 	args = append(args,
 		"port-forward",
 		"-n", t.Namespace,

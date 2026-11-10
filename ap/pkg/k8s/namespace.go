@@ -98,7 +98,7 @@ type KubectlScopeResolver struct {
 	kindByResource      map[string]string
 	kindByResourceGroup map[resourceKey]string
 	execCmd             func(ctx context.Context, name string, args ...string) ([]byte, error)
-	KubeContext         string
+	Cluster             KubeCluster
 	kubectlBin          string
 }
 
@@ -141,9 +141,7 @@ func (r *KubectlScopeResolver) load(ctx context.Context) error {
 	var out []byte
 	var err error
 	var args []string
-	if r.KubeContext != "" {
-		args = append(args, "--context", r.KubeContext)
-	}
+	args = append(args, r.Cluster.KubectlArgs()...)
 	args = append(args, "api-resources")
 	if r.execCmd != nil {
 		out, err = r.execCmd(ctx, bin, args...)
@@ -253,9 +251,9 @@ func (r *KubectlScopeResolver) KindForResource(resource, group string) (string, 
 }
 
 // NewDiscoveryScopeResolver creates a ScopeResolver using discovery from "kubectl api-resources".
-func NewDiscoveryScopeResolver(kubeContext, kubectlBin string) (ScopeResolver, error) {
+func NewDiscoveryScopeResolver(cluster KubeCluster, kubectlBin string) (ScopeResolver, error) {
 	resolver := NewKubectlScopeResolver()
-	resolver.KubeContext = kubeContext
+	resolver.Cluster = cluster
 	resolver.kubectlBin = kubectlBin
 	return resolver, nil
 }
@@ -282,14 +280,14 @@ var (
 )
 
 // GetDiscoveryScopeResolver returns a cached or newly initialized discovery ScopeResolver.
-func GetDiscoveryScopeResolver(kubeContext, kubectlBin string) (ScopeResolver, error) {
+func GetDiscoveryScopeResolver(cluster KubeCluster, kubectlBin string) (ScopeResolver, error) {
 	discoveryResolverMu.Lock()
 	defer discoveryResolverMu.Unlock()
-	cacheKey := kubeContext + "|" + kubectlBin
+	cacheKey := cluster.String() + "|" + kubectlBin
 	if r, ok := cachedDiscoveryMap[cacheKey]; ok {
 		return r, nil
 	}
-	resolver, err := NewDiscoveryScopeResolver(kubeContext, kubectlBin)
+	resolver, err := NewDiscoveryScopeResolver(cluster, kubectlBin)
 	if err != nil {
 		return nil, err
 	}
@@ -305,10 +303,10 @@ func ResetDiscoveryScopeResolver() {
 }
 
 // DefaultCheckNamespaceCached checks if the target namespace exists in the cluster, caching successful checks.
-func DefaultCheckNamespaceCached(ctx context.Context, namespace, kubeContext, kubectlBin string) error {
+func DefaultCheckNamespaceCached(ctx context.Context, namespace string, cluster KubeCluster, kubectlBin string) error {
 	cacheKey := namespace
-	if kubeContext != "" {
-		cacheKey = kubeContext + "/" + namespace
+	if cluster.String() != "" {
+		cacheKey = cluster.String() + "/" + namespace
 	}
 	verifiedNamespacesMu.Lock()
 	verified := verifiedNamespaces[cacheKey]
@@ -317,7 +315,7 @@ func DefaultCheckNamespaceCached(ctx context.Context, namespace, kubeContext, ku
 		return nil
 	}
 
-	if err := CheckNamespaceExists(ctx, namespace, kubeContext, kubectlBin); err != nil {
+	if err := CheckNamespaceExists(ctx, namespace, cluster, kubectlBin); err != nil {
 		return err
 	}
 
@@ -349,7 +347,7 @@ func (m MapScopeResolver) IsNamespaced(gvk GroupVersionKind) (bool, error) {
 var CheckNamespaceExistsFn = checkNamespaceExistsDefault
 
 // SetCheckNamespaceExistsForTest overrides CheckNamespaceExistsFn for tests and returns a restore function.
-func SetCheckNamespaceExistsForTest(fn func(ctx context.Context, namespace, kubeContext, kubectlBin string) error) func() {
+func SetCheckNamespaceExistsForTest(fn func(ctx context.Context, namespace string, cluster KubeCluster, kubectlBin string) error) func() {
 	prev := CheckNamespaceExistsFn
 	CheckNamespaceExistsFn = fn
 	return func() {
@@ -359,18 +357,16 @@ func SetCheckNamespaceExistsForTest(fn func(ctx context.Context, namespace, kube
 
 // CheckNamespaceExists checks whether the target namespace exists in the cluster.
 // It fails if the namespace does not exist, without creating it implicitly.
-func CheckNamespaceExists(ctx context.Context, namespace, kubeContext, kubectlBin string) error {
-	return CheckNamespaceExistsFn(ctx, namespace, kubeContext, kubectlBin)
+func CheckNamespaceExists(ctx context.Context, namespace string, cluster KubeCluster, kubectlBin string) error {
+	return CheckNamespaceExistsFn(ctx, namespace, cluster, kubectlBin)
 }
 
-func checkNamespaceExistsDefault(ctx context.Context, namespace, kubeContext, kubectlBin string) error {
+func checkNamespaceExistsDefault(ctx context.Context, namespace string, cluster KubeCluster, kubectlBin string) error {
 	if kubectlBin == "" {
 		return fmt.Errorf("kubectl binary is required")
 	}
 	var args []string
-	if kubeContext != "" {
-		args = append(args, "--context", kubeContext)
-	}
+	args = append(args, cluster.KubectlArgs()...)
 	args = append(args, "get", "namespace", namespace, "-o", "name")
 	cmd := exec.CommandContext(ctx, kubectlBin, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {

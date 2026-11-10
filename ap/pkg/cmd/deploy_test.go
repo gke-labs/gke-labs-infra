@@ -461,44 +461,38 @@ func TestResolveTargetCluster(t *testing.T) {
 		name           string
 		clusterFlag    string
 		currentContext string
-		wantContext    string
-		wantKind       string
+		wantCluster    k8s.KubeCluster
 		wantErr        bool
 	}{
 		{
 			name:           "empty flag with non-kind current context",
 			clusterFlag:    "",
 			currentContext: "my-context",
-			wantContext:    "",
-			wantKind:       "",
+			wantCluster:    k8s.CurrentCluster(),
 		},
 		{
 			name:           "empty flag with kind current context",
 			clusterFlag:    "",
 			currentContext: "kind-dev",
-			wantContext:    "",
-			wantKind:       "dev",
+			wantCluster:    k8s.CurrentKindCluster("dev"),
 		},
 		{
 			name:           "kind flag",
 			clusterFlag:    "kind://foo",
 			currentContext: "other",
-			wantContext:    "kind-foo",
-			wantKind:       "foo",
+			wantCluster:    k8s.KindCluster("foo"),
 		},
 		{
 			name:           "plain context flag",
 			clusterFlag:    "prod-cluster",
 			currentContext: "kind-dev",
-			wantContext:    "prod-cluster",
-			wantKind:       "",
+			wantCluster:    k8s.ClusterFromContext("prod-cluster"),
 		},
 		{
 			name:           "kind prefix context flag",
 			clusterFlag:    "kind-bar",
 			currentContext: "other",
-			wantContext:    "kind-bar",
-			wantKind:       "bar",
+			wantCluster:    k8s.KindCluster("bar"),
 		},
 		{
 			name:        "invalid scheme",
@@ -516,11 +510,8 @@ func TestResolveTargetCluster(t *testing.T) {
 			if err != nil {
 				return
 			}
-			if tc.KubeContext != tt.wantContext {
-				t.Errorf("tc.KubeContext = %q, want %q", tc.KubeContext, tt.wantContext)
-			}
-			if tc.KindCluster != tt.wantKind {
-				t.Errorf("tc.KindCluster = %q, want %q", tc.KindCluster, tt.wantKind)
+			if tc != tt.wantCluster {
+				t.Errorf("tc = %v, want %v", tc, tt.wantCluster)
 			}
 		})
 	}
@@ -614,8 +605,8 @@ func TestBuildDeployPlan_DryRunClusterKind(t *testing.T) {
 		t.Fatal("expected kubectl apply tasks, got 0")
 	}
 	for _, at := range applyTasks {
-		if at.KubeContext != "kind-foo" {
-			t.Errorf("applyTask.KubeContext = %q, want 'kind-foo'", at.KubeContext)
+		if at.Cluster != k8s.KindCluster("foo") {
+			t.Errorf("applyTask.Cluster = %v, want %v", at.Cluster, k8s.KindCluster("foo"))
 		}
 	}
 }
@@ -701,8 +692,8 @@ func TestBuildDeployPlan_DryRunClusterNonKind(t *testing.T) {
 		t.Fatal("expected kubectl apply tasks, got 0")
 	}
 	for _, at := range applyTasks {
-		if at.KubeContext != "my-custom-context" {
-			t.Errorf("applyTask.KubeContext = %q, want 'my-custom-context'", at.KubeContext)
+		if at.Cluster != k8s.ClusterFromContext("my-custom-context") {
+			t.Errorf("applyTask.Cluster = %v, want %v", at.Cluster, k8s.ClusterFromContext("my-custom-context"))
 		}
 	}
 }
@@ -764,15 +755,15 @@ func TestBuildDeployPlan_PassesContextToBuildTasks(t *testing.T) {
 			t.Fatalf("BuildDeployPlan(%q) failed: %v", tt.buildkitHost, err)
 		}
 		portForward, buildTasks := collectBuildTasks(plan)
-		if tt.wantPF && (portForward == nil || portForward.KubeContext != "my-custom-context") {
-			t.Errorf("host %q: want registry PortForwardTask with context 'my-custom-context', got %v", tt.buildkitHost, portForward)
+		if tt.wantPF && (portForward == nil || portForward.Cluster != k8s.ClusterFromContext("my-custom-context")) {
+			t.Errorf("host %q: want registry PortForwardTask with cluster 'my-custom-context', got %v", tt.buildkitHost, portForward)
 		}
 		if len(buildTasks) == 0 {
 			t.Fatalf("host %q: expected DockerBuildTasks, got none", tt.buildkitHost)
 		}
 		for _, bt := range buildTasks {
-			if bt.KubeContext != "my-custom-context" {
-				t.Errorf("host %q: DockerBuildTask.KubeContext = %q, want 'my-custom-context'", tt.buildkitHost, bt.KubeContext)
+			if bt.Cluster != k8s.ClusterFromContext("my-custom-context") {
+				t.Errorf("host %q: DockerBuildTask.Cluster = %v, want 'my-custom-context'", tt.buildkitHost, bt.Cluster)
 			}
 		}
 	}
@@ -1628,7 +1619,7 @@ func TestDeploy_RunDeploy_NonexistentNamespaceFailsEarly(t *testing.T) {
 	}
 
 	var capturedKubectl string
-	restore := k8s.SetCheckNamespaceExistsForTest(func(ctx context.Context, ns, kubeContext, kubectlBin string) error {
+	restore := k8s.SetCheckNamespaceExistsForTest(func(ctx context.Context, ns string, cluster k8s.KubeCluster, kubectlBin string) error {
 		capturedKubectl = kubectlBin
 		return fmt.Errorf("target namespace %q does not exist: not found", ns)
 	})
