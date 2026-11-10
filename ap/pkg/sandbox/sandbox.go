@@ -36,7 +36,7 @@ func Run(ctx context.Context, root string, args []string) (retErr error) {
 	podName := "ap-sandbox"
 	image := "local/ap-golang:latest"
 
-	kubectlBin, err := kubectl.EnsureKubectlForRepo(ctx, root)
+	kubectlBin, err := kubectl.Spec.EnsureForRepo(ctx, root)
 	if err != nil {
 		return fmt.Errorf("failed to ensure kubectl: %w", err)
 	}

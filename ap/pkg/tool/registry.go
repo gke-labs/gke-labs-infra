@@ -126,10 +126,6 @@ func loadDockerConfig(repoRoot string) (*docker.Config, error) {
 	return loadToolConfig(repoRoot, docker.LoadConfig, docker.DefaultConfig)
 }
 
-func loadKubectlConfig(repoRoot string) (*kubectl.Config, error) {
-	return loadToolConfig(repoRoot, kubectl.LoadConfig, kubectl.DefaultConfig)
-}
-
 func loadProtocConfig(repoRoot string) (*protoc.Config, error) {
 	return loadToolConfig(repoRoot, protoc.LoadConfig, protoc.DefaultConfig)
 }
@@ -209,37 +205,7 @@ var registry = []*Tool{
 		},
 	},
 	NewTool(kind.Spec),
-	{
-		Name:       "kubectl",
-		Short:      "Run kubectl with pinned binary",
-		UpdateFlag: "kubectl",
-		UpdateDesc: "Update kubectl versions in ap/pkg/tool/kubectl/versions.yaml",
-		Ensure: func(ctx context.Context, repoRoot string) (string, error) {
-			cfg, err := loadKubectlConfig(repoRoot)
-			if err != nil {
-				return "", err
-			}
-			return kubectl.EnsureKubectl(ctx, cfg.Kubectl)
-		},
-		Prepare: func(ctx context.Context, repoRoot string, args []string) (*Invocation, error) {
-			cfg, err := loadKubectlConfig(repoRoot)
-			if err != nil {
-				return nil, err
-			}
-			kubectlBin, err := kubectl.EnsureKubectl(ctx, cfg.Kubectl)
-			if err != nil {
-				return nil, fmt.Errorf("failed to prepare kubectl: %w", err)
-			}
-			return &Invocation{
-				Binary: kubectlBin,
-				Args:   args,
-				Env:    fileutils.PrependPath(os.Environ(), filepath.Dir(kubectlBin)),
-			}, nil
-		},
-		Update: func(ctx context.Context, repoRoot string) error {
-			return kubectl.Update(ctx, repoRoot)
-		},
-	},
+	NewTool(kubectl.Spec),
 	{
 		Name:       "protoc",
 		Short:      "Run protoc with pinned binary and language plugins",
