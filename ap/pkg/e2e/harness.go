@@ -116,7 +116,7 @@ func (h *Harness) RepoRoot() string {
 func (h *Harness) ensureKind() {
 	h.t.Helper()
 	repoRoot := h.RepoRoot()
-	bin, err := kind.EnsureKindForRepo(h.t.Context(), repoRoot)
+	bin, err := kind.Spec.EnsureForRepo(h.t.Context(), repoRoot)
 	if err != nil {
 		h.t.Fatalf("failed to prepare kind tool: %v", err)
 	}
