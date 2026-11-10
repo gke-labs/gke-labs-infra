@@ -73,6 +73,15 @@ func StampManifest(content string, id string, resolver ScopeResolver, fallbackNa
 			continue
 		}
 
+		if existingID, ok := getMetadataLabel(root, applyset.PartOfLabel); ok && existingID != id {
+			name := getMetadataName(root)
+			objDesc := kind
+			if name != "" {
+				objDesc = fmt.Sprintf("%s/%s", kind, name)
+			}
+			return "", nil, fmt.Errorf("object %s already has %s label %q (expected %q)", objDesc, applyset.PartOfLabel, existingID, id)
+		}
+
 		gvk := parseGVK(apiVersion, kind)
 		gk := applyset.GroupKind{Group: gvk.Group, Kind: gvk.Kind}
 
@@ -148,9 +157,29 @@ func setMetadataLabel(root *yaml.Node, key, value string) {
 	)
 }
 
+func getMetadataLabel(root *yaml.Node, key string) (string, bool) {
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		if root.Content[i].Value == "metadata" && root.Content[i+1].Kind == yaml.MappingNode {
+			metaNode := root.Content[i+1]
+			for j := 0; j+1 < len(metaNode.Content); j += 2 {
+				if metaNode.Content[j].Value == "labels" && metaNode.Content[j+1].Kind == yaml.MappingNode {
+					labelsNode := metaNode.Content[j+1]
+					for k := 0; k+1 < len(labelsNode.Content); k += 2 {
+						if labelsNode.Content[k].Value == key {
+							return labelsNode.Content[k+1].Value, true
+						}
+					}
+				}
+			}
+		}
+	}
+	return "", false
+}
+
 // VerifyApplySetParentTask verifies that the ApplySet parent exists,
 // has matching ID (if already labeled), is not managed by another tool,
 // and if custom resource, its CRD has the is-parent-type label.
+// It then claims the parent by writing the ApplySet ID label and tooling annotation.
 type VerifyApplySetParentTask struct {
 	Parent      *applyset.ParentRef
 	KubeContext string
@@ -241,6 +270,42 @@ func (t *VerifyApplySetParentTask) Run(ctx context.Context, scope *tasks.TaskCon
 		}
 	}
 
+	// Claim parent: write ID label and tooling annotation
+	var labelArgs []string
+	if t.KubeContext != "" {
+		labelArgs = append(labelArgs, "--context", t.KubeContext)
+	}
+	if t.Parent.Namespace != "" {
+		labelArgs = append(labelArgs, "-n", t.Parent.Namespace)
+	}
+	labelArgs = append(labelArgs, "label", "--overwrite", resourceArg, t.Parent.Name,
+		fmt.Sprintf("%s=%s", applyset.IDLabel, expectedID))
+
+	labelCmd := exec.CommandContext(ctx, kubectlBin, labelArgs...)
+	labelCmd.Stdout = scope.Stdout()
+	labelCmd.Stderr = scope.Stderr()
+	if err := labelCmd.Run(); err != nil {
+		return fmt.Errorf("failed to label applyset parent %s/%s: %w", resourceArg, t.Parent.Name, err)
+	}
+
+	tooling := fmt.Sprintf("ap/%s", version.Version())
+	var annotateArgs []string
+	if t.KubeContext != "" {
+		annotateArgs = append(annotateArgs, "--context", t.KubeContext)
+	}
+	if t.Parent.Namespace != "" {
+		annotateArgs = append(annotateArgs, "-n", t.Parent.Namespace)
+	}
+	annotateArgs = append(annotateArgs, "annotate", "--overwrite", resourceArg, t.Parent.Name,
+		fmt.Sprintf("%s=%s", applyset.ToolingAnnotation, tooling))
+
+	annotateCmd := exec.CommandContext(ctx, kubectlBin, annotateArgs...)
+	annotateCmd.Stdout = scope.Stdout()
+	annotateCmd.Stderr = scope.Stderr()
+	if err := annotateCmd.Run(); err != nil {
+		return fmt.Errorf("failed to annotate applyset parent %s/%s: %w", resourceArg, t.Parent.Name, err)
+	}
+
 	return nil
 }
 
@@ -262,8 +327,8 @@ func (t *VerifyApplySetParentTask) GetChildren() []tasks.Task {
 	return nil
 }
 
-// UpdateApplySetParentTask updates the parent object with ApplySet ID, tooling,
-// and group-kinds/additional-namespaces metadata.
+// UpdateApplySetParentTask updates the parent object with ApplySet
+// contains-group-kinds and additional-namespaces annotations.
 type UpdateApplySetParentTask struct {
 	Parent      *applyset.ParentRef
 	Membership  *applyset.Membership
@@ -276,8 +341,7 @@ func (t *UpdateApplySetParentTask) Run(ctx context.Context, scope *tasks.TaskCon
 		return fmt.Errorf("failed to ensure kubectl: %w", err)
 	}
 
-	tooling := fmt.Sprintf("ap/%s", version.Version())
-	_, annotations := t.Membership.ParentMetadata(t.Parent.Namespace, tooling)
+	_, annotations := t.Membership.ParentMetadata(t.Parent.Namespace, "")
 
 	resourceArg := t.Parent.Kind
 	if t.Parent.Resource != "" {
@@ -287,25 +351,7 @@ func (t *UpdateApplySetParentTask) Run(ctx context.Context, scope *tasks.TaskCon
 		resourceArg = fmt.Sprintf("%s.%s", resourceArg, t.Parent.Group)
 	}
 
-	// 1. Label parent with ID
-	var labelArgs []string
-	if t.KubeContext != "" {
-		labelArgs = append(labelArgs, "--context", t.KubeContext)
-	}
-	if t.Parent.Namespace != "" {
-		labelArgs = append(labelArgs, "-n", t.Parent.Namespace)
-	}
-	labelArgs = append(labelArgs, "label", "--overwrite", resourceArg, t.Parent.Name,
-		fmt.Sprintf("%s=%s", applyset.IDLabel, t.Parent.ID()))
-
-	labelCmd := exec.CommandContext(ctx, kubectlBin, labelArgs...)
-	labelCmd.Stdout = scope.Stdout()
-	labelCmd.Stderr = scope.Stderr()
-	if err := labelCmd.Run(); err != nil {
-		return fmt.Errorf("failed to label applyset parent %s/%s: %w", resourceArg, t.Parent.Name, err)
-	}
-
-	// 2. Annotate parent
+	// Annotate parent with contains-group-kinds and additional-namespaces
 	var annotateArgs []string
 	if t.KubeContext != "" {
 		annotateArgs = append(annotateArgs, "--context", t.KubeContext)

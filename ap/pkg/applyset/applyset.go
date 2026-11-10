@@ -12,6 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package applyset implements the ApplySet specification for tracking object
+// sets in Kubernetes (KEP-3659).
+//
+// Note: We deliberately follow the kubectl implementation rather than the KEP-3659
+// text where they diverge: the KEP text uses "applyset.k8s.io/...", lists "tooling"
+// as a label, names the CRD label "applyset.k8s.io/role/parent", and gives the ID
+// as a bare base64 hash. In contrast, kubectl (which other tools interoperate
+// with) ships "applyset.kubernetes.io/...", "tooling" as an annotation,
+// "applyset.kubernetes.io/is-parent-type", and the "applyset-<b64>-v1" formatted
+// ID. We follow kubectl so our ApplySets interoperate directly with kubectl and
+// the broader ecosystem.
 package applyset
 
 import (

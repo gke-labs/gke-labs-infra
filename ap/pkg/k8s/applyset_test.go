@@ -83,6 +83,52 @@ rules: []
 			t.Errorf("[%d] got %+v, want %+v", i, applied[i], exp)
 		}
 	}
+
+	t.Run("foreign part-of label returns error naming object", func(t *testing.T) {
+		foreignManifest := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: foreign-app
+  namespace: test-ns
+  labels:
+    applyset.kubernetes.io/part-of: applyset-other-id-v1
+spec:
+  replicas: 1
+`
+		_, _, err := StampManifest(foreignManifest, id, resolver, "fallback-ns")
+		if err == nil {
+			t.Fatal("expected error for manifest with foreign part-of label, got nil")
+		}
+		if !strings.Contains(err.Error(), "Deployment/foreign-app") {
+			t.Errorf("expected error to name object Deployment/foreign-app, got: %v", err)
+		}
+		if !strings.Contains(err.Error(), "applyset-other-id-v1") {
+			t.Errorf("expected error to mention foreign id, got: %v", err)
+		}
+	})
+
+	t.Run("identical part-of label passes", func(t *testing.T) {
+		identicalManifest := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: same-app
+  namespace: test-ns
+  labels:
+    applyset.kubernetes.io/part-of: applyset-test-id-v1
+spec:
+  replicas: 1
+`
+		stampedIdentical, appliedIdentical, err := StampManifest(identicalManifest, id, resolver, "fallback-ns")
+		if err != nil {
+			t.Fatalf("StampManifest failed for identical part-of label: %v", err)
+		}
+		if !strings.Contains(stampedIdentical, "applyset.kubernetes.io/part-of: applyset-test-id-v1") {
+			t.Errorf("stamped manifest missing part-of label:\n%s", stampedIdentical)
+		}
+		if len(appliedIdentical) != 1 || appliedIdentical[0].GroupKind.Kind != "Deployment" {
+			t.Errorf("unexpected applied objects: %+v", appliedIdentical)
+		}
+	})
 }
 
 func TestResolveParentRef(t *testing.T) {
