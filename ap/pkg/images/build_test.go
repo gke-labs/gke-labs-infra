@@ -818,69 +818,47 @@ func TestDockerBuildTask_ToolDocker(t *testing.T) {
 	_ = executedEnv
 }
 
-func TestParseContextBytesFromRawJSON(t *testing.T) {
-	rawJSON := strings.TrimSpace(`
-{"vertexes":[{"digest":"sha256:v1","name":"[internal] load build definition from Dockerfile"}]}
-{"statuses":[{"id":"transferring dockerfile:","vertex":"sha256:v1","name":"transferring","current":1126}]}
-{"vertexes":[{"digest":"sha256:v2","name":"[internal] load .dockerignore"}]}
-{"statuses":[{"id":"transferring context:","vertex":"sha256:v2","name":"transferring","current":0}]}
-{"statuses":[{"id":"transferring context:","vertex":"sha256:v2","name":"transferring","current":2}]}
-{"vertexes":[{"digest":"sha256:v3","name":"[internal] load build context"}]}
-{"statuses":[{"id":"transferring context:","vertex":"sha256:v3","name":"transferring","current":0}]}
-some non-json warning from daemon
-{"statuses":[{"id":"transferring context:","vertex":"sha256:v3","name":"transferring","current":25}]}
-{"statuses":[{"id":"transferring context:","vertex":"sha256:v3","name":"transferring","current":44260}]}
-{"logs":[{"vertex":"sha256:v3","data":"done\n"}]}
+func TestParseContextSizeFromPlain(t *testing.T) {
+	plainOutput := strings.TrimSpace(`
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.13kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/golang:1.27.3-trixie
+#2 DONE 0.1s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [builder 1/5] FROM docker.io/library/golang:1.27.3-trixie@sha256:af1bfc2614ebb1dbd31af514b78740fd678850e76498762b425ecee4c5c6ea80
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 10kB
+#5 transferring context: 44.26kB done
+#5 DONE 0.0s
 `)
 
-	total, err := ParseContextBytesFromRawJSON(strings.NewReader(rawJSON))
-	if err != nil {
-		t.Fatalf("unexpected error parsing rawjson: %v", err)
+	got := parseContextSizeFromPlain(strings.NewReader(plainOutput))
+	if want := "44.26kB"; got != want {
+		t.Errorf("parseContextSizeFromPlain() = %q, want %q", got, want)
 	}
 
-	// 2 bytes from .dockerignore + 44260 bytes from build context
-	const wantBytes = int64(44262)
-	if total != wantBytes {
-		t.Errorf("got total %d, want %d", total, wantBytes)
+	// Empty stream returns ""
+	if emptyGot := parseContextSizeFromPlain(strings.NewReader("")); emptyGot != "" {
+		t.Errorf("empty stream got %q, want empty", emptyGot)
 	}
 
-	formatted := FormatBytes(total)
-	if formatted != "44.26kB" {
-		t.Errorf("FormatBytes(%d) = %q, want %q", total, formatted, "44.26kB")
-	}
-
-	// Empty stream returns 0 bytes
-	emptyTotal, err := ParseContextBytesFromRawJSON(strings.NewReader(""))
-	if err != nil {
-		t.Fatalf("unexpected error parsing empty stream: %v", err)
-	}
-	if emptyTotal != 0 {
-		t.Errorf("empty stream total = %d, want 0", emptyTotal)
-	}
-}
-
-func TestFormatBytes(t *testing.T) {
-	tests := []struct {
-		bytes int64
-		want  string
-	}{
-		{bytes: -10, want: "0B"},
-		{bytes: 0, want: "0B"},
-		{bytes: 2, want: "2B"},
-		{bytes: 266, want: "266B"},
-		{bytes: 999, want: "999B"},
-		{bytes: 1000, want: "1.00kB"},
-		{bytes: 1126, want: "1.13kB"},
-		{bytes: 44260, want: "44.26kB"},
-		{bytes: 1500000, want: "1.50MB"},
-		{bytes: 5280000000, want: "5.28GB"},
-	}
-
-	for _, tt := range tests {
-		got := FormatBytes(tt.bytes)
-		if got != tt.want {
-			t.Errorf("FormatBytes(%d) = %q, want %q", tt.bytes, got, tt.want)
-		}
+	// Stream without build context transfer returns ""
+	cachedOutput := strings.TrimSpace(`
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#5 [internal] load build context
+#5 CACHED
+`)
+	if cachedGot := parseContextSizeFromPlain(strings.NewReader(cachedOutput)); cachedGot != "" {
+		t.Errorf("cached stream got %q, want empty", cachedGot)
 	}
 }
 

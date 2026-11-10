@@ -212,7 +212,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 		"--opt", "build-arg:IMAGE_PREFIX=" + naming.Prefix,
 		"--opt", "build-arg:IMAGE_TAG=" + naming.Tag,
 		"--metadata-file", metaFile,
-		"--progress=rawjson",
+		"--progress=plain",
 		"--output", output,
 	}
 
@@ -220,7 +220,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 		buildctlArgs = append(buildctlArgs, "--opt", "platform="+strings.Join(platforms, ","))
 	}
 
-	var rawjsonBuf bytes.Buffer
+	var progressBuf bytes.Buffer
 
 	if host, ok := strings.CutPrefix(t.BuildkitHost, "k8s://"); ok {
 		// handle port forward
@@ -238,7 +238,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 					cmd := execCommandContext(ctx, "buildctl", buildctlArgs...)
 					cmd.Dir = root
 					cmd.Stdout = scope.Stdout()
-					cmd.Stderr = io.MultiWriter(scope.Stderr(), &rawjsonBuf)
+					cmd.Stderr = io.MultiWriter(scope.Stderr(), &progressBuf)
 					cmd.Env = append(os.Environ(), "BUILDKIT_HOST=tcp://localhost:2375")
 					return cmd.Run()
 				},
@@ -257,7 +257,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 		cmd := execCommandContext(ctx, "buildctl", buildctlArgs...)
 		cmd.Dir = root
 		cmd.Stdout = scope.Stdout()
-		cmd.Stderr = io.MultiWriter(scope.Stderr(), &rawjsonBuf)
+		cmd.Stderr = io.MultiWriter(scope.Stderr(), &progressBuf)
 		cmd.Env = append(os.Environ(), "BUILDKIT_HOST="+t.BuildkitHost)
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("buildctl build failed for %s: %w", t.ImageName, err)
@@ -270,16 +270,13 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 		ref.Digest = digest
 	}
 
-	builder := t.BuildkitHost
-	if builder == "k8s" {
-		builder = DefaultK8sBuildkitHost
-	}
-	contextBytes, err := ParseContextBytesFromRawJSON(&rawjsonBuf)
-	if err != nil {
-		scope.Log().V(4).Info("failed to parse buildctl progress stream", "error", err)
-	}
+	contextSize := parseContextSizeFromPlain(&progressBuf)
 	duration := time.Since(start)
-	scope.Log().Info(fmt.Sprintf("built %s with %s in %s; sent %s", t.ImageName, builder, formatDuration(duration), FormatBytes(contextBytes)))
+	if contextSize != "" {
+		scope.Log().Info(fmt.Sprintf("built %s with %s in %s; sent %s", t.ImageName, t.BuildkitHost, formatDuration(duration), contextSize))
+	} else {
+		scope.Log().Info(fmt.Sprintf("built %s with %s in %s", t.ImageName, t.BuildkitHost, formatDuration(duration)))
+	}
 
 	return nil
 }
@@ -361,70 +358,48 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContex
 	return nil
 }
 
-// ParseContextBytesFromRawJSON parses a buildctl --progress=rawjson stream
-// and returns the total build-context transfer bytes sent from the workstation
-// (sum of the "transferring context" vertex statuses).
-func ParseContextBytesFromRawJSON(r io.Reader) (int64, error) {
+// parseContextSizeFromPlain parses a buildctl --progress=plain stream and returns
+// the transfer figure from the last "transferring context: <size> done" line of
+// the "[internal] load build context" vertex (e.g. "44.26kB"). If no transfer line
+// is found, it returns "".
+func parseContextSizeFromPlain(r io.Reader) string {
 	scanner := bufio.NewScanner(r)
-	buf := make([]byte, 64*1024)
-	scanner.Buffer(buf, 10*1024*1024)
-
-	currents := make(map[string]int64)
-
-	type vertexStatus struct {
-		ID      string `json:"id"`
-		Vertex  string `json:"vertex"`
-		Name    string `json:"name"`
-		Current int64  `json:"current"`
-	}
-
-	type solveStatus struct {
-		Statuses []vertexStatus `json:"statuses"`
-	}
+	var contextVertexID string
+	var lastSize string
+	inBuildContext := false
 
 	for scanner.Scan() {
-		line := bytes.TrimSpace(scanner.Bytes())
-		if len(line) == 0 || line[0] != '{' {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.Contains(line, "[internal] load build context") {
+			inBuildContext = true
+			if strings.HasPrefix(line, "#") {
+				fields := strings.Fields(line)
+				if len(fields) > 0 {
+					contextVertexID = fields[0]
+				}
+			}
 			continue
 		}
-		var record solveStatus
-		if err := json.Unmarshal(line, &record); err != nil {
-			continue
-		}
-		for _, s := range record.Statuses {
-			if strings.HasPrefix(strings.TrimSpace(s.ID), "transferring context") || strings.HasPrefix(strings.TrimSpace(s.Name), "transferring context") {
-				key := s.Vertex + "/" + s.ID
-				if s.Current > currents[key] {
-					currents[key] = s.Current
+
+		if strings.Contains(line, "transferring context:") {
+			matches := false
+			if contextVertexID != "" {
+				matches = strings.HasPrefix(line, contextVertexID+" ") || strings.HasPrefix(line, contextVertexID+"\t")
+			} else if inBuildContext {
+				matches = true
+			}
+			if matches {
+				idx := strings.Index(line, "transferring context:")
+				rest := strings.TrimSpace(line[idx+len("transferring context:"):])
+				fields := strings.Fields(rest)
+				if len(fields) > 0 {
+					lastSize = fields[0]
 				}
 			}
 		}
 	}
 
-	var total int64
-	for _, b := range currents {
-		total += b
-	}
-	return total, scanner.Err()
-}
-
-// FormatBytes formats a byte count into decimal units (B, kB, MB, GB),
-// matching BuildKit's progress display.
-func FormatBytes(b int64) string {
-	if b < 0 {
-		b = 0
-	}
-	if b < 1000 {
-		return fmt.Sprintf("%dB", b)
-	}
-	bf := float64(b)
-	if bf < 1000*1000 {
-		return fmt.Sprintf("%.2fkB", bf/1000)
-	}
-	if bf < 1000*1000*1000 {
-		return fmt.Sprintf("%.2fMB", bf/(1000*1000))
-	}
-	return fmt.Sprintf("%.2fGB", bf/(1000*1000*1000))
+	return lastSize
 }
 
 func formatDuration(d time.Duration) string {
