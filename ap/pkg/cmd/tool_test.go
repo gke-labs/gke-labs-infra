@@ -27,6 +27,8 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kubectl"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/spec"
 )
 
 type blockTransport struct {
@@ -216,8 +218,11 @@ func TestToolUpdateVersions_KubectlOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Setenv("KUBECTL_RELEASE_FEED_URL", server.URL+"/stable.txt")
-	t.Setenv("KUBECTL_DOWNLOAD_BASE_URL", server.URL)
+	origSource := kubectl.Spec.Source
+	kubectl.Spec.Source = &spec.KubernetesRelease{BaseURL: server.URL}
+	t.Cleanup(func() {
+		kubectl.Spec.Source = origSource
+	})
 	t.Chdir(tempRepo)
 
 	rootCmd := BuildRootCommand()

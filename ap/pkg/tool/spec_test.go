@@ -30,6 +30,7 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kind"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kubectl"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/spec"
 	toolversions "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/versions"
 	"k8s.io/klog/v2"
@@ -282,44 +283,101 @@ func TestSpec_ColdRun_DoesNotMutateHome(t *testing.T) {
 }
 
 func TestSpec_VersionsYAML(t *testing.T) {
-	rels, err := toolversions.Parse(kind.Spec.VersionsYAML, kind.Spec.Name)
-	if err != nil {
-		t.Fatalf("failed to parse versions.yaml: %v", err)
+	for _, s := range []*spec.Spec{kind.Spec, kubectl.Spec} {
+		t.Run(s.Name, func(t *testing.T) {
+			rels, err := toolversions.Parse(s.VersionsYAML, s.Name)
+			if err != nil {
+				t.Fatalf("failed to parse versions.yaml: %v", err)
+			}
+			if len(rels) != 5 {
+				t.Fatalf("expected exactly 5 releases in versions.yaml, got %d", len(rels))
+			}
+
+			for _, rel := range rels {
+				if rel.Version == "" {
+					t.Errorf("empty version in release")
+				}
+				if len(rel.Assets) != len(s.Platforms) {
+					t.Errorf("release %s has %d assets, want %d", rel.Version, len(rel.Assets), len(s.Platforms))
+				}
+				for _, plat := range s.Platforms {
+					digest, ok := rel.Assets[plat]
+					if !ok || digest == "" {
+						t.Errorf("release %s missing asset for platform %s", rel.Version, plat)
+						continue
+					}
+					if !strings.HasPrefix(digest, "sha256:") {
+						t.Errorf("release %s asset %s digest does not have sha256: prefix: %s", rel.Version, plat, digest)
+					}
+					if len(digest) != len("sha256:")+64 {
+						t.Errorf("release %s asset %s digest length is invalid: %s", rel.Version, plat, digest)
+					}
+				}
+			}
+
+			var prev string
+			for i, rel := range rels {
+				if i > 0 {
+					if toolversions.Compare(prev, rel.Version) <= 0 {
+						t.Errorf("versions table is not sorted newest-first: %s is not newer than %s", prev, rel.Version)
+					}
+				}
+				prev = rel.Version
+			}
+		})
 	}
-	if len(rels) != 5 {
-		t.Fatalf("expected exactly 5 releases in versions.yaml, got %d", len(rels))
+}
+
+func TestParseSidecarDigest(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{
+			name:  "plain hex sha256",
+			input: "c04487523e7aa7d1493f7808174c899db93d7a9cf57531420cd76b9bd415f8f4",
+			want:  "sha256:c04487523e7aa7d1493f7808174c899db93d7a9cf57531420cd76b9bd415f8f4",
+		},
+		{
+			name:  "with trailing newline and whitespace",
+			input: "  c04487523e7aa7d1493f7808174c899db93d7a9cf57531420cd76b9bd415f8f4  \n",
+			want:  "sha256:c04487523e7aa7d1493f7808174c899db93d7a9cf57531420cd76b9bd415f8f4",
+		},
+		{
+			name:  "shasum format with filename",
+			input: "c04487523e7aa7d1493f7808174c899db93d7a9cf57531420cd76b9bd415f8f4  kubectl\n",
+			want:  "sha256:c04487523e7aa7d1493f7808174c899db93d7a9cf57531420cd76b9bd415f8f4",
+		},
+		{
+			name:  "already has sha256 prefix",
+			input: "sha256:c04487523e7aa7d1493f7808174c899db93d7a9cf57531420cd76b9bd415f8f4",
+			want:  "sha256:c04487523e7aa7d1493f7808174c899db93d7a9cf57531420cd76b9bd415f8f4",
+		},
+		{
+			name:    "empty string",
+			input:   "",
+			wantErr: true,
+		},
+		{
+			name:    "whitespace only",
+			input:   "   \n\t  ",
+			wantErr: true,
+		},
 	}
 
-	for _, rel := range rels {
-		if rel.Version == "" {
-			t.Errorf("empty version in release")
-		}
-		if len(rel.Assets) != len(kind.Spec.Platforms) {
-			t.Errorf("release %s has %d assets, want %d", rel.Version, len(rel.Assets), len(kind.Spec.Platforms))
-		}
-		for _, plat := range kind.Spec.Platforms {
-			digest, ok := rel.Assets[plat]
-			if !ok || digest == "" {
-				t.Errorf("release %s missing asset for platform %s", rel.Version, plat)
-				continue
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := spec.ParseSidecarDigest(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseSidecarDigest(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+				return
 			}
-			if !strings.HasPrefix(digest, "sha256:") {
-				t.Errorf("release %s asset %s digest does not have sha256: prefix: %s", rel.Version, plat, digest)
+			if got != tt.want {
+				t.Errorf("ParseSidecarDigest(%q) = %q, want %q", tt.input, got, tt.want)
 			}
-			if len(digest) != len("sha256:")+64 {
-				t.Errorf("release %s asset %s digest length is invalid: %s", rel.Version, plat, digest)
-			}
-		}
-	}
-
-	var prev string
-	for i, rel := range rels {
-		if i > 0 {
-			if toolversions.Compare(prev, rel.Version) <= 0 {
-				t.Errorf("versions table is not sorted newest-first: %s is not newer than %s", prev, rel.Version)
-			}
-		}
-		prev = rel.Version
+		})
 	}
 }
 

@@ -18,14 +18,18 @@ package spec
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/fetch"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/github"
 	toolversions "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/versions"
@@ -126,6 +130,106 @@ func (g *GitHubReleases) AssetURL(tag, goos, goarch string) string {
 func (g *GitHubReleases) Digest(ctx context.Context, tag, goos, goarch string) (string, error) {
 	url := g.AssetURL(tag, goos, goarch)
 	return fetch.Digest(ctx, url)
+}
+
+// KubernetesRelease fetches versions, assets, and digests from dl.k8s.io.
+type KubernetesRelease struct {
+	BaseURL string // optional override for https://dl.k8s.io/release
+}
+
+func (k *KubernetesRelease) baseURL() string {
+	if k.BaseURL != "" {
+		return strings.TrimRight(k.BaseURL, "/")
+	}
+	return "https://dl.k8s.io/release"
+}
+
+// Versions reads the stable tag from https://dl.k8s.io/release/stable.txt (one entry).
+func (k *KubernetesRelease) Versions(ctx context.Context) ([]string, error) {
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+	}
+
+	url := fmt.Sprintf("%s/stable.txt", k.baseURL())
+	txt, err := fetchText(ctx, url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch stable version from %s: %w", url, err)
+	}
+	tag := NormalizeTag(txt)
+	if tag == "" || tag == "v" {
+		return nil, fmt.Errorf("empty version from %s", url)
+	}
+	return []string{tag}, nil
+}
+
+// AssetURL returns the download URL for the binary on dl.k8s.io.
+func (k *KubernetesRelease) AssetURL(tag, goos, goarch string) string {
+	bin := "kubectl"
+	if goos == "windows" {
+		bin = "kubectl.exe"
+	}
+	normTag := NormalizeTag(tag)
+	return fmt.Sprintf("%s/%s/bin/%s/%s/%s", k.baseURL(), normTag, goos, goarch, bin)
+}
+
+// Digest fetches the .sha256 sidecar next to the asset and trims it.
+func (k *KubernetesRelease) Digest(ctx context.Context, tag, goos, goarch string) (string, error) {
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+	}
+
+	shaURL := k.AssetURL(tag, goos, goarch) + ".sha256"
+	shaText, err := fetchText(ctx, shaURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch checksum from %s: %w", shaURL, err)
+	}
+	return ParseSidecarDigest(shaText)
+}
+
+// ParseSidecarDigest extracts and formats a sha256 digest from a sidecar file's text content.
+func ParseSidecarDigest(text string) (string, error) {
+	fields := strings.Fields(text)
+	if len(fields) == 0 {
+		return "", fmt.Errorf("empty checksum sidecar content")
+	}
+	digest := fields[0]
+	if !strings.HasPrefix(digest, "sha256:") {
+		digest = "sha256:" + digest
+	}
+	return digest, nil
+}
+
+func fetchText(ctx context.Context, url string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request for %s: %w", url, err)
+	}
+	req.Header.Set("User-Agent", "gke-labs-ap")
+
+	resp, err := scoped.HTTPClient(ctx).Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch from %s: %w", url, err)
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			klog.V(2).Infof("failed to close response body: %v", closeErr)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to fetch from %s: HTTP %s", url, resp.Status)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response from %s: %w", url, err)
+	}
+
+	return strings.TrimSpace(string(body)), nil
 }
 
 // Spec defines the configuration and behavior of a managed external tool.

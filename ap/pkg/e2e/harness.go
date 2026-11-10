@@ -138,12 +138,8 @@ func (h *Harness) KubectlBin() string {
 
 func (h *Harness) ensureKubectl() {
 	h.t.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		h.t.Fatalf("failed to get current working directory: %v", err)
-	}
-	repoRoot := findRepoRoot(dir)
-	bin, err := kubectl.EnsureKubectlForRepo(h.t.Context(), repoRoot)
+	repoRoot := h.RepoRoot()
+	bin, err := kubectl.Spec.EnsureForRepo(h.t.Context(), repoRoot)
 	if err != nil {
 		h.t.Fatalf("failed to prepare kubectl tool: %v", err)
 	}
