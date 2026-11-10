@@ -1581,6 +1581,93 @@ func TestDeploy_DryRun_WithoutNamespace_Unchanged(t *testing.T) {
 	}
 }
 
+func TestDeploy_DryRun_WithClusterAndBuildkitHost(t *testing.T) {
+	tempDir := setupFixtureRepo(t)
+
+	// 1. With --cluster, --namespace, and --buildkit-host
+	opt := DeployOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: tempDir,
+			Dir:      tempDir,
+			DryRun:   true,
+		},
+		BuildkitHost: "k8s://autodeploy-system/buildkit",
+		Cluster:      "homebase1",
+		Namespace:    "snigateway-system",
+	}
+
+	if err := opt.Resolve([]string{"./k8s"}); err != nil {
+		t.Fatalf("opt.Resolve failed: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		if err := RunDeploy(t.Context(), opt); err != nil {
+			t.Fatalf("RunDeploy failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "docker-build-a (buildkit: k8s://autodeploy-system/buildkit)") {
+		t.Errorf("expected dry-run to show 'docker-build-a (buildkit: k8s://autodeploy-system/buildkit)', got:\n%s", out)
+	}
+	if !strings.Contains(out, "kubectl-apply-a.yaml (context: homebase1, namespace: snigateway-system)") {
+		t.Errorf("expected dry-run to show 'kubectl-apply-a.yaml (context: homebase1, namespace: snigateway-system)', got:\n%s", out)
+	}
+
+	// 2. With --cluster alone (e.g. does-not-exist)
+	optCluster := DeployOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: tempDir,
+			Dir:      tempDir,
+			DryRun:   true,
+		},
+		BuildkitHost: "k8s://autodeploy-system/buildkit",
+		Cluster:      "does-not-exist",
+	}
+
+	if err := optCluster.Resolve([]string{"./k8s"}); err != nil {
+		t.Fatalf("optCluster.Resolve failed: %v", err)
+	}
+
+	outCluster := captureStdout(t, func() {
+		if err := RunDeploy(t.Context(), optCluster); err != nil {
+			t.Fatalf("RunDeploy failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(outCluster, "kubectl-apply-a.yaml (context: does-not-exist)") {
+		t.Errorf("expected dry-run to show 'kubectl-apply-a.yaml (context: does-not-exist)', got:\n%s", outCluster)
+	}
+
+	// 3. Without --cluster and without buildkit host, output is unchanged
+	optPlain := DeployOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: tempDir,
+			Dir:      tempDir,
+			DryRun:   true,
+		},
+	}
+
+	if err := optPlain.Resolve([]string{"./k8s"}); err != nil {
+		t.Fatalf("optPlain.Resolve failed: %v", err)
+	}
+
+	outPlain := captureStdout(t, func() {
+		if err := RunDeploy(t.Context(), optPlain); err != nil {
+			t.Fatalf("RunDeploy failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(outPlain, "docker-build-a\n") {
+		t.Errorf("expected dry-run to show unchanged 'docker-build-a', got:\n%s", outPlain)
+	}
+	if !strings.Contains(outPlain, "kubectl-apply-a.yaml\n") {
+		t.Errorf("expected dry-run to show unchanged 'kubectl-apply-a.yaml', got:\n%s", outPlain)
+	}
+	if strings.Contains(outPlain, "(context:") || strings.Contains(outPlain, "(buildkit:") || strings.Contains(outPlain, "(namespace:") {
+		t.Errorf("expected plan without --cluster and without buildkit host to be unchanged, got:\n%s", outPlain)
+	}
+}
+
 func TestBuildDeployCommand_ClusterFlag(t *testing.T) {
 	rootOpt := &RootOptions{}
 	cmd := BuildDeployCommand(rootOpt)

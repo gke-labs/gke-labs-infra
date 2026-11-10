@@ -392,6 +392,9 @@ func inspectImageDigest(ctx context.Context, dockerBin, fullImageName string) st
 }
 
 func (t *DockerBuildTask) GetName() string {
+	if t.BuildkitHost != "" {
+		return fmt.Sprintf("docker-build-%s (buildkit: %s)", t.ImageName, t.BuildkitHost)
+	}
 	return fmt.Sprintf("docker-build-%s", t.ImageName)
 }
 

@@ -816,3 +816,30 @@ func TestDockerBuildTask_ToolDocker(t *testing.T) {
 	}
 	_ = executedEnv
 }
+
+func TestDockerBuildTask_GetName(t *testing.T) {
+	tests := []struct {
+		name     string
+		task     DockerBuildTask
+		wantName string
+	}{
+		{
+			name:     "without buildkit host",
+			task:     DockerBuildTask{ImageName: "snigateway"},
+			wantName: "docker-build-snigateway",
+		},
+		{
+			name:     "with buildkit host",
+			task:     DockerBuildTask{ImageName: "snigateway", BuildkitHost: "k8s://autodeploy-system/buildkit"},
+			wantName: "docker-build-snigateway (buildkit: k8s://autodeploy-system/buildkit)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.task.GetName(); got != tt.wantName {
+				t.Errorf("GetName() = %q, want %q", got, tt.wantName)
+			}
+		})
+	}
+}

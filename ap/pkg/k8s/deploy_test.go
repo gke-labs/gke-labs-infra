@@ -130,3 +130,45 @@ func TestFindManifests(t *testing.T) {
 		})
 	}
 }
+
+func TestKubectlApplyTask_GetName(t *testing.T) {
+	tests := []struct {
+		name     string
+		task     KubectlApplyTask
+		wantName string
+	}{
+		{
+			name:     "plain manifest",
+			task:     KubectlApplyTask{ManifestPath: "k8s/controller.yaml"},
+			wantName: "kubectl-apply-controller.yaml",
+		},
+		{
+			name:     "with namespace only",
+			task:     KubectlApplyTask{ManifestPath: "k8s/controller.yaml", Namespace: "snigateway-system"},
+			wantName: "kubectl-apply-controller.yaml (namespace: snigateway-system)",
+		},
+		{
+			name:     "with cluster context only",
+			task:     KubectlApplyTask{ManifestPath: "k8s/controller.yaml", Cluster: ClusterFromContext("homebase1")},
+			wantName: "kubectl-apply-controller.yaml (context: homebase1)",
+		},
+		{
+			name:     "with cluster context and namespace",
+			task:     KubectlApplyTask{ManifestPath: "k8s/controller.yaml", Cluster: ClusterFromContext("homebase1"), Namespace: "snigateway-system"},
+			wantName: "kubectl-apply-controller.yaml (context: homebase1, namespace: snigateway-system)",
+		},
+		{
+			name:     "current cluster has empty context",
+			task:     KubectlApplyTask{ManifestPath: "k8s/controller.yaml", Cluster: CurrentCluster(), Namespace: "snigateway-system"},
+			wantName: "kubectl-apply-controller.yaml (namespace: snigateway-system)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.task.GetName(); got != tt.wantName {
+				t.Errorf("GetName() = %q, want %q", got, tt.wantName)
+			}
+		})
+	}
+}

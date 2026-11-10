@@ -544,8 +544,15 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 }
 
 func (t *KubectlApplyTask) GetName() string {
+	var parts []string
+	if cluster := t.Cluster.String(); cluster != "" {
+		parts = append(parts, "context: "+cluster)
+	}
 	if t.Namespace != "" {
-		return fmt.Sprintf("kubectl-apply-%s (namespace: %s)", filepath.Base(t.ManifestPath), t.Namespace)
+		parts = append(parts, "namespace: "+t.Namespace)
+	}
+	if len(parts) > 0 {
+		return fmt.Sprintf("kubectl-apply-%s (%s)", filepath.Base(t.ManifestPath), strings.Join(parts, ", "))
 	}
 	return fmt.Sprintf("kubectl-apply-%s", filepath.Base(t.ManifestPath))
 }
