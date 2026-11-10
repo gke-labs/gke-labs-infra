@@ -22,6 +22,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
@@ -815,4 +816,67 @@ func TestDockerBuildTask_ToolDocker(t *testing.T) {
 		t.Errorf("expected command %q, got %q", explicitBin, executedCmd)
 	}
 	_ = executedEnv
+}
+
+func TestParseContextSizeFromPlain(t *testing.T) {
+	plainOutput := strings.TrimSpace(`
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.13kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/golang:1.27.3-trixie
+#2 DONE 0.1s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [builder 1/5] FROM docker.io/library/golang:1.27.3-trixie@sha256:af1bfc2614ebb1dbd31af514b78740fd678850e76498762b425ecee4c5c6ea80
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 10kB
+#5 transferring context: 44.26kB done
+#5 DONE 0.0s
+`)
+
+	got := parseContextSizeFromPlain(strings.NewReader(plainOutput))
+	if want := "44.26kB"; got != want {
+		t.Errorf("parseContextSizeFromPlain() = %q, want %q", got, want)
+	}
+
+	// Empty stream returns ""
+	if emptyGot := parseContextSizeFromPlain(strings.NewReader("")); emptyGot != "" {
+		t.Errorf("empty stream got %q, want empty", emptyGot)
+	}
+
+	// Stream without build context transfer returns ""
+	cachedOutput := strings.TrimSpace(`
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#5 [internal] load build context
+#5 CACHED
+`)
+	if cachedGot := parseContextSizeFromPlain(strings.NewReader(cachedOutput)); cachedGot != "" {
+		t.Errorf("cached stream got %q, want empty", cachedGot)
+	}
+}
+
+func TestFormatDuration(t *testing.T) {
+	tests := []struct {
+		duration time.Duration
+		want     string
+	}{
+		{duration: 500 * time.Millisecond, want: "0.5s"},
+		{duration: 2700 * time.Millisecond, want: "2.7s"},
+		{duration: 22000 * time.Millisecond, want: "22.0s"},
+		{duration: 68600 * time.Millisecond, want: "1m8.6s"},
+	}
+
+	for _, tt := range tests {
+		got := formatDuration(tt.duration)
+		if got != tt.want {
+			t.Errorf("formatDuration(%v) = %q, want %q", tt.duration, got, tt.want)
+		}
+	}
 }

@@ -15,9 +15,12 @@
 package images
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -186,7 +189,7 @@ func (t *DockerBuildTask) supportsMultiPlatform(ctx context.Context, buildxBin s
 }
 
 func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskContext, root, fullImageName, relDockerfilePath string, naming ImageNaming, platforms []string) error {
-	scope.Log().Info("building image with buildctl", "image", fullImageName, "root", root)
+	start := time.Now()
 
 	output := fmt.Sprintf("type=image,name=%s,push=%t", fullImageName, t.Push)
 	if t.Push {
@@ -209,12 +212,15 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 		"--opt", "build-arg:IMAGE_PREFIX=" + naming.Prefix,
 		"--opt", "build-arg:IMAGE_TAG=" + naming.Tag,
 		"--metadata-file", metaFile,
+		"--progress=plain",
 		"--output", output,
 	}
 
 	if len(platforms) > 0 {
 		buildctlArgs = append(buildctlArgs, "--opt", "platform="+strings.Join(platforms, ","))
 	}
+
+	var progressBuf bytes.Buffer
 
 	if host, ok := strings.CutPrefix(t.BuildkitHost, "k8s://"); ok {
 		// handle port forward
@@ -232,7 +238,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 					cmd := execCommandContext(ctx, "buildctl", buildctlArgs...)
 					cmd.Dir = root
 					cmd.Stdout = scope.Stdout()
-					cmd.Stderr = scope.Stderr()
+					cmd.Stderr = io.MultiWriter(scope.Stderr(), &progressBuf)
 					cmd.Env = append(os.Environ(), "BUILDKIT_HOST=tcp://localhost:2375")
 					return cmd.Run()
 				},
@@ -251,7 +257,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 		cmd := execCommandContext(ctx, "buildctl", buildctlArgs...)
 		cmd.Dir = root
 		cmd.Stdout = scope.Stdout()
-		cmd.Stderr = scope.Stderr()
+		cmd.Stderr = io.MultiWriter(scope.Stderr(), &progressBuf)
 		cmd.Env = append(os.Environ(), "BUILDKIT_HOST="+t.BuildkitHost)
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("buildctl build failed for %s: %w", t.ImageName, err)
@@ -264,11 +270,19 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 		ref.Digest = digest
 	}
 
+	contextSize := parseContextSizeFromPlain(&progressBuf)
+	duration := time.Since(start)
+	if contextSize != "" {
+		scope.Log().Info(fmt.Sprintf("built %s with %s in %s; sent %s", t.ImageName, t.BuildkitHost, formatDuration(duration), contextSize))
+	} else {
+		scope.Log().Info(fmt.Sprintf("built %s with %s in %s", t.ImageName, t.BuildkitHost, formatDuration(duration)))
+	}
+
 	return nil
 }
 
 func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContext, buildxBin, dockerBin, root, fullImageName, actualImagePrefix, relDockerfilePath string, naming ImageNaming, platforms []string) error {
-	scope.Log().Info("building image with docker buildx", "image", fullImageName, "root", root)
+	start := time.Now()
 
 	metaFile := filepath.Join(os.TempDir(), fmt.Sprintf("buildx-meta-%d.json", time.Now().UnixNano()))
 	defer func() {
@@ -338,7 +352,61 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContex
 		}
 	}
 
+	duration := time.Since(start)
+	scope.Log().Info(fmt.Sprintf("built %s with docker in %s", t.ImageName, formatDuration(duration)))
+
 	return nil
+}
+
+// parseContextSizeFromPlain parses a buildctl --progress=plain stream and returns
+// the transfer figure from the last "transferring context: <size> done" line of
+// the "[internal] load build context" vertex (e.g. "44.26kB"). If no transfer line
+// is found, it returns "".
+func parseContextSizeFromPlain(r io.Reader) string {
+	scanner := bufio.NewScanner(r)
+	var contextVertexID string
+	var lastSize string
+	inBuildContext := false
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.Contains(line, "[internal] load build context") {
+			inBuildContext = true
+			if strings.HasPrefix(line, "#") {
+				fields := strings.Fields(line)
+				if len(fields) > 0 {
+					contextVertexID = fields[0]
+				}
+			}
+			continue
+		}
+
+		if strings.Contains(line, "transferring context:") {
+			matches := false
+			if contextVertexID != "" {
+				matches = strings.HasPrefix(line, contextVertexID+" ") || strings.HasPrefix(line, contextVertexID+"\t")
+			} else if inBuildContext {
+				matches = true
+			}
+			if matches {
+				idx := strings.Index(line, "transferring context:")
+				rest := strings.TrimSpace(line[idx+len("transferring context:"):])
+				fields := strings.Fields(rest)
+				if len(fields) > 0 {
+					lastSize = fields[0]
+				}
+			}
+		}
+	}
+
+	return lastSize
+}
+
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	}
+	return d.Round(100 * time.Millisecond).String()
 }
 
 type buildMetadataFile struct {
