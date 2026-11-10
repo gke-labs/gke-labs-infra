@@ -15,9 +15,12 @@
 package images
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -186,7 +189,7 @@ func (t *DockerBuildTask) supportsMultiPlatform(ctx context.Context, buildxBin s
 }
 
 func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskContext, root, fullImageName, relDockerfilePath string, naming ImageNaming, platforms []string) error {
-	scope.Log().Info("building image with buildctl", "image", fullImageName, "root", root)
+	start := time.Now()
 
 	output := fmt.Sprintf("type=image,name=%s,push=%t", fullImageName, t.Push)
 	if t.Push {
@@ -209,12 +212,15 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 		"--opt", "build-arg:IMAGE_PREFIX=" + naming.Prefix,
 		"--opt", "build-arg:IMAGE_TAG=" + naming.Tag,
 		"--metadata-file", metaFile,
+		"--progress=rawjson",
 		"--output", output,
 	}
 
 	if len(platforms) > 0 {
 		buildctlArgs = append(buildctlArgs, "--opt", "platform="+strings.Join(platforms, ","))
 	}
+
+	var rawjsonBuf bytes.Buffer
 
 	if host, ok := strings.CutPrefix(t.BuildkitHost, "k8s://"); ok {
 		// handle port forward
@@ -232,7 +238,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 					cmd := execCommandContext(ctx, "buildctl", buildctlArgs...)
 					cmd.Dir = root
 					cmd.Stdout = scope.Stdout()
-					cmd.Stderr = scope.Stderr()
+					cmd.Stderr = io.MultiWriter(scope.Stderr(), &rawjsonBuf)
 					cmd.Env = append(os.Environ(), "BUILDKIT_HOST=tcp://localhost:2375")
 					return cmd.Run()
 				},
@@ -251,7 +257,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 		cmd := execCommandContext(ctx, "buildctl", buildctlArgs...)
 		cmd.Dir = root
 		cmd.Stdout = scope.Stdout()
-		cmd.Stderr = scope.Stderr()
+		cmd.Stderr = io.MultiWriter(scope.Stderr(), &rawjsonBuf)
 		cmd.Env = append(os.Environ(), "BUILDKIT_HOST="+t.BuildkitHost)
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("buildctl build failed for %s: %w", t.ImageName, err)
@@ -264,11 +270,22 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 		ref.Digest = digest
 	}
 
+	builder := t.BuildkitHost
+	if builder == "k8s" {
+		builder = DefaultK8sBuildkitHost
+	}
+	contextBytes, err := ParseContextBytesFromRawJSON(&rawjsonBuf)
+	if err != nil {
+		scope.Log().V(4).Info("failed to parse buildctl progress stream", "error", err)
+	}
+	duration := time.Since(start)
+	scope.Log().Info(fmt.Sprintf("built %s with %s in %s; sent %s", t.ImageName, builder, formatDuration(duration), FormatBytes(contextBytes)))
+
 	return nil
 }
 
 func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContext, buildxBin, dockerBin, root, fullImageName, actualImagePrefix, relDockerfilePath string, naming ImageNaming, platforms []string) error {
-	scope.Log().Info("building image with docker buildx", "image", fullImageName, "root", root)
+	start := time.Now()
 
 	metaFile := filepath.Join(os.TempDir(), fmt.Sprintf("buildx-meta-%d.json", time.Now().UnixNano()))
 	defer func() {
@@ -338,7 +355,83 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContex
 		}
 	}
 
+	duration := time.Since(start)
+	scope.Log().Info(fmt.Sprintf("built %s with docker in %s", t.ImageName, formatDuration(duration)))
+
 	return nil
+}
+
+// ParseContextBytesFromRawJSON parses a buildctl --progress=rawjson stream
+// and returns the total build-context transfer bytes sent from the workstation
+// (sum of the "transferring context" vertex statuses).
+func ParseContextBytesFromRawJSON(r io.Reader) (int64, error) {
+	scanner := bufio.NewScanner(r)
+	buf := make([]byte, 64*1024)
+	scanner.Buffer(buf, 10*1024*1024)
+
+	currents := make(map[string]int64)
+
+	type vertexStatus struct {
+		ID      string `json:"id"`
+		Vertex  string `json:"vertex"`
+		Name    string `json:"name"`
+		Current int64  `json:"current"`
+	}
+
+	type solveStatus struct {
+		Statuses []vertexStatus `json:"statuses"`
+	}
+
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 || line[0] != '{' {
+			continue
+		}
+		var record solveStatus
+		if err := json.Unmarshal(line, &record); err != nil {
+			continue
+		}
+		for _, s := range record.Statuses {
+			if strings.HasPrefix(strings.TrimSpace(s.ID), "transferring context") || strings.HasPrefix(strings.TrimSpace(s.Name), "transferring context") {
+				key := s.Vertex + "/" + s.ID
+				if s.Current > currents[key] {
+					currents[key] = s.Current
+				}
+			}
+		}
+	}
+
+	var total int64
+	for _, b := range currents {
+		total += b
+	}
+	return total, scanner.Err()
+}
+
+// FormatBytes formats a byte count into decimal units (B, kB, MB, GB),
+// matching BuildKit's progress display.
+func FormatBytes(b int64) string {
+	if b < 0 {
+		b = 0
+	}
+	if b < 1000 {
+		return fmt.Sprintf("%dB", b)
+	}
+	bf := float64(b)
+	if bf < 1000*1000 {
+		return fmt.Sprintf("%.2fkB", bf/1000)
+	}
+	if bf < 1000*1000*1000 {
+		return fmt.Sprintf("%.2fMB", bf/(1000*1000))
+	}
+	return fmt.Sprintf("%.2fGB", bf/(1000*1000*1000))
+}
+
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	}
+	return d.Round(100 * time.Millisecond).String()
 }
 
 type buildMetadataFile struct {
