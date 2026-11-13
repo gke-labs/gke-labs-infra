@@ -81,6 +81,7 @@ func TestLoadImages_NoNodesFound(t *testing.T) {
 
 func TestLoadImages_Success(t *testing.T) {
 	tempDir := t.TempDir()
+	t.Setenv("PATH", tempDir+":"+os.Getenv("PATH"))
 	logFile := filepath.Join(tempDir, "docker.log")
 
 	fakeKind := filepath.Join(tempDir, "kind")

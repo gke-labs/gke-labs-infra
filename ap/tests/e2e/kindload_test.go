@@ -28,9 +28,9 @@ func TestKindLoad_PulledMultiPlatform(t *testing.T) {
 		t.Skip("RUN_E2E not set, skipping e2e test")
 	}
 
-	h := e2e.NewHarness(t, e2e.Options{ClusterName: "ap-kindload-e2e"})
+	h := e2e.NewHarness(t, e2e.Options{ClusterName: "ap-deploy-kind-e2e"})
 
-	image := "alpine:latest"
+	image := "alpine:3.22"
 	h.RunCmd("docker", "pull", image)
 
 	h.KindLoad(image)

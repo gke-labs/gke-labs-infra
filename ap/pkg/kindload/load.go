@@ -22,7 +22,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -41,7 +40,7 @@ var DefaultBackoffs = []time.Duration{
 	32 * time.Second,
 }
 
-// KindLoadRetryPolicy defines the default retry policy used when retrying kind load docker-image.
+// KindLoadRetryPolicy defines the default retry policy used when retrying loading images into kind.
 var KindLoadRetryPolicy tasks.RetryPolicy = tasks.Backoff(DefaultBackoffs)
 
 // LoadImages loads docker images into the specified kind cluster using the given kind binary.
@@ -54,16 +53,8 @@ func LoadImages(ctx context.Context, kindBin, cluster string, images []string, s
 	}
 
 	env := fileutils.PrependPath(os.Environ(), filepath.Dir(kindBin))
-	binaryName := "docker"
-	if runtime.GOOS == "windows" {
-		binaryName = "docker.exe"
-	}
-	dockerBin := binaryName
-	if localDocker := filepath.Join(filepath.Dir(kindBin), binaryName); fileutils.IsExecutable(localDocker) {
-		dockerBin = localDocker
-	} else if resolvedDocker, err := toolDocker.EnsureDocker(ctx, ""); err == nil && resolvedDocker != "" {
-		dockerBin = resolvedDocker
-		env = fileutils.PrependPath(env, filepath.Dir(resolvedDocker))
+	if dockerBin, err := toolDocker.EnsureDocker(ctx, ""); err == nil && dockerBin != "" {
+		env = fileutils.PrependPath(env, filepath.Dir(dockerBin))
 	}
 
 	args := []string{"get", "nodes"}
@@ -108,7 +99,7 @@ func LoadImages(ctx context.Context, kindBin, cluster string, images []string, s
 
 	archivePath := filepath.Join(tempDir, "images.tar")
 	saveArgs := append([]string{"save", "-o", archivePath}, images...)
-	saveCmd := exec.CommandContext(ctx, dockerBin, saveArgs...)
+	saveCmd := exec.CommandContext(ctx, "docker", saveArgs...)
 	saveCmd.Env = env
 	saveCmd.Stdout = stdout
 	saveCmd.Stderr = stderr
@@ -117,14 +108,14 @@ func LoadImages(ctx context.Context, kindBin, cluster string, images []string, s
 	}
 
 	for _, node := range nodes {
-		if err := importImageArchive(ctx, dockerBin, node, archivePath, env, stdout, stderr); err != nil {
+		if err := importImageArchive(ctx, node, archivePath, env, stdout, stderr); err != nil {
 			return fmt.Errorf("failed to load image(s) into kind cluster %q: %w", cluster, err)
 		}
 	}
 	return nil
 }
 
-func importImageArchive(ctx context.Context, dockerBin, node, archivePath string, env []string, stdout, stderr io.Writer) (err error) {
+func importImageArchive(ctx context.Context, node, archivePath string, env []string, stdout, stderr io.Writer) (err error) {
 	archiveFile, openErr := os.Open(archivePath)
 	if openErr != nil {
 		return fmt.Errorf("failed to open image archive: %w", openErr)
@@ -135,7 +126,7 @@ func importImageArchive(ctx context.Context, dockerBin, node, archivePath string
 		}
 	}()
 
-	importCmd := exec.CommandContext(ctx, dockerBin, "exec", "--privileged", "-i", node, "ctr", "--namespace=k8s.io", "images", "import", "--digests", "-")
+	importCmd := exec.CommandContext(ctx, "docker", "exec", "--privileged", "-i", node, "ctr", "--namespace=k8s.io", "images", "import", "--digests", "-")
 	importCmd.Env = env
 	importCmd.Stdin = archiveFile
 	importCmd.Stdout = stdout

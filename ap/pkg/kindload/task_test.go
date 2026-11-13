@@ -158,6 +158,7 @@ func TestKindLoadTask_Run(t *testing.T) {
 
 	t.Run("executes kind load with image refs", func(t *testing.T) {
 		tempDir := t.TempDir()
+		t.Setenv("PATH", tempDir+":"+os.Getenv("PATH"))
 		argsLog := filepath.Join(tempDir, "args.log")
 		dockerLog := filepath.Join(tempDir, "docker.log")
 		fakeBin := filepath.Join(tempDir, "kind")
