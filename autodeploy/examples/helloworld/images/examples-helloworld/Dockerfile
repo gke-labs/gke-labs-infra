@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM --platform=$BUILDPLATFORM golang:1.27.3-trixie AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.4-trixie AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -26,7 +26,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /usr/local/bin/helloworld .
 
-FROM golang:1.27.3-trixie
+FROM golang:1.27.4-trixie
 COPY --from=builder /usr/local/bin/helloworld /usr/local/bin/helloworld
 
 WORKDIR /workspace

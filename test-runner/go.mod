@@ -2,7 +2,7 @@ module github.com/gke-labs/gke-labs-infra/test-runner
 
 go 1.27.2
 
-toolchain go1.27.3
+toolchain go1.27.4
 
 require (
 	github.com/google/go-github/v81 v81.0.0

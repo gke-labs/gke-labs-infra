@@ -2,7 +2,7 @@ module github.com/gke-labs/gke-labs-infra/autodeploy
 
 go 1.27.2
 
-toolchain go1.27.3
+toolchain go1.27.4
 
 require (
 	github.com/gke-labs/gke-labs-infra v0.0.0-00010101000000-000000000000

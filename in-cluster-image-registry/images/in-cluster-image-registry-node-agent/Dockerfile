@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM --platform=$BUILDPLATFORM golang:1.27.3-trixie AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.4-trixie AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
