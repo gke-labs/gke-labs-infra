@@ -177,6 +177,7 @@ func (h *Harness) setupNamespace() {
 	h.namespace = fmt.Sprintf("test-%d", rand.Intn(1000000))
 	h.t.Logf("Creating namespace %s", h.namespace)
 	h.runCmd(h.KubectlCommand(), "create", "namespace", h.namespace)
+	h.runCmd(h.KubectlCommand(), "wait", "--for=create", "serviceaccount/default", "-n", h.namespace, "--timeout=60s")
 
 	if !h.skipCleanup {
 		h.t.Cleanup(func() {

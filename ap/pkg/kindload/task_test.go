@@ -158,15 +158,38 @@ func TestKindLoadTask_Run(t *testing.T) {
 
 	t.Run("executes kind load with image refs", func(t *testing.T) {
 		tempDir := t.TempDir()
+		t.Setenv("PATH", tempDir+":"+os.Getenv("PATH"))
 		argsLog := filepath.Join(tempDir, "args.log")
+		dockerLog := filepath.Join(tempDir, "docker.log")
 		fakeBin := filepath.Join(tempDir, "kind")
+		fakeDocker := filepath.Join(tempDir, "docker")
 
 		script := fmt.Sprintf(`#!/bin/sh
-echo "$@" > %q
+echo "$@" >> %q
+if [ "$1" = "get" ] && [ "$2" = "nodes" ]; then
+    echo "demo-node"
+    exit 0
+fi
 exit 0
 `, argsLog)
 
 		if err := os.WriteFile(fakeBin, []byte(script), 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		dockerScript := fmt.Sprintf(`#!/bin/sh
+echo "$@" >> %q
+if [ "$1" = "save" ]; then
+    touch "$3"
+    exit 0
+fi
+if [ "$1" = "exec" ]; then
+    exit 0
+fi
+exit 1
+`, dockerLog)
+
+		if err := os.WriteFile(fakeDocker, []byte(dockerScript), 0755); err != nil {
 			t.Fatal(err)
 		}
 
@@ -195,14 +218,27 @@ exit 0
 
 		gotArgs := strings.Fields(string(content))
 		expectedArgs := []string{
-			"load", "docker-image",
-			"images.local/app1:v1.0",
-			"images.local/app2:latest-1234567890ab",
+			"get", "nodes",
 			"--name", "demo-cluster",
 		}
 
 		if !reflect.DeepEqual(gotArgs, expectedArgs) {
 			t.Errorf("args = %v, want %v", gotArgs, expectedArgs)
+		}
+
+		dockerContent, err := os.ReadFile(dockerLog)
+		if err != nil {
+			t.Fatalf("failed to read docker log: %v", err)
+		}
+		dockerLines := strings.Split(strings.TrimSpace(string(dockerContent)), "\n")
+		if len(dockerLines) != 2 {
+			t.Fatalf("expected 2 docker commands logged, got %d:\n%s", len(dockerLines), string(dockerContent))
+		}
+		if !strings.HasPrefix(dockerLines[0], "save -o ") || !strings.Contains(dockerLines[0], "images.local/app1:v1.0 images.local/app2:latest-1234567890ab") {
+			t.Errorf("expected docker save with both images, got: %q", dockerLines[0])
+		}
+		if !strings.Contains(dockerLines[1], "exec --privileged -i demo-node ctr --namespace=k8s.io images import --digests -") {
+			t.Errorf("expected docker exec ctr import into demo-node, got: %q", dockerLines[1])
 		}
 	})
 }
