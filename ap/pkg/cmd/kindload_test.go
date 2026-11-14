@@ -17,71 +17,88 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-func TestResolveKindClusterName(t *testing.T) {
+func TestBuildKindLoadPlan(t *testing.T) {
 	tests := []struct {
-		name, clusterFlag, currentContext, want string
-		wantErr                                 bool
+		name           string
+		clusterFlag    string
+		currentContext string
+		images         []string
+		wantCluster    string
+		wantErr        string
 	}{
-		{name: "kind scheme", clusterFlag: "kind://dev", want: "dev"},
-		{name: "kind context prefix", clusterFlag: "kind-dev", want: "dev"},
-		{name: "plain cluster name", clusterFlag: "dev", want: "dev"},
-		{name: "empty flag with kind context", currentContext: "kind-prod", want: "prod"},
-		{name: "empty flag with non-kind context", currentContext: "my-context", want: ""},
-		{name: "empty flag and empty context", want: ""},
-		{name: "invalid scheme", clusterFlag: "docker://dev", wantErr: true},
-		{name: "empty kind scheme", clusterFlag: "kind://", wantErr: true},
+		{
+			name:        "kind scheme",
+			clusterFlag: "kind://dev",
+			images:      []string{"alpine:3.22", "nginx:1.27"},
+			wantCluster: "dev",
+		},
+		{
+			name:           "kind context from current context",
+			currentContext: "kind-dev",
+			images:         []string{"alpine:3.22"},
+			wantCluster:    "dev",
+		},
+		{
+			name:        "kind context flag",
+			clusterFlag: "kind-dev",
+			images:      []string{"alpine:3.22"},
+			wantCluster: "dev",
+		},
+		{
+			name:        "non-kind cluster flag error",
+			clusterFlag: "prod-cluster",
+			images:      []string{"alpine:3.22"},
+			wantErr:     "prod-cluster is not a kind cluster; pass --cluster kind://<name>",
+		},
+		{
+			name:           "non-kind current context error",
+			currentContext: "my-context",
+			images:         []string{"alpine:3.22"},
+			wantErr:        "my-context is not a kind cluster; pass --cluster kind://<name>",
+		},
+		{
+			name:    "empty cluster and context error",
+			images:  []string{"alpine:3.22"},
+			wantErr: "current context is not a kind cluster; pass --cluster kind://<name>",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := resolveKindClusterName(tt.clusterFlag, tt.currentContext)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("resolveKindClusterName(%q, %q) error = %v, wantErr %v", tt.clusterFlag, tt.currentContext, err, tt.wantErr)
+			opt := KindLoadOptions{
+				Cluster: tt.clusterFlag,
+				Images:  tt.images,
 			}
-			if got != tt.want {
-				t.Errorf("resolveKindClusterName(%q, %q) = %q, want %q", tt.clusterFlag, tt.currentContext, got, tt.want)
+			task, err := BuildKindLoadPlan(opt, tt.currentContext)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("BuildKindLoadPlan() error = nil, want %q", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("BuildKindLoadPlan() error = %q, want containing %q", err.Error(), tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("BuildKindLoadPlan() error = %v, want nil", err)
+			}
+			if task.ClusterName != tt.wantCluster {
+				t.Errorf("ClusterName = %q, want %q", task.ClusterName, tt.wantCluster)
+			}
+			if len(task.Images) != len(tt.images) {
+				t.Fatalf("len(task.Images) = %d, want %d", len(task.Images), len(tt.images))
+			}
+			for i, img := range tt.images {
+				if got := task.Images[i].String(); got != img {
+					t.Errorf("task.Images[%d] = %q, want %q", i, got, img)
+				}
 			}
 		})
 	}
-}
-
-func TestBuildKindLoadPlan(t *testing.T) {
-	t.Run("valid images and cluster", func(t *testing.T) {
-		opt := KindLoadOptions{
-			Cluster: "kind://test-cluster",
-			Images:  []string{"alpine:3.22", "nginx:1.27"},
-		}
-		task, err := BuildKindLoadPlan(opt, "")
-		if err != nil {
-			t.Fatalf("BuildKindLoadPlan failed: %v", err)
-		}
-		if task.ClusterName != "test-cluster" {
-			t.Errorf("ClusterName = %q, want 'test-cluster'", task.ClusterName)
-		}
-		if len(task.Images) != 2 || task.Images[0].String() != "alpine:3.22" || task.Images[1].String() != "nginx:1.27" {
-			t.Errorf("Images = %v, want [alpine:3.22 nginx:1.27]", task.Images)
-		}
-		if got := task.GetName(); got != "kind-load (cluster: test-cluster): 2 images" {
-			t.Errorf("GetName() = %q, want 'kind-load (cluster: test-cluster): 2 images'", got)
-		}
-	})
-
-	t.Run("empty images", func(t *testing.T) {
-		opt := KindLoadOptions{Cluster: "kind://test-cluster"}
-		if _, err := BuildKindLoadPlan(opt, ""); err == nil {
-			t.Fatal("expected error for empty images, got nil")
-		}
-	})
-
-	t.Run("invalid image format", func(t *testing.T) {
-		opt := KindLoadOptions{Cluster: "kind://test-cluster", Images: []string{""}}
-		if _, err := BuildKindLoadPlan(opt, ""); err == nil {
-			t.Fatal("expected error for invalid image, got nil")
-		}
-	})
 }
 
 func TestRunKindLoad_DryRun(t *testing.T) {

@@ -38,7 +38,7 @@ func TestKindLoad_PulledMultiPlatform(t *testing.T) {
 	apBin := filepath.Join(t.TempDir(), "ap")
 	h.RunCmd("go", "build", "-o", apBin, filepath.Join(repoRoot, "ap"))
 
-	h.RunCmd(apBin, "kind-load", "--cluster", "ap-deploy-kind-e2e", image)
+	h.RunCmd(apBin, "kind-load", "--cluster", "kind://ap-deploy-kind-e2e", image)
 
 	podManifest := fmt.Sprintf(`
 apiVersion: v1

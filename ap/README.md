@@ -74,10 +74,10 @@ Pass `--applyset=[RESOURCE[.GROUP]/]NAME` to track deployments using the KEP-365
 The `ap kind-load` command loads one or more container images from the local Docker daemon into a kind cluster:
 
 ```bash
-ap kind-load --cluster my-cluster otel/ebpf-instrument:v0.10.0 alpine:3.22
+ap kind-load --cluster kind://my-cluster otel/ebpf-instrument:v0.10.0 alpine:3.22
 ```
 
-It loads built or pulled images using the same direct containerd import as `ap deploy`, avoiding the upstream kind issue with multi-platform images on containerd image stores (Docker 29+). Target a specific cluster with `--cluster <name>` or `--cluster kind://<name>`. When omitted, `ap kind-load` targets the current kubeconfig context if it is a kind cluster, or the default kind cluster.
+It loads built or pulled images using the same direct containerd import as `ap deploy`, avoiding the upstream kind issue with multi-platform images on containerd image stores (Docker 29+). Target a specific cluster with `--cluster kind://<name>` or a kubeconfig context. When omitted, `ap kind-load` targets the current kubeconfig context if it is a kind cluster.
 
 ## End-to-End Testing (e2e)
 

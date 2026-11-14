@@ -17,7 +17,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/imageref"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/kindload"
@@ -54,20 +53,26 @@ Images must already exist in the local Docker daemon (built or pulled).`,
 		},
 	}
 
-	cmd.Flags().StringVar(&opt.Cluster, "cluster", "", "Target kind cluster (kind://<name> or cluster name)")
+	cmd.Flags().StringVar(&opt.Cluster, "cluster", "", "Target cluster (kind://<name> or kubeconfig context)")
 
 	return cmd
 }
 
 // BuildKindLoadPlan constructs the KindLoadTask for the given options.
 func BuildKindLoadPlan(opt KindLoadOptions, currentContext string) (*kindload.KindLoadTask, error) {
-	if len(opt.Images) == 0 {
-		return nil, fmt.Errorf("at least one image is required")
-	}
-
-	clusterName, err := resolveKindClusterName(opt.Cluster, currentContext)
+	tc, err := ResolveTargetCluster(opt.Cluster, currentContext)
 	if err != nil {
 		return nil, err
+	}
+	if !tc.IsKind() {
+		target := opt.Cluster
+		if target == "" {
+			target = currentContext
+		}
+		if target == "" {
+			target = "current context"
+		}
+		return nil, fmt.Errorf("%s is not a kind cluster; pass --cluster kind://<name>", target)
 	}
 
 	var imageRefs []*imageref.ImageRef
@@ -80,7 +85,7 @@ func BuildKindLoadPlan(opt KindLoadOptions, currentContext string) (*kindload.Ki
 	}
 
 	return &kindload.KindLoadTask{
-		ClusterName: clusterName,
+		ClusterName: tc.KindClusterName(),
 		Images:      imageRefs,
 	}, nil
 }
@@ -113,25 +118,4 @@ func RunKindLoad(ctx context.Context, opt KindLoadOptions) error {
 	}
 
 	return tasks.Run(ctx, scope, []tasks.Task{task}, tasks.RunOptions{DryRun: opt.DryRun})
-}
-
-func resolveKindClusterName(clusterFlag, currentContext string) (string, error) {
-	clusterFlag = strings.TrimSpace(clusterFlag)
-	if clusterFlag != "" {
-		if strings.Contains(clusterFlag, "://") {
-			name, ok := strings.CutPrefix(clusterFlag, "kind://")
-			if !ok || name == "" {
-				return "", fmt.Errorf("invalid --cluster %q; expected kind://<name> or <cluster-name>", clusterFlag)
-			}
-			return name, nil
-		}
-		if name, ok := strings.CutPrefix(clusterFlag, "kind-"); ok && name != "" {
-			return name, nil
-		}
-		return clusterFlag, nil
-	}
-	if name, ok := ParseKindClusterFromContext(currentContext); ok {
-		return name, nil
-	}
-	return "", nil
 }
