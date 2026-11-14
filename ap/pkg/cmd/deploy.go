@@ -61,7 +61,7 @@ func BuildDeployCommand(rootOpt *RootOptions) *cobra.Command {
 		Short: "Deploy artifacts",
 		Long: `Deploy artifacts by building container images and applying Kubernetes manifests.
 
-Positional path arguments select either a directory to apply all manifests found under any k8s/ directory beneath it, or a single manifest file to apply only that file and build only its referenced images.
+Positional path arguments select either a directory to apply all manifests found under any k8s/ directory beneath it, a single manifest file, or a kustomization.yaml file to build with kustomize and apply.
 
 Flags configure the target cluster (--cluster), target namespace (-n, --namespace), remote buildkit daemon (--buildkit-host), and whether to skip pushing images (--skip-push).`,
 		Args: cobra.ArbitraryArgs,
@@ -181,6 +181,9 @@ func resolveDeployTargets(r *sourcetree.SourceTree, repoRoot, currentDir string,
 
 func selectManifests(r *sourcetree.SourceTree, dir string, whole bool, filters []targetFilter) ([]string, error) {
 	allManifests := r.Under(dir).FindManifests()
+	if len(allManifests) == 0 && r.FileExists(filepath.Join(dir, "kustomization.yaml")) {
+		allManifests = []string{filepath.Join(dir, "kustomization.yaml")}
+	}
 	if whole || len(filters) == 0 {
 		return allManifests, nil
 	}
@@ -196,6 +199,25 @@ func selectManifests(r *sourcetree.SourceTree, dir string, whole bool, filters [
 				if !seenManifest[cleanM] {
 					seenManifest[cleanM] = true
 					selectedManifests = append(selectedManifests, cleanM)
+				}
+			}
+		}
+		if !matched {
+			if filepath.Base(f.path) == "kustomization.yaml" && r.FileExists(f.path) {
+				cleanM := filepath.Clean(f.path)
+				matched = true
+				if !seenManifest[cleanM] {
+					seenManifest[cleanM] = true
+					selectedManifests = append(selectedManifests, cleanM)
+				}
+			} else if r.DirExists(f.path) {
+				kPath := filepath.Clean(filepath.Join(f.path, "kustomization.yaml"))
+				if r.FileExists(kPath) {
+					matched = true
+					if !seenManifest[kPath] {
+						seenManifest[kPath] = true
+						selectedManifests = append(selectedManifests, kPath)
+					}
 				}
 			}
 		}

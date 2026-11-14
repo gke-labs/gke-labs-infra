@@ -1026,11 +1026,26 @@ func (r *SourceTree) FindManifests() []string {
 
 		ext := filepath.Ext(f.Name)
 		if ext == ".yaml" || ext == ".yml" {
+			if f.Name == "kustomization.yaml" {
+				continue
+			}
 			manifests = append(manifests, f.Path)
 		}
 	}
 	sort.Strings(manifests)
 	return manifests
+}
+
+// FindKustomizations returns all kustomization.yaml paths that belong to this view.
+func (r *SourceTree) FindKustomizations() []string {
+	var kustomizations []string
+	for _, f := range r.files {
+		if f.Name == "kustomization.yaml" {
+			kustomizations = append(kustomizations, f.Path)
+		}
+	}
+	sort.Strings(kustomizations)
+	return kustomizations
 }
 
 // Walk walks the directory tree rooted at root over the in-memory repo tree.

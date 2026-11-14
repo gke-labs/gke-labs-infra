@@ -1815,3 +1815,260 @@ func TestDeploy_DryRun_ResolvedReferences(t *testing.T) {
 		}
 	})
 }
+
+func TestDeploy_Kustomize(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Scaffolding: .git and .ap
+	if err := os.MkdirAll(filepath.Join(tempDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir, ".ap"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, ".ap", "ap.yaml"), []byte("imagePrefix: images.local\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create cert-manager directory with kustomization.yaml
+	certDir := filepath.Join(tempDir, "cert-manager")
+	if err := os.MkdirAll(certDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	certKust := `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - cert-manager.yaml
+`
+	certYaml := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cert-manager
+spec:
+  template:
+    spec:
+      containers:
+      - name: cert-manager
+        image: quay.io/jetstack/cert-manager-controller:v1.17.0
+`
+	if err := os.WriteFile(filepath.Join(certDir, "kustomization.yaml"), []byte(certKust), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(certDir, "cert-manager.yaml"), []byte(certYaml), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create app directory with kustomization.yaml referencing a local placeholder image
+	if err := os.MkdirAll(filepath.Join(tempDir, "images", "my-app"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, "images", "my-app", "Dockerfile"), []byte("FROM alpine\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	appDir := filepath.Join(tempDir, "app")
+	if err := os.MkdirAll(appDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	appKust := `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - app.yaml
+`
+	appYaml := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+spec:
+  template:
+    spec:
+      containers:
+      - name: my-app
+        image: my-app
+`
+	if err := os.WriteFile(filepath.Join(appDir, "kustomization.yaml"), []byte(appKust), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "app.yaml"), []byte(appYaml), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Direct invocation: ap deploy cert-manager/kustomization.yaml
+	t.Run("direct kustomization file argument", func(t *testing.T) {
+		opt := DeployOptions{
+			RootOptions: &RootOptions{
+				RepoRoot: tempDir,
+				Dir:      tempDir,
+				DryRun:   true,
+			},
+		}
+
+		if err := opt.Resolve([]string{"cert-manager/kustomization.yaml"}); err != nil {
+			t.Fatalf("opt.Resolve failed: %v", err)
+		}
+		if len(opt.plans) != 1 {
+			t.Fatalf("expected 1 plan, got %d", len(opt.plans))
+		}
+		expectedManifest := filepath.Join(tempDir, "cert-manager", "kustomization.yaml")
+		if !reflect.DeepEqual(opt.plans[0].manifests, []string{expectedManifest}) {
+			t.Errorf("expected manifests %v, got %v", []string{expectedManifest}, opt.plans[0].manifests)
+		}
+		if len(opt.plans[0].imageNames) != 0 {
+			t.Errorf("expected 0 imageNames, got %v", opt.plans[0].imageNames)
+		}
+
+		out := captureStdout(t, func() {
+			if err := RunDeploy(t.Context(), opt); err != nil {
+				t.Fatalf("RunDeploy failed: %v", err)
+			}
+		})
+
+		if !strings.Contains(out, "kubectl-apply-kustomization.yaml") {
+			t.Errorf("expected dry-run output to contain 'kubectl-apply-kustomization.yaml', got:\n%s", out)
+		}
+	})
+
+	// 2. Directory argument: ap deploy cert-manager
+	t.Run("directory containing kustomization.yaml", func(t *testing.T) {
+		opt := DeployOptions{
+			RootOptions: &RootOptions{
+				RepoRoot: tempDir,
+				Dir:      tempDir,
+				DryRun:   true,
+			},
+		}
+
+		if err := opt.Resolve([]string{"cert-manager"}); err != nil {
+			t.Fatalf("opt.Resolve failed: %v", err)
+		}
+		if len(opt.plans) != 1 {
+			t.Fatalf("expected 1 plan, got %d", len(opt.plans))
+		}
+		expectedManifest := filepath.Join(tempDir, "cert-manager", "kustomization.yaml")
+		if !reflect.DeepEqual(opt.plans[0].manifests, []string{expectedManifest}) {
+			t.Errorf("expected manifests %v, got %v", []string{expectedManifest}, opt.plans[0].manifests)
+		}
+	})
+
+	// 3. With ApplySet flag: ap deploy --applyset configmap/cert-manager-parent cert-manager/kustomization.yaml
+	t.Run("kustomization with applyset", func(t *testing.T) {
+		opt := DeployOptions{
+			RootOptions: &RootOptions{
+				RepoRoot: tempDir,
+				Dir:      tempDir,
+				DryRun:   true,
+			},
+			ApplySet: "configmap/cert-manager-parent",
+		}
+
+		if err := opt.Resolve([]string{"cert-manager/kustomization.yaml"}); err != nil {
+			t.Fatalf("opt.Resolve failed: %v", err)
+		}
+
+		r, err := opt.GetSourceTree()
+		if err != nil {
+			t.Fatalf("GetSourceTree failed: %v", err)
+		}
+		naming := images.ImageNaming{Prefix: "images.local", Tag: "latest"}
+
+		planTasks, err := BuildDeployPlan(opt, r, "", naming)
+		if err != nil {
+			t.Fatalf("BuildDeployPlan failed: %v", err)
+		}
+
+		// Verify applyset parent verify and update tasks are present in plan
+		var hasVerifyParent, hasUpdateParent, hasApplyKust bool
+		for _, task := range planTasks {
+			switch task.(type) {
+			case *k8s.VerifyApplySetParentTask:
+				hasVerifyParent = true
+			case *k8s.UpdateApplySetParentTask:
+				hasUpdateParent = true
+			}
+			if group, ok := task.(*tasks.Group); ok {
+				for _, child := range group.Tasks {
+					if dg, ok := child.(*tasks.Group); ok && dg.Name == "deploy-k8s" {
+						for _, dt := range dg.Tasks {
+							if kat, ok := dt.(*k8s.KubectlApplyTask); ok && filepath.Base(kat.ManifestPath) == "kustomization.yaml" {
+								hasApplyKust = true
+								if kat.ApplySetID == "" {
+									t.Errorf("expected ApplySetID to be set on KubectlApplyTask")
+								}
+								if kat.Membership == nil {
+									t.Errorf("expected Membership to be set on KubectlApplyTask")
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		if !hasVerifyParent {
+			t.Errorf("expected VerifyApplySetParentTask in plan tasks")
+		}
+		if !hasUpdateParent {
+			t.Errorf("expected UpdateApplySetParentTask in plan tasks")
+		}
+		if !hasApplyKust {
+			t.Errorf("expected KubectlApplyTask for kustomization.yaml in plan tasks")
+		}
+	})
+
+	// 4. Kustomization with referenced local image: ap deploy app/kustomization.yaml
+	t.Run("kustomization with local image build", func(t *testing.T) {
+		opt := DeployOptions{
+			RootOptions: &RootOptions{
+				RepoRoot: tempDir,
+				Dir:      tempDir,
+				DryRun:   true,
+			},
+		}
+
+		if err := opt.Resolve([]string{"app/kustomization.yaml"}); err != nil {
+			t.Fatalf("opt.Resolve failed: %v", err)
+		}
+		if len(opt.plans) != 1 {
+			t.Fatalf("expected 1 plan, got %d", len(opt.plans))
+		}
+		if !reflect.DeepEqual(opt.plans[0].imageNames, []string{"my-app"}) {
+			t.Errorf("expected imageNames [my-app], got %v", opt.plans[0].imageNames)
+		}
+
+		r, err := opt.GetSourceTree()
+		if err != nil {
+			t.Fatalf("GetSourceTree failed: %v", err)
+		}
+		naming := images.ImageNaming{Prefix: "images.local", Tag: "latest"}
+
+		planTasks, err := BuildDeployPlan(opt, r, "", naming)
+		if err != nil {
+			t.Fatalf("BuildDeployPlan failed: %v", err)
+		}
+
+		builtImages, appliedManifests := extractDeployTasks(planTasks)
+		if !reflect.DeepEqual(builtImages, []string{"my-app"}) {
+			t.Errorf("expected builtImages [my-app], got %v", builtImages)
+		}
+		expectedAppManifest := filepath.Join(tempDir, "app", "kustomization.yaml")
+		if !reflect.DeepEqual(appliedManifests, []string{expectedAppManifest}) {
+			t.Errorf("expected appliedManifests [%s], got %v", expectedAppManifest, appliedManifests)
+		}
+	})
+
+	// 5. Non-existent kustomization target fails with expected error
+	t.Run("non-existent kustomization target", func(t *testing.T) {
+		opt := DeployOptions{
+			RootOptions: &RootOptions{
+				RepoRoot: tempDir,
+				Dir:      tempDir,
+			},
+		}
+		err := opt.Resolve([]string{"nonexistent/kustomization.yaml"})
+		if err == nil {
+			t.Fatalf("expected error for non-existent target, got nil")
+		}
+		if !strings.Contains(err.Error(), "does not exist") {
+			t.Errorf("expected error to mention 'does not exist', got: %v", err)
+		}
+	})
+}

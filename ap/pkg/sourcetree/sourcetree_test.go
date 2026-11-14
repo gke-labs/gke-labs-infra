@@ -607,3 +607,52 @@ func TestRepo_Track(t *testing.T) {
 		t.Errorf("expected valid hash for tidied go.mod, got err=%v", err)
 	}
 }
+
+func TestFindKustomizations(t *testing.T) {
+	ResetCache()
+	dir := t.TempDir()
+
+	files := map[string]string{
+		".git/HEAD":                       "ref: refs/heads/main\n",
+		".ap/ap.yaml":                     "",
+		"k8s/manifest.yaml":               "apiVersion: v1\nkind: ConfigMap\n",
+		"k8s/kustomization.yaml":          "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n",
+		"cert-manager/kustomization.yaml": "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n",
+		"sub/kustomization.yaml":          "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n",
+		"sub/deploy.yaml":                 "apiVersion: apps/v1\nkind: Deployment\n",
+	}
+
+	for rel, content := range files {
+		full := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+			t.Fatalf("MkdirAll failed: %v", err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0644); err != nil {
+			t.Fatalf("WriteFile failed: %v", err)
+		}
+	}
+
+	r, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+
+	kusts := r.FindKustomizations()
+	expected := []string{
+		filepath.Join(dir, "cert-manager", "kustomization.yaml"),
+		filepath.Join(dir, "k8s", "kustomization.yaml"),
+		filepath.Join(dir, "sub", "kustomization.yaml"),
+	}
+	if !reflect.DeepEqual(kusts, expected) {
+		t.Errorf("FindKustomizations() = %v, want %v", kusts, expected)
+	}
+
+	// Verify FindManifests excludes k8s/kustomization.yaml
+	manifests := r.FindManifests()
+	expectedManifests := []string{
+		filepath.Join(dir, "k8s", "manifest.yaml"),
+	}
+	if !reflect.DeepEqual(manifests, expectedManifests) {
+		t.Errorf("FindManifests() = %v, want %v", manifests, expectedManifests)
+	}
+}

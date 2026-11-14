@@ -34,6 +34,8 @@ import (
 	"k8s.io/klog/v2"
 )
 
+var execCommandContext = exec.CommandContext
+
 type imageReferenceMatch struct {
 	start     int
 	end       int
@@ -186,13 +188,90 @@ func FindPlaceholderImages(content string) ([]string, error) {
 	return names, nil
 }
 
-// FindReferencedImagesInFile reads a YAML manifest file and returns referenced placeholder image names.
+// FindReferencedImagesInFile reads a YAML manifest file (or kustomization file) and returns referenced placeholder image names.
 func FindReferencedImagesInFile(path string) ([]string, error) {
+	if filepath.Base(path) == "kustomization.yaml" {
+		return findReferencedImagesInKustomization(path)
+	}
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read %s: %w", path, err)
 	}
 	return FindPlaceholderImages(string(content))
+}
+
+func findReferencedImagesInKustomization(path string) ([]string, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read %s: %w", path, err)
+	}
+
+	seen := make(map[string]bool)
+	var names []string
+
+	direct, err := FindPlaceholderImages(string(content))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse %s: %w", path, err)
+	}
+	for _, img := range direct {
+		if !seen[img] {
+			seen[img] = true
+			names = append(names, img)
+		}
+	}
+
+	var parsed struct {
+		Resources []string `yaml:"resources"`
+	}
+	if err := yaml.Unmarshal(content, &parsed); err != nil {
+		return nil, fmt.Errorf("failed to parse resources in %s: %w", path, err)
+	}
+
+	dir := filepath.Dir(path)
+	for _, res := range parsed.Resources {
+		if strings.Contains(res, "://") {
+			continue
+		}
+		resPath := filepath.Join(dir, res)
+		fi, err := os.Stat(resPath)
+		if err != nil {
+			continue
+		}
+		if fi.IsDir() {
+			nestedK := filepath.Join(resPath, "kustomization.yaml")
+			if _, err := os.Stat(nestedK); err != nil {
+				continue
+			}
+			nestedImgs, err := findReferencedImagesInKustomization(nestedK)
+			if err != nil {
+				return nil, err
+			}
+			for _, img := range nestedImgs {
+				if !seen[img] {
+					seen[img] = true
+					names = append(names, img)
+				}
+			}
+		} else {
+			fileImgs, err := FindReferencedImagesInFile(resPath)
+			if err != nil {
+				return nil, err
+			}
+			for _, img := range fileImgs {
+				if !seen[img] {
+					seen[img] = true
+					names = append(names, img)
+				}
+			}
+		}
+	}
+
+	if len(names) == 0 {
+		return nil, nil
+	}
+
+	sort.Strings(names)
+	return names, nil
 }
 
 func replacePlaceholderImages(content string, naming imageref.ImageNaming) (string, error) {
@@ -436,12 +515,47 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 	if err != nil {
 		return err
 	}
-	klog.Infof("Applying manifest %s", relPath)
 
-	content, err := os.ReadFile(t.ManifestPath)
-	if err != nil {
-		return err
+	var content []byte
+	if filepath.Base(t.ManifestPath) == "kustomization.yaml" {
+		kustomizeBin, err := scope.Tool(ctx, "kustomize")
+		if err != nil {
+			return fmt.Errorf("failed to ensure kustomize: %w", err)
+		}
+		if kustomizeBin == "" {
+			return fmt.Errorf("kustomize binary is required")
+		}
+		klog.Infof("Building kustomization %s", relPath)
+		kustomizeDir := filepath.Dir(t.ManifestPath)
+		if kustomizeDir == "" {
+			kustomizeDir = "."
+		}
+		cmd := execCommandContext(ctx, kustomizeBin, "build", kustomizeDir)
+		cmd.Dir = kustomizeDir
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			errMsg := strings.TrimSpace(stderr.String())
+			if errMsg != "" {
+				return fmt.Errorf("kustomize build failed for %s: %w: %s", relPath, err, errMsg)
+			}
+			return fmt.Errorf("kustomize build failed for %s: %w", relPath, err)
+		}
+		if stderr.Len() > 0 {
+			if _, err := scope.Stderr().Write(stderr.Bytes()); err != nil {
+				klog.V(2).Infof("failed to write kustomize stderr: %v", err)
+			}
+		}
+		content = stdout.Bytes()
+	} else {
+		var err error
+		content, err = os.ReadFile(t.ManifestPath)
+		if err != nil {
+			return err
+		}
 	}
+	klog.Infof("Applying manifest %s", relPath)
 
 	replaced, err := replacePlaceholderImages(string(content), naming)
 	if err != nil {
@@ -512,7 +626,7 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 	var applyArgs []string
 	applyArgs = append(applyArgs, t.Cluster.KubectlArgs()...)
 	applyArgs = append(applyArgs, "apply", "-f", "-")
-	cmd := exec.CommandContext(ctx, kubectlBin, applyArgs...)
+	cmd := execCommandContext(ctx, kubectlBin, applyArgs...)
 	cmd.Stdin = bytes.NewBufferString(replaced)
 	cmd.Stdout = scope.Stdout()
 	cmd.Stderr = scope.Stderr()
@@ -531,7 +645,7 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 			var waitArgs []string
 			waitArgs = append(waitArgs, t.Cluster.KubectlArgs()...)
 			waitArgs = append(waitArgs, "wait", "--for=condition=Established", "customresourcedefinition/"+name, "--timeout=60s")
-			waitCmd := exec.CommandContext(ctx, kubectlBin, waitArgs...)
+			waitCmd := execCommandContext(ctx, kubectlBin, waitArgs...)
 			waitCmd.Stdout = scope.Stdout()
 			waitCmd.Stderr = scope.Stderr()
 			if err := waitCmd.Run(); err != nil {
