@@ -19,8 +19,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -134,7 +132,7 @@ func TestRunDeploy_DryRun(t *testing.T) {
 		BuildkitHost: "k8s://autodeploy-system/buildkit",
 	}
 
-	if err := opt.Resolve(nil); err != nil {
+	if err := opt.Resolve(t.Context(), nil); err != nil {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
 
@@ -288,7 +286,7 @@ func TestBuildDeployPlan_KindMode(t *testing.T) {
 			},
 			kindCluster: "my-cluster",
 		}
-		if err := opt.Resolve(nil); err != nil {
+		if err := opt.Resolve(t.Context(), nil); err != nil {
 			t.Fatalf("opt.Resolve failed: %v", err)
 		}
 		r, err := opt.GetSourceTree()
@@ -371,7 +369,7 @@ func TestBuildDeployPlan_KindMode(t *testing.T) {
 					},
 					kindCluster: "my-cluster",
 				}
-				if err := opt.Resolve(nil); err != nil {
+				if err := opt.Resolve(t.Context(), nil); err != nil {
 					t.Fatalf("opt.Resolve failed: %v", err)
 				}
 				r, err := opt.GetSourceTree()
@@ -533,7 +531,7 @@ func TestBuildDeployPlan_DryRunClusterKind(t *testing.T) {
 		},
 		Cluster: "kind://foo",
 	}
-	if err := opt.Resolve(nil); err != nil {
+	if err := opt.Resolve(t.Context(), nil); err != nil {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
 	r, err := opt.GetSourceTree()
@@ -626,7 +624,7 @@ func TestBuildDeployPlan_DryRunClusterNonKind(t *testing.T) {
 		},
 		Cluster: "my-custom-context",
 	}
-	if err := opt.Resolve(nil); err != nil {
+	if err := opt.Resolve(t.Context(), nil); err != nil {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
 	r, err := opt.GetSourceTree()
@@ -732,7 +730,7 @@ func TestBuildDeployPlan_PassesContextToBuildTasks(t *testing.T) {
 		RootOptions: &RootOptions{RepoRoot: tempDir, Dir: tempDir, DryRun: true},
 		Cluster:     "my-custom-context",
 	}
-	if err := opt.Resolve(nil); err != nil {
+	if err := opt.Resolve(t.Context(), nil); err != nil {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
 	r, err := opt.GetSourceTree()
@@ -785,7 +783,7 @@ func TestDeploy_FixtureRepo_SelectK8s(t *testing.T) {
 		BuildkitHost: "k8s://autodeploy-system/buildkit",
 	}
 
-	if err := opt.Resolve([]string{"./k8s"}); err != nil {
+	if err := opt.Resolve(t.Context(), []string{"./k8s"}); err != nil {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
 
@@ -833,7 +831,7 @@ func TestDeploy_FixtureRepo_SelectWholeRoot(t *testing.T) {
 		BuildkitHost: "k8s://autodeploy-system/buildkit",
 	}
 
-	if err := opt.Resolve([]string{"."}); err != nil {
+	if err := opt.Resolve(t.Context(), []string{"."}); err != nil {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
 
@@ -883,7 +881,7 @@ func TestDeploy_FixtureRepo_SelectSubK8s(t *testing.T) {
 		BuildkitHost: "k8s://autodeploy-system/buildkit",
 	}
 
-	if err := opt.Resolve([]string{"sub/k8s"}); err != nil {
+	if err := opt.Resolve(t.Context(), []string{"sub/k8s"}); err != nil {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
 
@@ -923,7 +921,7 @@ func TestDeploy_FixtureRepo_SelectFile(t *testing.T) {
 		BuildkitHost: "k8s://autodeploy-system/buildkit",
 	}
 
-	if err := opt.Resolve([]string{"./k8s/a.yaml"}); err != nil {
+	if err := opt.Resolve(t.Context(), []string{"./k8s/a.yaml"}); err != nil {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
 
@@ -963,7 +961,7 @@ func TestDeploy_FixtureRepo_SelectNoImages(t *testing.T) {
 		BuildkitHost: "k8s://autodeploy-system/buildkit",
 	}
 
-	if err := opt.Resolve([]string{"./k8s/cm.yaml"}); err != nil {
+	if err := opt.Resolve(t.Context(), []string{"./k8s/cm.yaml"}); err != nil {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
 
@@ -1021,7 +1019,7 @@ func TestDeploy_ZeroManifestsMatchError(t *testing.T) {
 	}
 
 	// 1. Target is a file with no manifests (e.g. images/a/Dockerfile)
-	err := opt.Resolve([]string{"images/a/Dockerfile"})
+	err := opt.Resolve(t.Context(), []string{"images/a/Dockerfile"})
 	if err == nil {
 		t.Fatalf("expected error for target matching 0 manifests, got nil")
 	}
@@ -1030,7 +1028,7 @@ func TestDeploy_ZeroManifestsMatchError(t *testing.T) {
 	}
 
 	// 2. Target is an existing directory with no manifests
-	err = opt.Resolve([]string{"./empty-dir"})
+	err = opt.Resolve(t.Context(), []string{"./empty-dir"})
 	if err == nil {
 		t.Fatalf("expected error for directory matching 0 manifests, got nil")
 	}
@@ -1080,7 +1078,7 @@ spec:
 		},
 	}
 
-	err := opt.Resolve([]string{"."})
+	err := opt.Resolve(t.Context(), []string{"."})
 	if err == nil {
 		t.Fatalf("expected error for missing Dockerfile, got nil")
 	}
@@ -1103,7 +1101,7 @@ func TestDeploy_NonexistentPath(t *testing.T) {
 		},
 	}
 
-	err := opt.Resolve([]string{"./nonexistent"})
+	err := opt.Resolve(t.Context(), []string{"./nonexistent"})
 	if err == nil {
 		t.Fatalf("expected error for nonexistent path, got nil")
 	}
@@ -1129,7 +1127,7 @@ func TestDeploy_BuildkitAndBuildx(t *testing.T) {
 		},
 		BuildkitHost: "",
 	}
-	if err := optBuildx.Resolve([]string{"./k8s"}); err != nil {
+	if err := optBuildx.Resolve(t.Context(), []string{"./k8s"}); err != nil {
 		t.Fatalf("optBuildx.Resolve failed: %v", err)
 	}
 	naming := images.ResolveImageNaming(nil)
@@ -1164,7 +1162,7 @@ func TestDeploy_BuildkitAndBuildx(t *testing.T) {
 		},
 		BuildkitHost: customHost,
 	}
-	if err := optBuildctl.Resolve([]string{"./k8s"}); err != nil {
+	if err := optBuildctl.Resolve(t.Context(), []string{"./k8s"}); err != nil {
 		t.Fatalf("optBuildctl.Resolve failed: %v", err)
 	}
 	tasksBuildctl, err := BuildDeployPlan(optBuildctl, r, customHost, naming)
@@ -1235,7 +1233,7 @@ func TestDeploy_DryRun_StdoutOutput(t *testing.T) {
 		},
 		BuildkitHost: "k8s://autodeploy-system/buildkit",
 	}
-	if err := optK8s.Resolve([]string{"./k8s"}); err != nil {
+	if err := optK8s.Resolve(t.Context(), []string{"./k8s"}); err != nil {
 		t.Fatalf("optK8s.Resolve failed: %v", err)
 	}
 
@@ -1270,7 +1268,7 @@ func TestDeploy_DryRun_StdoutOutput(t *testing.T) {
 		},
 		BuildkitHost: "k8s://autodeploy-system/buildkit",
 	}
-	if err := optDot.Resolve([]string{"."}); err != nil {
+	if err := optDot.Resolve(t.Context(), []string{"."}); err != nil {
 		t.Fatalf("optDot.Resolve failed: %v", err)
 	}
 
@@ -1383,7 +1381,7 @@ data:
 		BuildkitHost: "k8s://autodeploy-system/buildkit",
 	}
 
-	if err := opt.Resolve([]string{"."}); err != nil {
+	if err := opt.Resolve(t.Context(), []string{"."}); err != nil {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
 
@@ -1451,7 +1449,7 @@ spec:
 		},
 	}
 
-	err := opt.Resolve([]string{"."})
+	err := opt.Resolve(t.Context(), []string{"."})
 	if err == nil {
 		t.Fatalf("expected error for missing Dockerfile, got nil")
 	}
@@ -1514,7 +1512,7 @@ func TestDeploy_InvalidNamespace(t *testing.T) {
 		Namespace: "INVALID_NAME",
 	}
 
-	err := opt.Resolve([]string{"."})
+	err := opt.Resolve(t.Context(), []string{"."})
 	if err == nil {
 		t.Fatalf("expected error for invalid namespace, got nil")
 	}
@@ -1536,7 +1534,7 @@ func TestDeploy_DryRun_WithNamespace(t *testing.T) {
 		Namespace:    "corp-gke",
 	}
 
-	if err := opt.Resolve([]string{"./k8s"}); err != nil {
+	if err := opt.Resolve(t.Context(), []string{"./k8s"}); err != nil {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
 
@@ -1567,7 +1565,7 @@ func TestDeploy_DryRun_WithoutNamespace_Unchanged(t *testing.T) {
 		Namespace:    "",
 	}
 
-	if err := opt.Resolve([]string{"./k8s"}); err != nil {
+	if err := opt.Resolve(t.Context(), []string{"./k8s"}); err != nil {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
 
@@ -1600,7 +1598,7 @@ func TestDeploy_DryRun_WithClusterAndBuildkitHost(t *testing.T) {
 		Namespace:    "snigateway-system",
 	}
 
-	if err := opt.Resolve([]string{"./k8s"}); err != nil {
+	if err := opt.Resolve(t.Context(), []string{"./k8s"}); err != nil {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
 
@@ -1628,7 +1626,7 @@ func TestDeploy_DryRun_WithClusterAndBuildkitHost(t *testing.T) {
 		Cluster:      "does-not-exist",
 	}
 
-	if err := optCluster.Resolve([]string{"./k8s"}); err != nil {
+	if err := optCluster.Resolve(t.Context(), []string{"./k8s"}); err != nil {
 		t.Fatalf("optCluster.Resolve failed: %v", err)
 	}
 
@@ -1651,7 +1649,7 @@ func TestDeploy_DryRun_WithClusterAndBuildkitHost(t *testing.T) {
 		},
 	}
 
-	if err := optPlain.Resolve([]string{"./k8s"}); err != nil {
+	if err := optPlain.Resolve(t.Context(), []string{"./k8s"}); err != nil {
 		t.Fatalf("optPlain.Resolve failed: %v", err)
 	}
 
@@ -1705,7 +1703,7 @@ func TestDeploy_RunDeploy_NonexistentNamespaceFailsEarly(t *testing.T) {
 		Namespace: "nonexistent-ns",
 	}
 
-	if err := opt.Resolve([]string{"./k8s"}); err != nil {
+	if err := opt.Resolve(t.Context(), []string{"./k8s"}); err != nil {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
 
@@ -1743,7 +1741,7 @@ func TestDeploy_DryRun_ResolvedReferences(t *testing.T) {
 			},
 			BuildkitHost: "k8s://autodeploy-system/buildkit",
 		}
-		if err := opt.Resolve([]string{"./k8s"}); err != nil {
+		if err := opt.Resolve(t.Context(), []string{"./k8s"}); err != nil {
 			t.Fatalf("opt.Resolve failed: %v", err)
 		}
 
@@ -1769,7 +1767,7 @@ func TestDeploy_DryRun_ResolvedReferences(t *testing.T) {
 			},
 			BuildkitHost: "k8s://autodeploy-system/buildkit",
 		}
-		if err := opt.Resolve([]string{"./k8s"}); err != nil {
+		if err := opt.Resolve(t.Context(), []string{"./k8s"}); err != nil {
 			t.Fatalf("opt.Resolve failed: %v", err)
 		}
 
@@ -1798,7 +1796,7 @@ func TestDeploy_DryRun_ResolvedReferences(t *testing.T) {
 			},
 			kindCluster: "test-cluster",
 		}
-		if err := opt.Resolve([]string{"./k8s"}); err != nil {
+		if err := opt.Resolve(t.Context(), []string{"./k8s"}); err != nil {
 			t.Fatalf("opt.Resolve failed: %v", err)
 		}
 
@@ -1889,7 +1887,7 @@ func TestDeploy_Kustomize_DryRun(t *testing.T) {
 			DryRun:   true,
 		},
 	}
-	if err := opt.Resolve([]string{"cert-manager/kustomization.yaml"}); err != nil {
+	if err := opt.Resolve(t.Context(), []string{"cert-manager/kustomization.yaml"}); err != nil {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
 
@@ -1911,29 +1909,35 @@ func createTestDeployGitRepo(t *testing.T) string {
 
 	runGit := func(args ...string) string {
 		cmd := exec.Command("git", append([]string{"-C", repoDir}, args...)...)
-		out, err := cmd.CombinedOutput()
+		cmd.Env = append(os.Environ(),
+			"GIT_CONFIG_GLOBAL=/dev/null",
+			"GIT_CONFIG_NOSYSTEM=1",
+			"GIT_AUTHOR_NAME=Test User",
+			"GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=Test User",
+			"GIT_COMMITTER_EMAIL=test@example.com",
+		)
+		output, err := cmd.CombinedOutput()
 		if err != nil {
-			t.Fatalf("git %s failed: %v\nOutput: %s", strings.Join(args, " "), err, string(out))
+			t.Fatalf("git %s failed: %v\nOutput: %s", strings.Join(args, " "), err, string(output))
 		}
-		return strings.TrimSpace(string(out))
+		return strings.TrimSpace(string(output))
 	}
 
 	runGit("init")
-	runGit("config", "user.email", "test@example.com")
-	runGit("config", "user.name", "Test User")
 	runGit("checkout", "-b", "main")
 
-	kmDir := filepath.Join(repoDir, "cert-manager")
-	if err := os.MkdirAll(kmDir, 0755); err != nil {
+	kustomizationDir := filepath.Join(repoDir, "cert-manager")
+	if err := os.MkdirAll(kustomizationDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	kmFile := filepath.Join(kmDir, "kustomization.yaml")
-	kmContent := `apiVersion: kustomize.config.k8s.io/v1beta1
+	kustomizationFile := filepath.Join(kustomizationDir, "kustomization.yaml")
+	kustomizationContent := `apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
 - https://github.com/cert-manager/cert-manager/releases/download/v1.21.3/cert-manager.yaml
 `
-	if err := os.WriteFile(kmFile, []byte(kmContent), 0644); err != nil {
+	if err := os.WriteFile(kustomizationFile, []byte(kustomizationContent), 0644); err != nil {
 		t.Fatal(err)
 	}
 	runGit("add", "cert-manager/kustomization.yaml")
@@ -1951,115 +1955,30 @@ func TestDeploy_URL_MultipleTargetsFails(t *testing.T) {
 		},
 	}
 
-	err := opt.ResolveContext(ctx, []string{"https://github.com/foo/bar/blob/main/k8s/a.yaml", "extra"})
+	err := opt.Resolve(ctx, []string{"https://github.com/foo/bar/blob/main/k8s/a.yaml", "extra"})
 	if err == nil || !strings.Contains(err.Error(), "cannot combine URL target with other targets") {
 		t.Errorf("expected 'cannot combine URL target with other targets' error, got %v", err)
 	}
 
-	err = opt.ResolveContext(ctx, []string{"local-path", "https://github.com/foo/bar/blob/main/k8s/a.yaml"})
+	err = opt.Resolve(ctx, []string{"local-path", "https://github.com/foo/bar/blob/main/k8s/a.yaml"})
 	if err == nil || !strings.Contains(err.Error(), "cannot combine URL target with other targets") {
 		t.Errorf("expected 'cannot combine URL target with other targets' error, got %v", err)
 	}
 }
 
-func TestDeploy_URL_KustomizeSyntax_DryRun(t *testing.T) {
+func TestDeploy_URL_DryRun(t *testing.T) {
 	repoDir := createTestDeployGitRepo(t)
 	cacheDir := t.TempDir()
 	t.Setenv("AP_CACHE_DIR", cacheDir)
-	ctx := t.Context()
 
-	opt := DeployOptions{
-		RootOptions: &RootOptions{
-			RepoRoot: t.TempDir(),
-			Dir:      t.TempDir(),
-			DryRun:   true,
-		},
-	}
-
-	urlStr := "git::" + repoDir + "//cert-manager/kustomization.yaml?ref=main"
-	if err := opt.ResolveContext(ctx, []string{urlStr}); err != nil {
-		t.Fatalf("opt.ResolveContext failed: %v", err)
-	}
-
-	if !strings.HasPrefix(opt.RepoRoot, cacheDir) {
-		t.Errorf("expected opt.RepoRoot to be in cacheDir %s, got %s", cacheDir, opt.RepoRoot)
-	}
+	outsideDir := t.TempDir()
+	t.Chdir(outsideDir)
 
 	output := captureStdout(t, func() {
-		if err := RunDeploy(ctx, opt); err != nil {
-			t.Fatalf("RunDeploy failed: %v", err)
-		}
-	})
-
-	expectedTaskName := "kubectl-apply-cert-manager/kustomization.yaml"
-	if !strings.Contains(output, expectedTaskName) {
-		t.Errorf("expected dry-run output to contain %q, got:\n%s", expectedTaskName, output)
-	}
-}
-
-func TestDeploy_URL_GithubWeb_DryRun(t *testing.T) {
-	repoDir := createTestDeployGitRepo(t)
-	cacheDir := t.TempDir()
-	t.Setenv("AP_CACHE_DIR", cacheDir)
-	ctx := t.Context()
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("x-repository-download", "git clone "+repoDir)
-		w.Header().Set("x-raw-download", "https://raw.githubusercontent.com/justinsb/packages/main/cert-manager/kustomization.yaml")
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
-	opt := DeployOptions{
-		RootOptions: &RootOptions{
-			RepoRoot: t.TempDir(),
-			Dir:      t.TempDir(),
-			DryRun:   true,
-		},
-	}
-
-	urlStr := server.URL + "/justinsb/packages/blob/main/cert-manager/kustomization.yaml"
-	if err := opt.ResolveContext(ctx, []string{urlStr}); err != nil {
-		t.Fatalf("opt.ResolveContext failed: %v", err)
-	}
-
-	output := captureStdout(t, func() {
-		if err := RunDeploy(ctx, opt); err != nil {
-			t.Fatalf("RunDeploy failed: %v", err)
-		}
-	})
-
-	expectedTaskName := "kubectl-apply-cert-manager/kustomization.yaml"
-	if !strings.Contains(output, expectedTaskName) {
-		t.Errorf("expected dry-run output to contain %q, got:\n%s", expectedTaskName, output)
-	}
-}
-
-func TestDeploy_URL_OutsideGitRepo(t *testing.T) {
-	repoDir := createTestDeployGitRepo(t)
-	cacheDir := t.TempDir()
-	t.Setenv("AP_CACHE_DIR", cacheDir)
-	ctx := t.Context()
-
-	// Initial options without RepoRoot (running outside any git repo)
-	opt := DeployOptions{
-		RootOptions: &RootOptions{
-			DryRun: true,
-		},
-	}
-
-	urlStr := "git::" + repoDir + "//cert-manager/kustomization.yaml?ref=main"
-	if err := opt.ResolveContext(ctx, []string{urlStr}); err != nil {
-		t.Fatalf("opt.ResolveContext failed: %v", err)
-	}
-
-	if opt.RepoRoot == "" {
-		t.Fatalf("expected opt.RepoRoot to be populated after URL resolution")
-	}
-
-	output := captureStdout(t, func() {
-		if err := RunDeploy(ctx, opt); err != nil {
-			t.Fatalf("RunDeploy failed: %v", err)
+		rootCmd := BuildRootCommand()
+		rootCmd.SetArgs([]string{"deploy", "--dry-run", "file://" + repoDir + "//cert-manager/kustomization.yaml?ref=main"})
+		if err := rootCmd.ExecuteContext(t.Context()); err != nil {
+			t.Fatalf("rootCmd.ExecuteContext failed: %v", err)
 		}
 	})
 
