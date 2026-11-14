@@ -67,38 +67,38 @@ func (TarGz) Extract(archivePath, binary, dest string) error {
 }
 
 func extractTarGz(archivePath, binary, dest string) error {
-	f, err := os.Open(archivePath)
+	archiveFile, err := os.Open(archivePath)
 	if err != nil {
 		return fmt.Errorf("failed to open archive %s: %w", archivePath, err)
 	}
 	defer func() {
-		if closeErr := f.Close(); closeErr != nil {
+		if closeErr := archiveFile.Close(); closeErr != nil {
 			klog.V(2).Infof("failed to close %s: %v", archivePath, closeErr)
 		}
 	}()
 
-	gzr, err := gzip.NewReader(f)
+	gzipReader, err := gzip.NewReader(archiveFile)
 	if err != nil {
 		return fmt.Errorf("failed to initialize gzip reader for %s: %w", archivePath, err)
 	}
 	defer func() {
-		if closeErr := gzr.Close(); closeErr != nil {
+		if closeErr := gzipReader.Close(); closeErr != nil {
 			klog.V(2).Infof("failed to close gzip reader: %v", closeErr)
 		}
 	}()
 
-	tr := tar.NewReader(gzr)
+	tarReader := tar.NewReader(gzipReader)
 	for {
-		hdr, err := tr.Next()
+		header, err := tarReader.Next()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
 			return fmt.Errorf("failed reading tar archive %s: %w", archivePath, err)
 		}
-		cleanName := filepath.Clean(hdr.Name)
-		if (hdr.Typeflag == tar.TypeReg || hdr.Typeflag == tar.TypeRegA) && (cleanName == binary || filepath.Base(cleanName) == binary) {
-			return extractStreamToFile(tr, dest)
+		cleanName := filepath.Clean(header.Name)
+		if (header.Typeflag == tar.TypeReg || header.Typeflag == tar.TypeRegA) && (cleanName == binary || filepath.Base(cleanName) == binary) {
+			return extractStreamToFile(tarReader, dest)
 		}
 	}
 	return fmt.Errorf("target binary %q not found in archive %s", binary, archivePath)
@@ -180,36 +180,36 @@ func (g *GitHubReleases) Versions(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("failed to list %s releases: %w", g.Repo, err)
 	}
 
-	var vers []string
+	var versions []string
 	seen := make(map[string]bool)
-	for _, rel := range rawReleases {
-		if rel.Draft || rel.Prerelease {
+	for _, release := range rawReleases {
+		if release.Draft || release.Prerelease {
 			continue
 		}
-		rawTag := rel.TagName
+		rawTag := release.TagName
 		if g.TagPrefix != "" {
 			if !strings.HasPrefix(rawTag, g.TagPrefix) {
 				continue
 			}
 			rawTag = strings.TrimPrefix(rawTag, g.TagPrefix)
 		}
-		ver := strings.TrimPrefix(rawTag, "v")
-		if ver == "" || ver[0] < '0' || ver[0] > '9' || strings.Contains(ver, "-") {
+		version := strings.TrimPrefix(rawTag, "v")
+		if version == "" || version[0] < '0' || version[0] > '9' || strings.Contains(version, "-") {
 			continue
 		}
-		normTag := NormalizeTag(rawTag)
-		if seen[normTag] {
+		normalizedTag := NormalizeTag(rawTag)
+		if seen[normalizedTag] {
 			continue
 		}
-		seen[normTag] = true
-		vers = append(vers, normTag)
+		seen[normalizedTag] = true
+		versions = append(versions, normalizedTag)
 	}
 
-	sort.Slice(vers, func(i, j int) bool {
-		return toolversions.Compare(vers[i], vers[j]) > 0
+	sort.Slice(versions, func(i, j int) bool {
+		return toolversions.Compare(versions[i], versions[j]) > 0
 	})
 
-	return vers, nil
+	return versions, nil
 }
 
 // AssetURL returns the download URL for the asset on GitHub releases.
@@ -218,12 +218,12 @@ func (g *GitHubReleases) AssetURL(tag, goos, goarch string) string {
 	if g.TagPrefix != "" {
 		cleanTag = strings.TrimPrefix(cleanTag, g.TagPrefix)
 	}
-	normTag := NormalizeTag(cleanTag)
-	asset := g.Asset(normTag, goos, goarch)
+	normalizedTag := NormalizeTag(cleanTag)
+	asset := g.Asset(normalizedTag, goos, goarch)
 	if g.BaseURL != "" {
 		return fmt.Sprintf("%s/%s", strings.TrimRight(g.BaseURL, "/"), asset)
 	}
-	releaseTag := g.TagPrefix + normTag
+	releaseTag := g.TagPrefix + normalizedTag
 	return fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", g.Repo, releaseTag, asset)
 }
 
@@ -254,11 +254,11 @@ func (k *KubernetesRelease) Versions(ctx context.Context) ([]string, error) {
 	}
 
 	url := fmt.Sprintf("%s/stable.txt", k.baseURL())
-	txt, err := fetchText(ctx, url)
+	text, err := fetchText(ctx, url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch stable version from %s: %w", url, err)
 	}
-	tag := NormalizeTag(txt)
+	tag := NormalizeTag(text)
 	if tag == "" || tag == "v" {
 		return nil, fmt.Errorf("empty version from %s", url)
 	}
@@ -271,8 +271,8 @@ func (k *KubernetesRelease) AssetURL(tag, goos, goarch string) string {
 	if goos == "windows" {
 		bin = "kubectl.exe"
 	}
-	normTag := NormalizeTag(tag)
-	return fmt.Sprintf("%s/%s/bin/%s/%s/%s", k.baseURL(), normTag, goos, goarch, bin)
+	normalizedTag := NormalizeTag(tag)
+	return fmt.Sprintf("%s/%s/bin/%s/%s/%s", k.baseURL(), normalizedTag, goos, goarch, bin)
 }
 
 // Digest fetches the .sha256 sidecar next to the asset and trims it.
@@ -344,27 +344,27 @@ func ParseSidecarDigest(text string) (string, error) {
 }
 
 func fetchText(ctx context.Context, url string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to create request for %s: %w", url, err)
 	}
-	req.Header.Set("User-Agent", "gke-labs-ap")
+	request.Header.Set("User-Agent", "gke-labs-ap")
 
-	resp, err := scoped.HTTPClient(ctx).Do(req)
+	response, err := scoped.HTTPClient(ctx).Do(request)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch from %s: %w", url, err)
 	}
 	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
+		if closeErr := response.Body.Close(); closeErr != nil {
 			klog.V(2).Infof("failed to close response body: %v", closeErr)
 		}
 	}()
 
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to fetch from %s: HTTP %s", url, resp.Status)
+	if response.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to fetch from %s: HTTP %s", url, response.Status)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return "", fmt.Errorf("failed to read response from %s: %w", url, err)
 	}
@@ -413,33 +413,33 @@ func (s *Spec) Releases() ([]toolversions.Release, error) {
 	key := s.Name + ":" + string(s.VersionsYAML)
 	releasesCacheMu.Lock()
 	defer releasesCacheMu.Unlock()
-	if rels, ok := releasesCache[key]; ok {
-		return rels, nil
+	if releases, ok := releasesCache[key]; ok {
+		return releases, nil
 	}
-	rels, err := toolversions.Parse(s.VersionsYAML, s.Name)
+	releases, err := toolversions.Parse(s.VersionsYAML, s.Name)
 	if err != nil {
 		return nil, err
 	}
-	releasesCache[key] = rels
-	return rels, nil
+	releasesCache[key] = releases
+	return releases, nil
 }
 
 // LatestRelease returns the newest known release from VersionsYAML, or nil if empty.
 func (s *Spec) LatestRelease() *toolversions.Release {
-	rels, err := s.Releases()
-	if err != nil || len(rels) == 0 {
+	releases, err := s.Releases()
+	if err != nil || len(releases) == 0 {
 		return nil
 	}
-	return toolversions.Latest(rels)
+	return toolversions.Latest(releases)
 }
 
 // LookupRelease finds a release by version string.
 func (s *Spec) LookupRelease(version string) (*toolversions.Release, bool) {
-	rels, err := s.Releases()
+	releases, err := s.Releases()
 	if err != nil {
 		return nil, false
 	}
-	return toolversions.Lookup(rels, version)
+	return toolversions.Lookup(releases, version)
 }
 
 // NormalizeTag ensures that the version string has a leading "v".
@@ -483,17 +483,17 @@ func LoadConfig(spec *Spec, repoRoot string) (string, error) {
 	}
 
 	var version string
-	if val, ok := raw[spec.Name]; ok && val != nil {
-		valStr, isStr := val.(string)
-		if !isStr {
+	if value, ok := raw[spec.Name]; ok && value != nil {
+		valueString, isString := value.(string)
+		if !isString {
 			return "", fmt.Errorf("invalid %s: %s must be a string", configFile, spec.Name)
 		}
-		version = strings.TrimSpace(valStr)
+		version = strings.TrimSpace(valueString)
 	}
 
 	if version == "" || version == "latest" {
-		if rel := spec.LatestRelease(); rel != nil {
-			version = rel.Version
+		if release := spec.LatestRelease(); release != nil {
+			version = release.Version
 		}
 	}
 
@@ -536,21 +536,21 @@ func Ensure(ctx context.Context, spec *Spec, version string) (string, error) {
 		}
 	}
 
-	rel, err := ResolveRelease(ctx, spec, version)
+	release, err := ResolveRelease(ctx, spec, version)
 	if err != nil {
 		return "", err
 	}
 
-	tag := NormalizeTag(rel.Version)
+	tag := NormalizeTag(release.Version)
 	binPath := filepath.Join(cacheRoot, "tools", spec.Name, tag, "bin", binName)
 	if fileutils.IsExecutable(binPath) {
 		klog.V(2).Infof("Using %s %s", spec.Name, tag)
 		return binPath, nil
 	}
 
-	tmpFile, err := fetch.Download(ctx, rel.URL, rel.Digest, cacheRoot)
+	tmpFile, err := fetch.Download(ctx, release.URL, release.Digest, cacheRoot)
 	if err != nil {
-		return "", fmt.Errorf("failed to download %s from %s: %w", spec.Name, rel.URL, err)
+		return "", fmt.Errorf("failed to download %s from %s: %w", spec.Name, release.URL, err)
 	}
 	defer func() {
 		if rmErr := os.Remove(tmpFile); rmErr != nil && !os.IsNotExist(rmErr) {
@@ -577,11 +577,11 @@ func (s *Spec) Ensure(ctx context.Context, version string) (string, error) {
 
 // EnsureForRepo loads .ap/<Name>.yaml in repoRoot (if present) and ensures the pinned or default binary.
 func EnsureForRepo(ctx context.Context, spec *Spec, repoRoot string) (string, error) {
-	ver, err := LoadConfig(spec, repoRoot)
+	version, err := LoadConfig(spec, repoRoot)
 	if err != nil {
 		return "", err
 	}
-	return Ensure(ctx, spec, ver)
+	return Ensure(ctx, spec, version)
 }
 
 // EnsureForRepo loads .ap/<Name>.yaml in repoRoot (if present) and ensures the pinned or default binary.
@@ -613,38 +613,38 @@ func ResolveRelease(ctx context.Context, spec *Spec, version string) (*ResolvedR
 		}
 	}
 
-	requestedVer := strings.TrimSpace(version)
-	if requestedVer == "" || requestedVer == "latest" {
-		rel := spec.LatestRelease()
-		if rel == nil {
+	requestedVersion := strings.TrimSpace(version)
+	if requestedVersion == "" || requestedVersion == "latest" {
+		release := spec.LatestRelease()
+		if release == nil {
 			return nil, fmt.Errorf("no %s releases found in versions.yaml", spec.Name)
 		}
-		digest, ok := rel.Assets[platform]
+		digest, ok := release.Assets[platform]
 		if !ok || digest == "" {
-			return nil, fmt.Errorf("%s %s has no asset for %s in versions.yaml", spec.Name, rel.Version, platform)
+			return nil, fmt.Errorf("%s %s has no asset for %s in versions.yaml", spec.Name, release.Version, platform)
 		}
 		return &ResolvedRelease{
-			Version: rel.Version,
-			URL:     spec.DownloadURL(rel.Version, runtime.GOOS, runtime.GOARCH),
+			Version: release.Version,
+			URL:     spec.DownloadURL(release.Version, runtime.GOOS, runtime.GOARCH),
 			Digest:  digest,
 		}, nil
 	}
 
-	if rel, ok := spec.LookupRelease(requestedVer); ok {
-		digest, ok := rel.Assets[platform]
+	if release, ok := spec.LookupRelease(requestedVersion); ok {
+		digest, ok := release.Assets[platform]
 		if !ok || digest == "" {
-			return nil, fmt.Errorf("%s %s has no asset for %s in versions.yaml", spec.Name, rel.Version, platform)
+			return nil, fmt.Errorf("%s %s has no asset for %s in versions.yaml", spec.Name, release.Version, platform)
 		}
 		return &ResolvedRelease{
-			Version: rel.Version,
-			URL:     spec.DownloadURL(rel.Version, runtime.GOOS, runtime.GOARCH),
+			Version: release.Version,
+			URL:     spec.DownloadURL(release.Version, runtime.GOOS, runtime.GOARCH),
 			Digest:  digest,
 		}, nil
 	}
 
 	// On a miss: warn and resolve from source
-	klog.Warningf("%s %s is not in versions.yaml; resolving it from the GitHub API, which is rate limited; run 'ap tool update-versions' to add it", spec.Name, requestedVer)
-	tag := NormalizeTag(requestedVer)
+	klog.Warningf("%s %s is not in versions.yaml; resolving it from the GitHub API, which is rate limited; run 'ap tool update-versions' to add it", spec.Name, requestedVersion)
+	tag := NormalizeTag(requestedVersion)
 	url := spec.DownloadURL(tag, runtime.GOOS, runtime.GOARCH)
 
 	digest, err := spec.Source.Digest(ctx, tag, runtime.GOOS, runtime.GOARCH)
@@ -665,7 +665,7 @@ func Update(ctx context.Context, spec *Spec, repoRoot string) error {
 		return fmt.Errorf("repoRoot is required for Update")
 	}
 
-	vers, err := spec.Source.Versions(ctx)
+	versions, err := spec.Source.Versions(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list %s versions: %w", spec.Name, err)
 	}
@@ -674,8 +674,8 @@ func Update(ctx context.Context, spec *Spec, repoRoot string) error {
 	var releases []toolversions.Release
 	seenVersions := make(map[string]bool)
 
-	for _, ver := range vers {
-		if seenVersions[ver] {
+	for _, version := range versions {
+		if seenVersions[version] {
 			continue
 		}
 
@@ -687,9 +687,9 @@ func Update(ctx context.Context, spec *Spec, repoRoot string) error {
 			}
 			goos, goarch := parts[0], parts[1]
 
-			digest, err := spec.Source.Digest(ctx, ver, goos, goarch)
+			digest, err := spec.Source.Digest(ctx, version, goos, goarch)
 			if err != nil || digest == "" {
-				klog.V(2).Infof("failed to get digest for %s %s on %s: %v", spec.Name, ver, plat, err)
+				klog.V(2).Infof("failed to get digest for %s %s on %s: %v", spec.Name, version, plat, err)
 				break
 			}
 			assetsMap[plat] = digest
@@ -697,10 +697,10 @@ func Update(ctx context.Context, spec *Spec, repoRoot string) error {
 
 		if len(assetsMap) == len(spec.Platforms) {
 			releases = append(releases, toolversions.Release{
-				Version: ver,
+				Version: version,
 				Assets:  assetsMap,
 			})
-			seenVersions[ver] = true
+			seenVersions[version] = true
 			if len(releases) == maxReleases {
 				break
 			}
