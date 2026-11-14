@@ -35,6 +35,7 @@ import (
 	gotool "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kind"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kubectl"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kustomize"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/protoc"
 )
 
@@ -206,6 +207,7 @@ var registry = []*Tool{
 	},
 	NewTool(kind.Spec),
 	NewTool(kubectl.Spec),
+	NewTool(kustomize.Spec),
 	{
 		Name:       "protoc",
 		Short:      "Run protoc with pinned binary and language plugins",

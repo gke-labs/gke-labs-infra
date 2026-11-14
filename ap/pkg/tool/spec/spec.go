@@ -16,6 +16,8 @@
 package spec
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"fmt"
 	"io"
@@ -56,6 +58,91 @@ func (Bare) Extract(archivePath, binary, dest string) error {
 	return nil
 }
 
+// TarGz represents a .tar.gz archive containing the binary.
+type TarGz struct{}
+
+// Extract extracts the binary from a .tar.gz archive to dest.
+func (TarGz) Extract(archivePath, binary, dest string) error {
+	return extractTarGz(archivePath, binary, dest)
+}
+
+func extractTarGz(archivePath, binary, dest string) error {
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return fmt.Errorf("failed to open archive %s: %w", archivePath, err)
+	}
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil {
+			klog.V(2).Infof("failed to close %s: %v", archivePath, closeErr)
+		}
+	}()
+
+	gzr, err := gzip.NewReader(f)
+	if err != nil {
+		return fmt.Errorf("failed to initialize gzip reader for %s: %w", archivePath, err)
+	}
+	defer func() {
+		if closeErr := gzr.Close(); closeErr != nil {
+			klog.V(2).Infof("failed to close gzip reader: %v", closeErr)
+		}
+	}()
+
+	tr := tar.NewReader(gzr)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("failed reading tar archive %s: %w", archivePath, err)
+		}
+		cleanName := filepath.Clean(hdr.Name)
+		if (hdr.Typeflag == tar.TypeReg || hdr.Typeflag == tar.TypeRegA) && (cleanName == binary || filepath.Base(cleanName) == binary) {
+			return extractStreamToFile(tr, dest)
+		}
+	}
+	return fmt.Errorf("target binary %q not found in archive %s", binary, archivePath)
+}
+
+func extractStreamToFile(r io.Reader, dest string) error {
+	destDir := filepath.Dir(dest)
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory %s: %w", destDir, err)
+	}
+
+	tmpFile, err := os.CreateTemp(destDir, ".bin-*.tmp")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary file in %s: %w", destDir, err)
+	}
+	tmpName := tmpFile.Name()
+	success := false
+	defer func() {
+		if !success {
+			if closeErr := tmpFile.Close(); closeErr != nil {
+				klog.V(2).Infof("failed to close temporary file %s: %v", tmpName, closeErr)
+			}
+			if rmErr := os.Remove(tmpName); rmErr != nil && !os.IsNotExist(rmErr) {
+				klog.V(2).Infof("failed to remove temporary file %s: %v", tmpName, rmErr)
+			}
+		}
+	}()
+
+	if _, err := io.Copy(tmpFile, r); err != nil {
+		return fmt.Errorf("failed to write binary to %s: %w", tmpName, err)
+	}
+	if err := tmpFile.Chmod(0755); err != nil {
+		return fmt.Errorf("failed to chmod binary %s: %w", tmpName, err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("failed to close binary %s: %w", tmpName, err)
+	}
+	if err := os.Rename(tmpName, dest); err != nil {
+		return fmt.Errorf("failed to move binary to %s: %w", dest, err)
+	}
+	success = true
+	return nil
+}
+
 // Source provides versions, asset URLs, and digests for a tool.
 type Source interface {
 	Versions(ctx context.Context) ([]string, error)
@@ -66,6 +153,7 @@ type Source interface {
 // GitHubReleases fetches versions from GitHub releases and computes digests via fetch.Digest.
 type GitHubReleases struct {
 	Repo       string
+	TagPrefix  string // optional prefix to filter and strip from release tags (e.g. "kustomize/")
 	Asset      func(tag, goos, goarch string) string
 	APIBaseURL string // optional override for api.github.com
 	BaseURL    string // optional override for release asset downloads
@@ -87,7 +175,7 @@ func (g *GitHubReleases) Versions(ctx context.Context) ([]string, error) {
 		apiBase = "https://api.github.com"
 	}
 
-	rawReleases, err := github.ListReleases(ctx, apiBase, g.Repo, 20)
+	rawReleases, err := github.ListReleases(ctx, apiBase, g.Repo, 100)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list %s releases: %w", g.Repo, err)
 	}
@@ -98,15 +186,23 @@ func (g *GitHubReleases) Versions(ctx context.Context) ([]string, error) {
 		if rel.Draft || rel.Prerelease {
 			continue
 		}
-		ver := strings.TrimPrefix(rel.TagName, "v")
+		rawTag := rel.TagName
+		if g.TagPrefix != "" {
+			if !strings.HasPrefix(rawTag, g.TagPrefix) {
+				continue
+			}
+			rawTag = strings.TrimPrefix(rawTag, g.TagPrefix)
+		}
+		ver := strings.TrimPrefix(rawTag, "v")
 		if ver == "" || ver[0] < '0' || ver[0] > '9' || strings.Contains(ver, "-") {
 			continue
 		}
-		if seen[rel.TagName] {
+		normTag := NormalizeTag(rawTag)
+		if seen[normTag] {
 			continue
 		}
-		seen[rel.TagName] = true
-		vers = append(vers, rel.TagName)
+		seen[normTag] = true
+		vers = append(vers, normTag)
 	}
 
 	sort.Slice(vers, func(i, j int) bool {
@@ -118,12 +214,17 @@ func (g *GitHubReleases) Versions(ctx context.Context) ([]string, error) {
 
 // AssetURL returns the download URL for the asset on GitHub releases.
 func (g *GitHubReleases) AssetURL(tag, goos, goarch string) string {
-	asset := g.Asset(tag, goos, goarch)
+	cleanTag := tag
+	if g.TagPrefix != "" {
+		cleanTag = strings.TrimPrefix(cleanTag, g.TagPrefix)
+	}
+	normTag := NormalizeTag(cleanTag)
+	asset := g.Asset(normTag, goos, goarch)
 	if g.BaseURL != "" {
 		return fmt.Sprintf("%s/%s", strings.TrimRight(g.BaseURL, "/"), asset)
 	}
-	normTag := NormalizeTag(tag)
-	return fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", g.Repo, normTag, asset)
+	releaseTag := g.TagPrefix + normTag
+	return fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", g.Repo, releaseTag, asset)
 }
 
 // Digest downloads the asset and computes its SHA-256 digest using fetch.Digest.
