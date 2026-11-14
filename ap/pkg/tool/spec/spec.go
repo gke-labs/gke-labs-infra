@@ -105,16 +105,16 @@ func extractTarGz(archivePath, binary, dest string) error {
 }
 
 func extractStreamToFile(r io.Reader, dest string) error {
-	tmp, err := fileutils.CreateTempFile(dest)
+	tempFile, err := fileutils.CreateTempFile(dest)
 	if err != nil {
 		return err
 	}
-	defer tmp.Cleanup()
+	defer tempFile.Cleanup()
 
-	if _, err := io.Copy(tmp.File(), r); err != nil {
+	if _, err := io.Copy(tempFile, r); err != nil {
 		return err
 	}
-	return tmp.Rename(0755)
+	return tempFile.Rename(0755)
 }
 
 // Source provides versions, asset URLs, and digests for a tool.

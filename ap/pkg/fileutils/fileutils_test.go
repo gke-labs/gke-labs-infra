@@ -83,27 +83,27 @@ func TestFileExists(t *testing.T) {
 }
 
 func TestTempFile(t *testing.T) {
-	tmpDir := t.TempDir()
+	tempDir := t.TempDir()
 
 	// 1. After Rename: destination exists with mode, temp file is gone, and Cleanup is a no-op.
-	dest := filepath.Join(tmpDir, "success.txt")
-	tmp, err := CreateTempFile(dest)
+	dest := filepath.Join(tempDir, "success.txt")
+	tempFile, err := CreateTempFile(dest)
 	if err != nil {
 		t.Fatalf("CreateTempFile failed: %v", err)
 	}
-	defer tmp.Cleanup()
+	defer tempFile.Cleanup()
 
-	tmpPath := tmp.File().Name()
-	if _, err := os.Stat(tmpPath); err != nil {
-		t.Fatalf("expected temp file %s to exist before rename: %v", tmpPath, err)
+	tempPath := findTempFile(t, tempDir, dest)
+	if tempPath == "" {
+		t.Fatalf("expected temporary file in %s for %s", tempDir, dest)
 	}
 
 	data := []byte("temp file content")
-	if _, err := tmp.File().Write(data); err != nil {
+	if _, err := tempFile.Write(data); err != nil {
 		t.Fatalf("failed to write to temp file: %v", err)
 	}
 
-	if err := tmp.Rename(0755); err != nil {
+	if err := tempFile.Rename(0755); err != nil {
 		t.Fatalf("Rename failed: %v", err)
 	}
 
@@ -122,39 +122,55 @@ func TestTempFile(t *testing.T) {
 		t.Errorf("got content %q, want %q", string(gotData), string(data))
 	}
 
-	if _, err := os.Stat(tmpPath); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("expected temp file %s to be gone after rename, got err: %v", tmpPath, err)
+	if _, err := os.Stat(tempPath); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("expected temp file %s to be gone after rename, got err: %v", tempPath, err)
 	}
 
 	// Cleanup is a no-op after Rename
-	tmp.Cleanup()
+	tempFile.Cleanup()
 	if _, err := os.Stat(dest); err != nil {
 		t.Errorf("destination %s should still exist after Cleanup: %v", dest, err)
 	}
 
 	// 2. Without Rename: Cleanup removes temp file and destination does not exist.
-	dest2 := filepath.Join(tmpDir, "aborted.txt")
-	tmp2, err := CreateTempFile(dest2)
+	dest2 := filepath.Join(tempDir, "aborted.txt")
+	tempFile2, err := CreateTempFile(dest2)
 	if err != nil {
 		t.Fatalf("CreateTempFile failed: %v", err)
 	}
-	tmpPath2 := tmp2.File().Name()
-	if _, err := os.Stat(tmpPath2); err != nil {
-		t.Fatalf("expected temp file %s to exist before cleanup: %v", tmpPath2, err)
+	tempPath2 := findTempFile(t, tempDir, dest2)
+	if tempPath2 == "" {
+		t.Fatalf("expected temporary file in %s for %s", tempDir, dest2)
 	}
 
-	if _, err := tmp2.File().Write([]byte("discarded content")); err != nil {
+	if _, err := tempFile2.Write([]byte("discarded content")); err != nil {
 		t.Fatalf("failed to write to temp file: %v", err)
 	}
 
-	tmp2.Cleanup()
+	tempFile2.Cleanup()
 
-	if _, err := os.Stat(tmpPath2); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("expected temp file %s to be removed by Cleanup, got err: %v", tmpPath2, err)
+	if _, err := os.Stat(tempPath2); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("expected temp file %s to be removed by Cleanup, got err: %v", tempPath2, err)
 	}
 	if _, err := os.Stat(dest2); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("expected destination %s to not exist, got err: %v", dest2, err)
 	}
+}
+
+func findTempFile(t *testing.T, dir, dest string) string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("failed to read dir: %v", err)
+	}
+	prefix := fmt.Sprintf(".%s-", filepath.Base(dest))
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasPrefix(name, prefix) && strings.HasSuffix(name, ".tmp") {
+			return filepath.Join(dir, name)
+		}
+	}
+	return ""
 }
 
 func TestWriteFileAtomic(t *testing.T) {

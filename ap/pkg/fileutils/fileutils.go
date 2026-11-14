@@ -67,25 +67,20 @@ type TempFile struct {
 func CreateTempFile(dest string) (*TempFile, error) {
 	destDir := filepath.Dir(dest)
 	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create directory for %s: %w", dest, err)
 	}
 
 	pattern := fmt.Sprintf(".%s-*.tmp", filepath.Base(dest))
-	tmpFile, err := os.CreateTemp(destDir, pattern)
+	file, err := os.CreateTemp(destDir, pattern)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create temporary file for %s: %w", dest, err)
 	}
 
 	return &TempFile{
-		file: tmpFile,
-		name: tmpFile.Name(),
+		file: file,
+		name: file.Name(),
 		dest: dest,
 	}, nil
-}
-
-// File returns the underlying temporary file.
-func (t *TempFile) File() *os.File {
-	return t.file
 }
 
 // Write writes p to the underlying temporary file.
@@ -97,20 +92,20 @@ func (t *TempFile) Write(p []byte) (int, error) {
 // If successful, it marks the TempFile as renamed so that Cleanup is a no-op.
 func (t *TempFile) Rename(perm os.FileMode) error {
 	if t.renamed {
-		return errors.New("already renamed")
+		return fmt.Errorf("temporary file for %s already renamed", t.dest)
 	}
 	if t.closed {
-		return errors.New("temporary file is already closed")
+		return fmt.Errorf("temporary file for %s is already closed", t.dest)
 	}
 	if err := t.file.Chmod(perm); err != nil {
-		return err
+		return fmt.Errorf("failed to chmod temporary file for %s: %w", t.dest, err)
 	}
 	t.closed = true
 	if err := t.file.Close(); err != nil {
-		return fmt.Errorf("failed to close temporary file %s: %w", t.name, err)
+		return fmt.Errorf("failed to close temporary file for %s: %w", t.dest, err)
 	}
 	if err := os.Rename(t.name, t.dest); err != nil {
-		return err
+		return fmt.Errorf("failed to move temporary file to %s: %w", t.dest, err)
 	}
 	t.renamed = true
 	return nil
@@ -119,7 +114,7 @@ func (t *TempFile) Rename(perm os.FileMode) error {
 // Cleanup closes the temporary file if still open and removes it unless it was renamed.
 // Failures to close or remove are logged. Cleanup is safe to call after Rename.
 func (t *TempFile) Cleanup() {
-	if t == nil || t.renamed {
+	if t.renamed {
 		return
 	}
 	if !t.closed {
@@ -137,16 +132,16 @@ func (t *TempFile) Cleanup() {
 // directory, set the target mode, close (error checked), then rename over the target.
 // Any failure removes the temporary file.
 func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
-	tmp, err := CreateTempFile(path)
+	tempFile, err := CreateTempFile(path)
 	if err != nil {
 		return err
 	}
-	defer tmp.Cleanup()
+	defer tempFile.Cleanup()
 
-	if _, err := tmp.Write(data); err != nil {
+	if _, err := tempFile.Write(data); err != nil {
 		return err
 	}
-	return tmp.Rename(perm)
+	return tempFile.Rename(perm)
 }
 
 // CopyFile copies a file from src to dst atomically via a temporary file, preserving permissions and mtime.
@@ -166,17 +161,17 @@ func CopyFile(src, dst string, perm os.FileMode) error {
 		return err
 	}
 
-	tmp, err := CreateTempFile(dst)
+	tempFile, err := CreateTempFile(dst)
 	if err != nil {
 		return err
 	}
-	defer tmp.Cleanup()
+	defer tempFile.Cleanup()
 
-	if _, err := io.Copy(tmp.File(), in); err != nil {
+	if _, err := io.Copy(tempFile, in); err != nil {
 		return err
 	}
 
-	if err := tmp.Rename(perm); err != nil {
+	if err := tempFile.Rename(perm); err != nil {
 		return err
 	}
 
