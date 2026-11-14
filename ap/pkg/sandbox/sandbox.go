@@ -150,7 +150,11 @@ func Run(ctx context.Context, root string, args []string) (retErr error) {
 	if len(resp.ChangedFiles) > 0 {
 		klog.Infof("Copying back %d changed files...", len(resp.ChangedFiles))
 		for _, file := range resp.ChangedFiles {
-			fullPath := filepath.Join(root, file.Path)
+			fullPath := filepath.Clean(filepath.Join(root, file.Path))
+			rel, err := filepath.Rel(root, fullPath)
+			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				return fmt.Errorf("sandbox returned path %q escaping root", file.Path)
+			}
 			if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
 				return fmt.Errorf("failed to create local directory for %s: %w", file.Path, err)
 			}
