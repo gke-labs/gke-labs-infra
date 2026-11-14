@@ -105,42 +105,16 @@ func extractTarGz(archivePath, binary, dest string) error {
 }
 
 func extractStreamToFile(r io.Reader, dest string) error {
-	destDir := filepath.Dir(dest)
-	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return fmt.Errorf("failed to create directory %s: %w", destDir, err)
-	}
-
-	tmpFile, err := os.CreateTemp(destDir, ".bin-*.tmp")
+	tempFile, err := fileutils.CreateTempFile(dest)
 	if err != nil {
-		return fmt.Errorf("failed to create temporary file in %s: %w", destDir, err)
+		return err
 	}
-	tmpName := tmpFile.Name()
-	success := false
-	defer func() {
-		if !success {
-			if closeErr := tmpFile.Close(); closeErr != nil {
-				klog.V(2).Infof("failed to close temporary file %s: %v", tmpName, closeErr)
-			}
-			if rmErr := os.Remove(tmpName); rmErr != nil && !os.IsNotExist(rmErr) {
-				klog.V(2).Infof("failed to remove temporary file %s: %v", tmpName, rmErr)
-			}
-		}
-	}()
+	defer tempFile.Cleanup()
 
-	if _, err := io.Copy(tmpFile, r); err != nil {
-		return fmt.Errorf("failed to write binary to %s: %w", tmpName, err)
+	if _, err := io.Copy(tempFile, r); err != nil {
+		return err
 	}
-	if err := tmpFile.Chmod(0755); err != nil {
-		return fmt.Errorf("failed to chmod binary %s: %w", tmpName, err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("failed to close binary %s: %w", tmpName, err)
-	}
-	if err := os.Rename(tmpName, dest); err != nil {
-		return fmt.Errorf("failed to move binary to %s: %w", dest, err)
-	}
-	success = true
-	return nil
+	return tempFile.Rename(0755)
 }
 
 // Source provides versions, asset URLs, and digests for a tool.
