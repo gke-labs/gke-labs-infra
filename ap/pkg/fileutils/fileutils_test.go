@@ -82,6 +82,81 @@ func TestFileExists(t *testing.T) {
 	}
 }
 
+func TestTempFile(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// 1. After Rename: destination exists with mode, temp file is gone, and Cleanup is a no-op.
+	dest := filepath.Join(tmpDir, "success.txt")
+	tmp, err := CreateTempFile(dest)
+	if err != nil {
+		t.Fatalf("CreateTempFile failed: %v", err)
+	}
+	defer tmp.Cleanup()
+
+	tmpPath := tmp.File().Name()
+	if _, err := os.Stat(tmpPath); err != nil {
+		t.Fatalf("expected temp file %s to exist before rename: %v", tmpPath, err)
+	}
+
+	data := []byte("temp file content")
+	if _, err := tmp.File().Write(data); err != nil {
+		t.Fatalf("failed to write to temp file: %v", err)
+	}
+
+	if err := tmp.Rename(0755); err != nil {
+		t.Fatalf("Rename failed: %v", err)
+	}
+
+	info, err := os.Stat(dest)
+	if err != nil {
+		t.Fatalf("expected destination %s to exist: %v", dest, err)
+	}
+	if info.Mode().Perm() != 0755 {
+		t.Errorf("got perm %v, want %v", info.Mode().Perm(), os.FileMode(0755))
+	}
+	gotData, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("failed reading destination: %v", err)
+	}
+	if string(gotData) != string(data) {
+		t.Errorf("got content %q, want %q", string(gotData), string(data))
+	}
+
+	if _, err := os.Stat(tmpPath); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("expected temp file %s to be gone after rename, got err: %v", tmpPath, err)
+	}
+
+	// Cleanup is a no-op after Rename
+	tmp.Cleanup()
+	if _, err := os.Stat(dest); err != nil {
+		t.Errorf("destination %s should still exist after Cleanup: %v", dest, err)
+	}
+
+	// 2. Without Rename: Cleanup removes temp file and destination does not exist.
+	dest2 := filepath.Join(tmpDir, "aborted.txt")
+	tmp2, err := CreateTempFile(dest2)
+	if err != nil {
+		t.Fatalf("CreateTempFile failed: %v", err)
+	}
+	tmpPath2 := tmp2.File().Name()
+	if _, err := os.Stat(tmpPath2); err != nil {
+		t.Fatalf("expected temp file %s to exist before cleanup: %v", tmpPath2, err)
+	}
+
+	if _, err := tmp2.File().Write([]byte("discarded content")); err != nil {
+		t.Fatalf("failed to write to temp file: %v", err)
+	}
+
+	tmp2.Cleanup()
+
+	if _, err := os.Stat(tmpPath2); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("expected temp file %s to be removed by Cleanup, got err: %v", tmpPath2, err)
+	}
+	if _, err := os.Stat(dest2); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("expected destination %s to not exist, got err: %v", dest2, err)
+	}
+}
+
 func TestWriteFileAtomic(t *testing.T) {
 	tmpDir := t.TempDir()
 	targetPath := filepath.Join(tmpDir, "file.txt")
