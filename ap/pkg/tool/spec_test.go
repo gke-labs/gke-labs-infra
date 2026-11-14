@@ -31,6 +31,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/helm"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kind"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kubectl"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kustomize"
@@ -286,7 +287,7 @@ func TestSpec_ColdRun_DoesNotMutateHome(t *testing.T) {
 }
 
 func TestSpec_VersionsYAML(t *testing.T) {
-	for _, s := range []*spec.Spec{kind.Spec, kubectl.Spec, kustomize.Spec} {
+	for _, s := range []*spec.Spec{helm.Spec, kind.Spec, kubectl.Spec, kustomize.Spec} {
 		t.Run(s.Name, func(t *testing.T) {
 			rels, err := toolversions.Parse(s.VersionsYAML, s.Name)
 			if err != nil {
@@ -575,6 +576,59 @@ func TestGitHubReleases_Versions(t *testing.T) {
 				if vers[i] != tc.wantVers[i] {
 					t.Errorf("version[%d] = %q, want %q", i, vers[i], tc.wantVers[i])
 				}
+			}
+		})
+	}
+}
+
+func TestHelmRelease(t *testing.T) {
+	dummyHash := "9e0068e9ae18c441d27388190ee7f53ae65eba44bfe910b40bdac44c4b51fa71"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, ".sha256") {
+			_, _ = fmt.Fprintln(w, dummyHash)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	release := &spec.HelmRelease{BaseURL: server.URL}
+
+	tests := []struct {
+		tag        string
+		goos       string
+		goarch     string
+		wantURL    string
+		wantDigest string
+	}{
+		{
+			tag:        "v4.3.2",
+			goos:       "linux",
+			goarch:     "amd64",
+			wantURL:    fmt.Sprintf("%s/helm-v4.3.2-linux-amd64.tar.gz", server.URL),
+			wantDigest: "sha256:" + dummyHash,
+		},
+		{
+			tag:        "4.3.2",
+			goos:       "darwin",
+			goarch:     "arm64",
+			wantURL:    fmt.Sprintf("%s/helm-v4.3.2-darwin-arm64.tar.gz", server.URL),
+			wantDigest: "sha256:" + dummyHash,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(fmt.Sprintf("%s-%s-%s", tc.tag, tc.goos, tc.goarch), func(t *testing.T) {
+			gotURL := release.AssetURL(tc.tag, tc.goos, tc.goarch)
+			if gotURL != tc.wantURL {
+				t.Errorf("AssetURL(%q, %q, %q) = %q, want %q", tc.tag, tc.goos, tc.goarch, gotURL, tc.wantURL)
+			}
+			digest, err := release.Digest(t.Context(), tc.tag, tc.goos, tc.goarch)
+			if err != nil {
+				t.Fatalf("Digest(%q, %q, %q) failed: %v", tc.tag, tc.goos, tc.goarch, err)
+			}
+			if digest != tc.wantDigest {
+				t.Errorf("Digest(%q, %q, %q) = %q, want %q", tc.tag, tc.goos, tc.goarch, digest, tc.wantDigest)
 			}
 		})
 	}
