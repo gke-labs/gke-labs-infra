@@ -95,11 +95,22 @@ func BuildToolInstallCommand(rootOpt *RootOptions) *cobra.Command {
 
 // ToolUpdateVersionsOptions holds flags for "tool update-versions".
 type ToolUpdateVersionsOptions struct {
-	Protoc    bool
-	Docker    bool
-	Buildx    bool
-	Kind      bool
-	Kubectl   bool
+	// Protoc updates ap/pkg/tool/protoc/versions.yaml.
+	Protoc bool
+
+	// Docker updates ap/pkg/tool/docker/versions.yaml.
+	Docker bool
+
+	// Buildx updates ap/pkg/tool/docker/versions.yaml.
+	Buildx bool
+
+	// Kind updates ap/pkg/tool/kind/versions.yaml.
+	Kind bool
+
+	// Kubectl updates ap/pkg/tool/kubectl/versions.yaml.
+	Kubectl bool
+
+	// Kustomize updates ap/pkg/tool/kustomize/versions.yaml.
 	Kustomize bool
 }
 
