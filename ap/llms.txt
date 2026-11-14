@@ -63,7 +63,7 @@ When making changes to an AP-managed project, coding agents should follow this v
 
 The `ap kind-load` command loads one or more container images from the local Docker daemon into a kind cluster using the same direct containerd import path as `ap deploy`.
 
--   **Command**: `ap kind-load [--cluster <name>] <image>...`
+-   **Command**: `ap kind-load [--cluster kind://<name>] <image>...`
 -   **Usage**: Loads built or pulled images (e.g. pinned third-party images needed for e2e tests) into a kind cluster.
 -   **Cluster**: Target a specific cluster with `--cluster kind://<name>` or a kubeconfig context; when omitted, targets the current kubeconfig context if it is a kind cluster.
 
