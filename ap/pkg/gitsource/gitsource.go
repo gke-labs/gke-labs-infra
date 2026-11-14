@@ -336,7 +336,12 @@ func repoCacheDir(cacheRoot, repoURL string) (string, error) {
 	return filepath.Join(cacheRoot, "git", "local", sanitized), nil
 }
 
-func checkoutCommit(ctx context.Context, repoDirectory string, target *Target) error {
+func fetchAndCheckout(ctx context.Context, repoDirectory string, target *Target) error {
+	fetchCmd := exec.CommandContext(ctx, "git", "-C", repoDirectory, "fetch", "--depth", "1", "origin", target.Commit)
+	if output, err := fetchCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to fetch commit %s from %s: %w\n%s", target.Commit, target.RepoURL, err, string(output))
+	}
+
 	checkoutCmd := exec.CommandContext(ctx, "git", "-C", repoDirectory, "checkout", "--force", "--detach", target.Commit)
 	if output, err := checkoutCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to checkout commit %s in %s: %w\n%s", target.Commit, target.RepoURL, err, string(output))
@@ -345,27 +350,26 @@ func checkoutCommit(ctx context.Context, repoDirectory string, target *Target) e
 }
 
 func updateExisting(ctx context.Context, repoDirectory string, target *Target) error {
-	fetchCmd := exec.CommandContext(ctx, "git", "-C", repoDirectory, "fetch", "origin")
-	if output, err := fetchCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to fetch git repository %s: %w\n%s", target.RepoURL, err, string(output))
-	}
-
-	return checkoutCommit(ctx, repoDirectory, target)
+	return fetchAndCheckout(ctx, repoDirectory, target)
 }
 
 func cloneFresh(ctx context.Context, repoDirectory string, target *Target) error {
 	if err := os.RemoveAll(repoDirectory); err != nil {
 		return fmt.Errorf("failed to remove repo dir for %s: %w", target.RepoURL, err)
 	}
-	if err := os.MkdirAll(filepath.Dir(repoDirectory), 0755); err != nil {
-		return fmt.Errorf("failed to create repo parent dir for %s: %w", target.RepoURL, err)
+	if err := os.MkdirAll(repoDirectory, 0755); err != nil {
+		return fmt.Errorf("failed to create repo dir for %s: %w", target.RepoURL, err)
 	}
-	cloneCmd := exec.CommandContext(ctx, "git", "clone", "--quiet", target.RepoURL, repoDirectory)
-	if output, err := cloneCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to git clone %s: %w\n%s", target.RepoURL, err, string(output))
+	initCmd := exec.CommandContext(ctx, "git", "-C", repoDirectory, "init")
+	if output, err := initCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to git init %s: %w\n%s", target.RepoURL, err, string(output))
+	}
+	remoteCmd := exec.CommandContext(ctx, "git", "-C", repoDirectory, "remote", "add", "origin", target.RepoURL)
+	if output, err := remoteCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to add git remote origin for %s: %w\n%s", target.RepoURL, err, string(output))
 	}
 
-	return checkoutCommit(ctx, repoDirectory, target)
+	return fetchAndCheckout(ctx, repoDirectory, target)
 }
 
 // CloneOrUpdate clones or fetches target.RepoURL into a subdirectory of cacheRoot (derived via fileutils.CacheDir),

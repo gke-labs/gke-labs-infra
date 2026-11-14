@@ -297,4 +297,8 @@ func TestCloneOrUpdate(t *testing.T) {
 	if checkedOutCommit != secondCommit {
 		t.Errorf("checked out commit = %q, want %q", checkedOutCommit, secondCommit)
 	}
+
+	if isShallow := runClonedGit("rev-parse", "--is-shallow-repository"); isShallow != "true" {
+		t.Errorf("is-shallow-repository = %q, want %q", isShallow, "true")
+	}
 }
