@@ -17,6 +17,7 @@ package e2e
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -33,7 +34,11 @@ func TestKindLoad_PulledMultiPlatform(t *testing.T) {
 	image := "alpine:3.22"
 	h.RunCmd("docker", "pull", image)
 
-	h.KindLoad(image)
+	repoRoot := h.FindRepoRoot()
+	apBin := filepath.Join(t.TempDir(), "ap")
+	h.RunCmd("go", "build", "-o", apBin, filepath.Join(repoRoot, "ap"))
+
+	h.RunCmd(apBin, "kind-load", "--cluster", "ap-deploy-kind-e2e", image)
 
 	podManifest := fmt.Sprintf(`
 apiVersion: v1

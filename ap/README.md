@@ -69,6 +69,16 @@ ap deploy path/to/k8s/controller.yaml -n my-namespace --cluster my-context --bui
 
 Pass `--applyset=[RESOURCE[.GROUP]/]NAME` to track deployments using the KEP-3659 ApplySet specification. `ap deploy` stamps `applyset.kubernetes.io/part-of: <id>` on every applied object and updates the pre-existing parent object with the ApplySet ID label, tooling version (`ap/<version>`), and `contains-group-kinds` (and `additional-namespaces` when applicable) annotations. The deploy fails if the parent does not exist, carries a conflicting tooling annotation, or is namespace-scoped without `--namespace`.
 
+## Loading Images into Kind
+
+The `ap kind-load` command loads one or more container images from the local Docker daemon into a kind cluster:
+
+```bash
+ap kind-load --cluster my-cluster otel/ebpf-instrument:v0.10.0 alpine:3.22
+```
+
+It loads built or pulled images using the same direct containerd import as `ap deploy`, avoiding the upstream kind issue with multi-platform images on containerd image stores (Docker 29+). Target a specific cluster with `--cluster <name>` or `--cluster kind://<name>`. When omitted, `ap kind-load` targets the current kubeconfig context if it is a kind cluster, or the default kind cluster.
+
 ## End-to-End Testing (e2e)
 
 If a root has `tests/e2e` Go tests, `ap e2e` runs `RUN_E2E=1 go test -v -count=1 -timeout 30m ./tests/e2e/...`. A `dev/tasks/test-e2e*` script at the same root runs before them and is for setup only (build a binary, prepare a cluster, free disk space); it must not run the Go tests itself, or they run twice.
@@ -317,6 +327,7 @@ Commands:
 - `lint`: Run linting tasks: go vet, govulncheck, and the ap analyzers (`unused` [error], `testcontext` [warn], `replaceEmptyInterfaceWithAny` [warn], `testonlyimports` [error], `droppederrors` [error], `closewriter` [error], `deferinloop` [error])
 - `build`: Build artifacts. Positional targets can be subtree directories (building all images and build tasks beneath them) or specific image directories (`<parent>/images/<name>` containing a `Dockerfile`, building exactly that image with the repository root as the build context). Multiple targets build the union of specified images and subtrees.
 - `deploy`: Deploy artifacts
+- `kind-load`: Load docker images into a kind cluster
 - `generate`: Run generation tasks (runs legacy `dev/tasks/generate-*` scripts, `go generate ./...` in modules that contain `//go:generate` directives, and built-in presubmit/workflow generators; supports `--verify` to prove generators restore perturbed outputs, `--audit-generated` to find generated files lacking headers, and `--strict`)
 - `format`: Run formatting tasks
 - `bash`: Run a bash script from the repository root with managed tools on PATH (use as `#!/usr/bin/env -S ap bash`, requires coreutils 8.30+)

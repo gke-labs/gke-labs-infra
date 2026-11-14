@@ -59,6 +59,13 @@ When making changes to an AP-managed project, coding agents should follow this v
 -   **Skip Push**: Use `--skip-push` to skip pushing built images to the registry.
 -   **Manifest Scope**: Manifests are applied as written apart from image references and namespace retargeting; `ap deploy` does not install missing CRDs or create Secrets.
 
+## Loading Images into Kind
+
+-   **Command**: `ap kind-load [--cluster <name>] <image>...`
+-   **Usage**: Loads one or more container images from the local Docker daemon into a kind cluster using the same direct containerd import path as `ap deploy`.
+-   **Cluster**: Target a specific cluster with `--cluster <name>` or `--cluster=kind://<name>`; when omitted, targets the current kubeconfig context if it is a kind cluster, or the default kind cluster.
+-   **Images**: Accepts built or pulled images (e.g. pinned third-party images needed for e2e tests).
+
 ## Tool Management
 
 - `ap tool install [dir]` creates symlinks for managed tools (`kind`, `kubectl`, `docker`, `docker-buildx`, `protoc`, `go`) pointing to `ap` for busybox-style dispatch to pinned tool binaries. In a repository, it defaults to `${REPO_ROOT}/.build/bin`. Discovered task scripts have `${REPO_ROOT}/.build/bin` prepended to `PATH` automatically. Scripts should call tools by name and never download them; `ap` provides them on `PATH`.
