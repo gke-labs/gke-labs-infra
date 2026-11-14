@@ -331,19 +331,65 @@ const (
 	fetchTextRetryPause  = 100 * time.Millisecond
 )
 
+// fetchTextAttempt executes a single HTTP GET attempt under a per-attempt deadline.
+// It reports whether an error is retryable (transport error, attempt timeout, HTTP 5xx/429).
+func fetchTextAttempt(ctx context.Context, url string) (text string, retryable bool, err error) {
+	attemptCtx, cancel := context.WithTimeout(ctx, fetchTextTimeout)
+	defer cancel()
+
+	request, err := http.NewRequestWithContext(attemptCtx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", false, fmt.Errorf("failed to create request: %w", err)
+	}
+	request.Header.Set("User-Agent", "gke-labs-ap")
+
+	response, err := scoped.HTTPClient(attemptCtx).Do(request)
+	if err != nil {
+		return "", true, err
+	}
+	defer func() {
+		if closeErr := response.Body.Close(); closeErr != nil {
+			klog.V(2).Infof("failed to close response body: %v", closeErr)
+		}
+	}()
+
+	if response.StatusCode == http.StatusOK {
+		body, err := io.ReadAll(response.Body)
+		if err != nil {
+			return "", true, fmt.Errorf("failed to read response: %w", err)
+		}
+		return strings.TrimSpace(string(body)), false, nil
+	}
+
+	if response.StatusCode == http.StatusTooManyRequests || (response.StatusCode >= 500 && response.StatusCode <= 599) {
+		return "", true, fmt.Errorf("HTTP %s", response.Status)
+	}
+
+	return "", false, fmt.Errorf("HTTP %s", response.Status)
+}
+
 // fetchText fetches small text files (such as version feeds or checksum sidecars)
 // and returns the trimmed content. It must not be used for large downloads.
 // Each attempt runs under its own short deadline derived from ctx, and retries
 // transient failures (transport errors, timeouts, and HTTP 5xx/429).
 func fetchText(ctx context.Context, url string) (string, error) {
-	if err := ctx.Err(); err != nil {
-		return "", fmt.Errorf("failed to fetch from %s: %w", url, err)
-	}
-
-	var lastErr error
+	var lastError error
 	pause := fetchTextRetryPause
 	for attempt := 0; attempt < fetchTextMaxAttempts; attempt++ {
-		if attempt > 0 {
+		if err := ctx.Err(); err != nil {
+			return "", fmt.Errorf("failed to fetch from %s: %w", url, err)
+		}
+
+		text, retryable, err := fetchTextAttempt(ctx, url)
+		if err == nil {
+			return text, nil
+		}
+		if !retryable {
+			return "", fmt.Errorf("failed to fetch from %s: %w", url, err)
+		}
+		lastError = err
+
+		if attempt < fetchTextMaxAttempts-1 {
 			select {
 			case <-ctx.Done():
 				return "", fmt.Errorf("failed to fetch from %s: %w", url, ctx.Err())
@@ -351,64 +397,9 @@ func fetchText(ctx context.Context, url string) (string, error) {
 				pause *= 2
 			}
 		}
-
-		if err := ctx.Err(); err != nil {
-			return "", fmt.Errorf("failed to fetch from %s: %w", url, err)
-		}
-
-		attemptCtx, cancel := context.WithTimeout(ctx, fetchTextTimeout)
-
-		req, err := http.NewRequestWithContext(attemptCtx, http.MethodGet, url, nil)
-		if err != nil {
-			cancel()
-			return "", fmt.Errorf("failed to create request for %s: %w", url, err)
-		}
-		req.Header.Set("User-Agent", "gke-labs-ap")
-
-		resp, err := scoped.HTTPClient(attemptCtx).Do(req)
-		if err != nil {
-			cancel()
-			if ctx.Err() != nil {
-				return "", fmt.Errorf("failed to fetch from %s: %w", url, ctx.Err())
-			}
-			lastErr = err
-			continue
-		}
-
-		if resp.StatusCode == http.StatusOK {
-			body, readErr := io.ReadAll(resp.Body)
-			if closeErr := resp.Body.Close(); closeErr != nil {
-				klog.V(2).Infof("failed to close response body: %v", closeErr)
-			}
-			cancel()
-			if readErr != nil {
-				if ctx.Err() != nil {
-					return "", fmt.Errorf("failed to fetch from %s: %w", url, ctx.Err())
-				}
-				lastErr = fmt.Errorf("failed to read response: %w", readErr)
-				continue
-			}
-			return strings.TrimSpace(string(body)), nil
-		}
-
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			klog.V(2).Infof("failed to close response body: %v", closeErr)
-		}
-		cancel()
-
-		if ctx.Err() != nil {
-			return "", fmt.Errorf("failed to fetch from %s: %w", url, ctx.Err())
-		}
-
-		if resp.StatusCode == http.StatusTooManyRequests || (resp.StatusCode >= 500 && resp.StatusCode <= 599) {
-			lastErr = fmt.Errorf("HTTP %s", resp.Status)
-			continue
-		}
-
-		return "", fmt.Errorf("failed to fetch from %s: HTTP %s", url, resp.Status)
 	}
 
-	return "", fmt.Errorf("failed to fetch from %s: %w", url, lastErr)
+	return "", fmt.Errorf("failed to fetch from %s: %w", url, lastError)
 }
 
 // Spec defines the configuration and behavior of a managed external tool.
