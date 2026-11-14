@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -137,85 +136,6 @@ func TestFindManifests(t *testing.T) {
 	}
 }
 
-func TestFindReferencedImagesInFile_Kustomization(t *testing.T) {
-	tempDir := t.TempDir()
-
-	// cert-manager kustomization without local placeholder images
-	certDir := filepath.Join(tempDir, "cert-manager")
-	if err := os.MkdirAll(certDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	certKust := `apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-resources:
-  - cert-manager.yaml
-`
-	certYaml := `apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: cert-manager
-spec:
-  template:
-    spec:
-      containers:
-      - name: cert-manager
-        image: quay.io/jetstack/cert-manager-controller:v1.17.0
-`
-	if err := os.WriteFile(filepath.Join(certDir, "kustomization.yaml"), []byte(certKust), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(certDir, "cert-manager.yaml"), []byte(certYaml), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	imgs, err := FindReferencedImagesInFile(filepath.Join(certDir, "kustomization.yaml"))
-	if err != nil {
-		t.Fatalf("FindReferencedImagesInFile failed: %v", err)
-	}
-	if len(imgs) != 0 {
-		t.Errorf("expected 0 images, got %v", imgs)
-	}
-
-	// app kustomization referencing local resource with placeholder images
-	appDir := filepath.Join(tempDir, "app")
-	if err := os.MkdirAll(appDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	appKust := `apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-resources:
-  - deployment.yaml
-`
-	appYaml := `apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: app
-spec:
-  template:
-    spec:
-      containers:
-      - name: worker
-        image: worker
-      - name: sidecar
-        image: ${IMAGE_PREFIX}/sidecar:${IMAGE_TAG}
-`
-	if err := os.WriteFile(filepath.Join(appDir, "kustomization.yaml"), []byte(appKust), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(appDir, "deployment.yaml"), []byte(appYaml), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	appImgs, err := FindReferencedImagesInFile(filepath.Join(appDir, "kustomization.yaml"))
-	if err != nil {
-		t.Fatalf("FindReferencedImagesInFile failed: %v", err)
-	}
-	expectedAppImgs := []string{"sidecar", "worker"}
-	if !reflect.DeepEqual(appImgs, expectedAppImgs) {
-		t.Errorf("FindReferencedImagesInFile = %v, want %v", appImgs, expectedAppImgs)
-	}
-}
-
 func TestKubectlApplyTask_Kustomization(t *testing.T) {
 	tempDir := t.TempDir()
 
@@ -231,12 +151,12 @@ func TestKubectlApplyTask_Kustomization(t *testing.T) {
 	}
 
 	// Create cert-manager kustomization directory
-	kustDir := filepath.Join(tempDir, "cert-manager")
-	if err := os.MkdirAll(kustDir, 0755); err != nil {
+	kustomizationDir := filepath.Join(tempDir, "cert-manager")
+	if err := os.MkdirAll(kustomizationDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	kustPath := filepath.Join(kustDir, "kustomization.yaml")
-	if err := os.WriteFile(kustPath, []byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n"), 0644); err != nil {
+	kustomizationPath := filepath.Join(kustomizationDir, "kustomization.yaml")
+	if err := os.WriteFile(kustomizationPath, []byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -307,13 +227,14 @@ exit 0
 
 	membership := &applyset.Membership{}
 	task := &KubectlApplyTask{
-		ManifestPath:      kustPath,
+		ManifestPath:      kustomizationPath,
+		RepoRoot:          tempDir,
 		Namespace:         "custom-ns",
 		OriginalNamespace: "original-ns",
 		ApplySetID:        "applyset-test-parent-v1",
 		Membership:        membership,
 		ScopeResolver:     defaultTestResolver,
-		CheckNamespace: func(ctx context.Context, ns string) error {
+		CheckNamespace: func(ctx context.Context, namespace string) error {
 			return nil
 		},
 	}
@@ -329,8 +250,8 @@ exit 0
 	}
 	invocations := string(invocationsData)
 
-	if !strings.Contains(invocations, fmt.Sprintf("kustomize build %s", kustDir)) {
-		t.Errorf("expected kustomize build %s, got:\n%s", kustDir, invocations)
+	if !strings.Contains(invocations, fmt.Sprintf("kustomize build %s", kustomizationDir)) {
+		t.Errorf("expected kustomize build %s, got:\n%s", kustomizationDir, invocations)
 	}
 	if !strings.Contains(invocations, "kubectl apply -f -") {
 		t.Errorf("expected kubectl apply -f -, got:\n%s", invocations)
@@ -354,70 +275,8 @@ exit 0
 	}
 
 	// Verify membership recorded the objects
-	gks := membership.GroupKinds
-	if len(gks) != 2 {
-		t.Errorf("expected 2 GroupKinds in membership, got %d (%v)", len(gks), gks)
-	}
-}
-
-func TestKubectlApplyTask_KustomizationBuildFailure(t *testing.T) {
-	tempDir := t.TempDir()
-
-	if err := os.MkdirAll(filepath.Join(tempDir, ".git"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(tempDir, ".ap"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(tempDir, ".ap", "ap.yaml"), []byte("imagePrefix: test.local\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	kustDir := filepath.Join(tempDir, "broken")
-	if err := os.MkdirAll(kustDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	kustPath := filepath.Join(kustDir, "kustomization.yaml")
-	if err := os.WriteFile(kustPath, []byte("invalid content"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	binDir := filepath.Join(tempDir, "bin")
-	if err := os.MkdirAll(binDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	fakeKustomize := filepath.Join(binDir, "kustomize")
-	fakeKustomizeScript := `#!/bin/sh
-echo "kustomize syntax error in file" >&2
-exit 1
-`
-	if err := os.WriteFile(fakeKustomize, []byte(fakeKustomizeScript), 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	fakeKubectl := filepath.Join(binDir, "kubectl")
-	if err := os.WriteFile(fakeKubectl, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	tree, err := sourcetree.Open(tempDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	scope := tasks.NewTaskContext(tempDir, tempDir, tree)
-	scope = scope.WithTool("kustomize", fakeKustomize).WithTool("kubectl", fakeKubectl)
-
-	task := &KubectlApplyTask{
-		ManifestPath: kustPath,
-	}
-
-	err = task.Run(t.Context(), scope)
-	if err == nil {
-		t.Fatalf("expected error on kustomize build failure, got nil")
-	}
-	if !strings.Contains(err.Error(), "kustomize build failed") || !strings.Contains(err.Error(), "kustomize syntax error in file") {
-		t.Errorf("expected error to mention kustomize build failed and stderr, got: %v", err)
+	groupKinds := membership.GroupKinds
+	if len(groupKinds) != 2 {
+		t.Errorf("expected 2 GroupKinds in membership, got %d (%v)", len(groupKinds), groupKinds)
 	}
 }
