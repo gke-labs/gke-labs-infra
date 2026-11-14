@@ -1,0 +1,31 @@
+helm:
+    - version: v4.3.2
+      assets:
+        darwin-amd64: sha256:9e0068e9ae18c441d27388190ee7f53ae65eba44bfe910b40bdac44c4b51fa71
+        darwin-arm64: sha256:6f3421de3a8cc2ac578c8cfb33b8edde290dde2871bc1bab12e24f2e5caeaa90
+        linux-amd64: sha256:d1c0278d46beab79582d7e50f5b3dc206944ba8e577cde618513fd07daa53983
+        linux-arm64: sha256:df31cb61680ef728f82c770e5280dd565617bee6b039d37e85c677288be4bbb0
+    - version: v4.3.1
+      assets:
+        darwin-amd64: sha256:34bec4eba761ba5c16d1965ee6b8f5b0abe5993974a802274e2a4f0418893d89
+        darwin-arm64: sha256:6b4e61c8cd27d99e5a801e63ff25dd5c70b36875c2cd659d3e9ce6b76fc23198
+        linux-amd64: sha256:0403a88ae20913d11b10a2467b50087721fea7581736da6b9d3992f5357fe54b
+        linux-arm64: sha256:8cf8f66ecbc252ac8f7f06cca68aba88508ddfde3a6a34feb1678ad1694b4f88
+    - version: v4.3.0
+      assets:
+        darwin-amd64: sha256:347a784877e0e20eac865e8d1c36a80f6bb0861d6f29abd34defb6570ef95d92
+        darwin-arm64: sha256:d3870437e1e95b67f8edbde964156c84a26503f560821d40c542441658934fba
+        linux-amd64: sha256:86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb
+        linux-arm64: sha256:31c5794dd55c66a51e6b7d2e2ac7a114ae8b1de41ff1d9ba51748ac973b06a08
+    - version: v4.2.4
+      assets:
+        darwin-amd64: sha256:6c163d687ca03c3b5c01928e53bbbcf9518278f47ce7a2f249a5a08e8bdaa2bc
+        darwin-arm64: sha256:d747eb4e28bd2727173d15b759fa0a17822291ec09db7ced3d55af290a3661a2
+        linux-amd64: sha256:c306b46f719b0a4da32d0f78ee21bf90ce8d602f15b22ab753f0674d1670a7f3
+        linux-arm64: sha256:564de2191b881e9f71b5606b25345821ea1682f06ab90499d3ab22b530176da1
+    - version: v4.2.3
+      assets:
+        darwin-amd64: sha256:ff3ac86755a45f3422473bc1200776aac0fe04c5766abe6ca66699f7b564b23b
+        darwin-arm64: sha256:048ecf5ad3160f83d918f9fe945238d2132b079640f7b106175331c25f242c64
+        linux-amd64: sha256:e9b88b4ee95b18c706839c28d3a0220e5bc470e9cd9262410c90793c45ff8b7c
+        linux-arm64: sha256:21abd9354d39b2cd79a8d76be6912cd137a983cbf997193503fb8a6a6e2f2785

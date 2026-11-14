@@ -183,8 +183,8 @@ func TestToolUpdateVersions_Command(t *testing.T) {
 	if !strings.Contains(out, "update-versions") {
 		t.Errorf("expected help output to mention update-versions, got: %s", out)
 	}
-	if !strings.Contains(out, "--protoc") || !strings.Contains(out, "--docker") || !strings.Contains(out, "--buildx") || !strings.Contains(out, "--kind") || !strings.Contains(out, "--kubectl") || !strings.Contains(out, "--kustomize") || !strings.Contains(out, "--go") {
-		t.Errorf("expected help output to mention --protoc, --docker, --buildx, --kind, --kubectl, --kustomize, and --go flags, got: %s", out)
+	if !strings.Contains(out, "--protoc") || !strings.Contains(out, "--docker") || !strings.Contains(out, "--buildx") || !strings.Contains(out, "--helm") || !strings.Contains(out, "--kind") || !strings.Contains(out, "--kubectl") || !strings.Contains(out, "--kustomize") || !strings.Contains(out, "--go") {
+		t.Errorf("expected help output to mention --protoc, --docker, --buildx, --helm, --kind, --kubectl, --kustomize, and --go flags, got: %s", out)
 	}
 }
 
@@ -585,7 +585,7 @@ func TestToolInstall(t *testing.T) {
 		t.Fatalf("expected installed ap at %s to be executable", expectedAp)
 	}
 
-	expectedTools := []string{"kind", "kubectl", "kustomize", "docker", "docker-buildx", "protoc", "go"}
+	expectedTools := []string{"helm", "kind", "kubectl", "kustomize", "docker", "docker-buildx", "protoc", "go"}
 	for _, toolName := range expectedTools {
 		linkPath := filepath.Join(tempDir, toolName)
 		fi, err := os.Lstat(linkPath)

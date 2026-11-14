@@ -291,6 +291,45 @@ func (k *KubernetesRelease) Digest(ctx context.Context, tag, goos, goarch string
 	return ParseSidecarDigest(shaText)
 }
 
+// HelmRelease fetches versions from GitHub releases (helm/helm) and assets/digests from get.helm.sh.
+type HelmRelease struct {
+	BaseURL string // optional override for https://get.helm.sh
+}
+
+func (h *HelmRelease) baseURL() string {
+	if h.BaseURL != "" {
+		return strings.TrimRight(h.BaseURL, "/")
+	}
+	return "https://get.helm.sh"
+}
+
+// Versions returns release tags from GitHub API, newest first.
+func (h *HelmRelease) Versions(ctx context.Context) ([]string, error) {
+	return (&GitHubReleases{Repo: "helm/helm"}).Versions(ctx)
+}
+
+// AssetURL returns the download URL for the asset on get.helm.sh.
+func (h *HelmRelease) AssetURL(tag, goos, goarch string) string {
+	normalizedTag := NormalizeTag(tag)
+	return fmt.Sprintf("%s/helm-%s-%s-%s.tar.gz", h.baseURL(), normalizedTag, goos, goarch)
+}
+
+// Digest fetches the .sha256 sidecar next to the asset and trims it.
+func (h *HelmRelease) Digest(ctx context.Context, tag, goos, goarch string) (string, error) {
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+	}
+
+	shaURL := h.AssetURL(tag, goos, goarch) + ".sha256"
+	shaText, err := fetchText(ctx, shaURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch checksum from %s: %w", shaURL, err)
+	}
+	return ParseSidecarDigest(shaText)
+}
+
 // ParseSidecarDigest extracts and formats a sha256 digest from a sidecar file's text content.
 func ParseSidecarDigest(text string) (string, error) {
 	fields := strings.Fields(text)

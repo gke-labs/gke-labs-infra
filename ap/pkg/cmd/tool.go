@@ -101,6 +101,8 @@ type ToolUpdateVersionsOptions struct {
 	Kind      bool
 	Kubectl   bool
 	Kustomize bool
+	// Helm controls updating helm versions in versions.yaml.
+	Helm bool
 }
 
 // BuildToolUpdateVersionsCommand constructs the cobra command for "tool update-versions".
