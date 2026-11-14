@@ -180,6 +180,9 @@ func TestResolveTarget_Table(t *testing.T) {
 }
 
 func TestCloneOrUpdate(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+
 	repoDir, mainCommit, _ := createTestRepo(t)
 	cacheDir := t.TempDir()
 	t.Setenv("AP_CACHE_DIR", cacheDir)
@@ -251,5 +254,47 @@ func TestCloneOrUpdate(t *testing.T) {
 	}
 	if string(updatedContent) != "updated-content\n" {
 		t.Errorf("updated cloned file content = %q, want %q", string(updatedContent), "updated-content\n")
+	}
+
+	// Corrupt the cached clone and verify CloneOrUpdate recovers by deleting it and re-cloning.
+	if err := os.Truncate(filepath.Join(cloneDir, ".git", "HEAD"), 0); err != nil {
+		t.Fatal(err)
+	}
+
+	repairedCloneDir, err := CloneOrUpdate(ctx, targetUpdated)
+	if err != nil {
+		t.Fatalf("CloneOrUpdate after cache corruption failed: %v", err)
+	}
+	if repairedCloneDir != cloneDir {
+		t.Errorf("expected same cloneDir %q, got %q", cloneDir, repairedCloneDir)
+	}
+
+	repairedContent, err := os.ReadFile(clonedFile)
+	if err != nil {
+		t.Fatalf("failed to read repaired cloned file: %v", err)
+	}
+	if string(repairedContent) != "updated-content\n" {
+		t.Errorf("repaired cloned file content = %q, want %q", string(repairedContent), "updated-content\n")
+	}
+
+	runClonedGit := func(args ...string) string {
+		cmd := exec.Command("git", append([]string{"-C", repairedCloneDir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_CONFIG_GLOBAL=/dev/null",
+			"GIT_CONFIG_NOSYSTEM=1",
+			"GIT_AUTHOR_NAME=Test User",
+			"GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=Test User",
+			"GIT_COMMITTER_EMAIL=test@example.com",
+		)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s failed: %v\nOutput: %s", strings.Join(args, " "), err, string(output))
+		}
+		return strings.TrimSpace(string(output))
+	}
+	checkedOutCommit := runClonedGit("rev-parse", "HEAD")
+	if checkedOutCommit != secondCommit {
+		t.Errorf("checked out commit = %q, want %q", checkedOutCommit, secondCommit)
 	}
 }
