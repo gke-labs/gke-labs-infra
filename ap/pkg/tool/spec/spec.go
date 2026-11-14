@@ -334,16 +334,16 @@ const (
 // fetchTextAttempt executes a single HTTP GET attempt under a per-attempt deadline.
 // It reports whether an error is retryable (transport error, attempt timeout, HTTP 5xx/429).
 func fetchTextAttempt(ctx context.Context, url string) (text string, retryable bool, err error) {
-	attemptCtx, cancel := context.WithTimeout(ctx, fetchTextTimeout)
+	ctx, cancel := context.WithTimeout(ctx, fetchTextTimeout)
 	defer cancel()
 
-	request, err := http.NewRequestWithContext(attemptCtx, http.MethodGet, url, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", false, fmt.Errorf("failed to create request: %w", err)
 	}
 	request.Header.Set("User-Agent", "gke-labs-ap")
 
-	response, err := scoped.HTTPClient(attemptCtx).Do(request)
+	response, err := scoped.HTTPClient(ctx).Do(request)
 	if err != nil {
 		return "", true, err
 	}
