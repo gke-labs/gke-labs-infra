@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/gitsource"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool"
@@ -118,19 +119,23 @@ func BuildRootCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "ap",
 		Short: "ap is a tool for managing gke-labs projects",
-		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
 			cmd.SetContext(scoped.WithLog(cmd.Context(), klog.Background()))
-			repoRoot, err := findRoots()
-			if err != nil {
-				return err
-			}
-			opt.RepoRoot = repoRoot
 			cwd, err := os.Getwd()
 			if err != nil {
 				return err
 			}
 			opt.Dir = cwd
+
+			repoRoot, err := findRoots()
+			if err != nil {
+				if cmd.Annotations != nil && cmd.Annotations["allowURLWithoutRepoRoot"] == "true" && len(args) > 0 && gitsource.IsURL(args[0]) {
+					return nil
+				}
+				return err
+			}
+			opt.RepoRoot = repoRoot
 			return nil
 		},
 	}
