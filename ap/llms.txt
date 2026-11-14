@@ -46,7 +46,7 @@ When making changes to an AP-managed project, coding agents should follow this v
 ## Deployment
 
 -   **Command**: `ap deploy`
--   **Targets**: Positional arguments select targets: `ap deploy <dir>` applies every manifest under any `k8s/` directory beneath `<dir>`, while `ap deploy <dir>/k8s/<file>.yaml` applies a single file and builds only images that file references.
+-   **Targets**: Positional arguments select targets: `ap deploy <dir>` applies every manifest under any `k8s/` directory beneath `<dir>`, `ap deploy <dir>/k8s/<file>.yaml` applies a single file and builds only images that file references, and `ap deploy <dir>/kustomization.yaml` builds with `kustomize build` and applies the generated YAML as a manifest with ApplySet support (a kustomization target builds no container images for now).
 -   **Images**: `ap` automatically builds Docker images found in the `images/<image-name>` directory. Built images deployed with `:latest` are pinned by digest (`tag@sha256`) in applied manifests so redeploying always rolls pods to the new image.
 -   **Kubernetes**: `ap` deploys Kubernetes manifests located in the `k8s` directory.
 -   **Kind**: When the current context is a kind cluster, `ap deploy` works with no `IMAGE_PREFIX`, building locally, loading images into the kind cluster using a unique tag, and applying.

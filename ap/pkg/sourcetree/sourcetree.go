@@ -1026,6 +1026,9 @@ func (r *SourceTree) FindManifests() []string {
 
 		ext := filepath.Ext(f.Name)
 		if ext == ".yaml" || ext == ".yml" {
+			if f.Name == "kustomization.yaml" {
+				continue
+			}
 			manifests = append(manifests, f.Path)
 		}
 	}

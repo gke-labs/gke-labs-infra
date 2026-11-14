@@ -34,6 +34,11 @@ import (
 	"k8s.io/klog/v2"
 )
 
+// IsKustomization reports whether a path refers to a kustomization.yaml file.
+func IsKustomization(path string) bool {
+	return filepath.Base(path) == "kustomization.yaml"
+}
+
 type imageReferenceMatch struct {
 	start     int
 	end       int
@@ -188,6 +193,9 @@ func FindPlaceholderImages(content string) ([]string, error) {
 
 // FindReferencedImagesInFile reads a YAML manifest file and returns referenced placeholder image names.
 func FindReferencedImagesInFile(path string) ([]string, error) {
+	if IsKustomization(path) {
+		return nil, nil
+	}
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read %s: %w", path, err)
@@ -388,6 +396,7 @@ func findEnd(content string, start int, style yaml.Style) int {
 
 // DeployTaskOptions holds configuration options for deploying manifests.
 type DeployTaskOptions struct {
+	RepoRoot          string
 	Namespace         string
 	OriginalNamespace string
 	ScopeResolver     ScopeResolver
@@ -401,6 +410,7 @@ type DeployTaskOptions struct {
 // KubectlApplyTask represents a task to apply a single k8s manifest.
 type KubectlApplyTask struct {
 	ManifestPath      string
+	RepoRoot          string
 	Namespace         string
 	OriginalNamespace string
 	ScopeResolver     ScopeResolver
@@ -409,6 +419,39 @@ type KubectlApplyTask struct {
 	Cluster           KubeCluster
 	ApplySetID        string
 	Membership        *applyset.Membership
+}
+
+func kustomizeBuild(ctx context.Context, scope *tasks.TaskContext, kustomizationPath string) ([]byte, error) {
+	kustomizeBin, err := scope.Tool(ctx, "kustomize")
+	if err != nil {
+		return nil, fmt.Errorf("failed to ensure kustomize: %w", err)
+	}
+
+	relativeTarget, err := filepath.Rel(scope.RepoRoot(), kustomizationPath)
+	if err != nil {
+		relativeTarget = kustomizationPath
+	}
+	scope.Log().Info("Building kustomization", "path", relativeTarget)
+
+	kustomizationDir := filepath.Dir(kustomizationPath)
+	cmd := exec.CommandContext(ctx, kustomizeBin, "build", kustomizationDir)
+	cmd.Dir = kustomizationDir
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		errorMessage := strings.TrimSpace(stderr.String())
+		if errorMessage != "" {
+			return nil, fmt.Errorf("kustomize build failed for %s: %w: %s", relativeTarget, err, errorMessage)
+		}
+		return nil, fmt.Errorf("kustomize build failed for %s: %w", relativeTarget, err)
+	}
+	if stderr.Len() > 0 {
+		if _, err := scope.Stderr().Write(stderr.Bytes()); err != nil {
+			scope.Log().V(2).Info("failed to write kustomize stderr", "error", err)
+		}
+	}
+	return stdout.Bytes(), nil
 }
 
 func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
@@ -436,12 +479,17 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 	if err != nil {
 		return err
 	}
-	klog.Infof("Applying manifest %s", relPath)
 
-	content, err := os.ReadFile(t.ManifestPath)
+	var content []byte
+	if IsKustomization(t.ManifestPath) {
+		content, err = kustomizeBuild(ctx, scope, t.ManifestPath)
+	} else {
+		content, err = os.ReadFile(t.ManifestPath)
+	}
 	if err != nil {
 		return err
 	}
+	klog.Infof("Applying manifest %s", relPath)
 
 	replaced, err := replacePlaceholderImages(string(content), naming)
 	if err != nil {
@@ -543,7 +591,19 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 	return nil
 }
 
+func (t *KubectlApplyTask) targetName() string {
+	if IsKustomization(t.ManifestPath) {
+		relativePath, err := filepath.Rel(t.RepoRoot, t.ManifestPath)
+		if err != nil {
+			return filepath.ToSlash(t.ManifestPath)
+		}
+		return filepath.ToSlash(relativePath)
+	}
+	return filepath.Base(t.ManifestPath)
+}
+
 func (t *KubectlApplyTask) GetName() string {
+	target := t.targetName()
 	var parts []string
 	if cluster := t.Cluster.String(); cluster != "" {
 		parts = append(parts, "context: "+cluster)
@@ -552,9 +612,9 @@ func (t *KubectlApplyTask) GetName() string {
 		parts = append(parts, "namespace: "+t.Namespace)
 	}
 	if len(parts) > 0 {
-		return fmt.Sprintf("kubectl-apply-%s (%s)", filepath.Base(t.ManifestPath), strings.Join(parts, ", "))
+		return fmt.Sprintf("kubectl-apply-%s (%s)", target, strings.Join(parts, ", "))
 	}
-	return fmt.Sprintf("kubectl-apply-%s", filepath.Base(t.ManifestPath))
+	return fmt.Sprintf("kubectl-apply-%s", target)
 }
 
 func (t *KubectlApplyTask) GetChildren() []tasks.Task {
@@ -642,6 +702,7 @@ func DeployTasksForManifests(manifests []string, opts ...DeployTaskOptions) task
 	for _, manifest := range manifests {
 		deployTasks = append(deployTasks, &KubectlApplyTask{
 			ManifestPath:      manifest,
+			RepoRoot:          opt.RepoRoot,
 			Namespace:         opt.Namespace,
 			OriginalNamespace: opt.OriginalNamespace,
 			ScopeResolver:     opt.ScopeResolver,

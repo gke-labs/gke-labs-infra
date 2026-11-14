@@ -61,7 +61,7 @@ func BuildDeployCommand(rootOpt *RootOptions) *cobra.Command {
 		Short: "Deploy artifacts",
 		Long: `Deploy artifacts by building container images and applying Kubernetes manifests.
 
-Positional path arguments select either a directory to apply all manifests found under any k8s/ directory beneath it, or a single manifest file to apply only that file and build only its referenced images.
+Positional path arguments select either a directory to apply all manifests found under any k8s/ directory beneath it, a single manifest file to apply only that file and build only its referenced images, or an explicit kustomization.yaml file to build with kustomize and apply.
 
 Flags configure the target cluster (--cluster), target namespace (-n, --namespace), remote buildkit daemon (--buildkit-host), and whether to skip pushing images (--skip-push).`,
 		Args: cobra.ArbitraryArgs,
@@ -187,20 +187,30 @@ func selectManifests(r *sourcetree.SourceTree, dir string, whole bool, filters [
 
 	seenManifest := make(map[string]bool)
 	var selectedManifests []string
-	for _, f := range filters {
+	for _, filter := range filters {
 		matched := false
-		for _, m := range allManifests {
-			cleanM := filepath.Clean(m)
-			if cleanM == f.path || strings.HasPrefix(cleanM, f.path+string(filepath.Separator)) {
+		for _, manifest := range allManifests {
+			cleanManifest := filepath.Clean(manifest)
+			if cleanManifest == filter.path || strings.HasPrefix(cleanManifest, filter.path+string(filepath.Separator)) {
 				matched = true
-				if !seenManifest[cleanM] {
-					seenManifest[cleanM] = true
-					selectedManifests = append(selectedManifests, cleanM)
+				if !seenManifest[cleanManifest] {
+					seenManifest[cleanManifest] = true
+					selectedManifests = append(selectedManifests, cleanManifest)
 				}
 			}
 		}
 		if !matched {
-			return nil, fmt.Errorf("no manifests found under %q", f.arg)
+			if k8s.IsKustomization(filter.path) && r.FileExists(filter.path) {
+				cleanPath := filepath.Clean(filter.path)
+				matched = true
+				if !seenManifest[cleanPath] {
+					seenManifest[cleanPath] = true
+					selectedManifests = append(selectedManifests, cleanPath)
+				}
+			}
+		}
+		if !matched {
+			return nil, fmt.Errorf("no manifests found under %q", filter.arg)
 		}
 	}
 	sort.Strings(selectedManifests)
@@ -414,6 +424,7 @@ func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, b
 		}
 
 		deployTasks := k8s.DeployTasksForManifests(plan.manifests, k8s.DeployTaskOptions{
+			RepoRoot:          repoRoot,
 			Namespace:         namespace,
 			OriginalNamespace: originalNamespace,
 			Naming:            naming,

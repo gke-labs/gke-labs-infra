@@ -28,6 +28,7 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
@@ -1814,4 +1815,89 @@ func TestDeploy_DryRun_ResolvedReferences(t *testing.T) {
 			t.Errorf("expected dry-run output to list image to load 'images.local/a:latest', got:\n%s", out)
 		}
 	})
+}
+
+func TestSelectManifests_Kustomization(t *testing.T) {
+	tempDir := t.TempDir()
+
+	certManagerDir := filepath.Join(tempDir, "cert-manager")
+	if err := os.MkdirAll(certManagerDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	kustomizationPath := filepath.Join(certManagerDir, "kustomization.yaml")
+	if err := os.WriteFile(kustomizationPath, []byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tree, err := sourcetree.Open(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Explicit kustomization file path is selected.
+	explicitFilters := []targetFilter{{arg: "cert-manager/kustomization.yaml", path: kustomizationPath}}
+	selected, err := selectManifests(tree, tempDir, false, explicitFilters)
+	if err != nil {
+		t.Fatalf("selectManifests failed for explicit kustomization path: %v", err)
+	}
+	expectedSelected := []string{kustomizationPath}
+	if !reflect.DeepEqual(selected, expectedSelected) {
+		t.Errorf("selectManifests = %v, want %v", selected, expectedSelected)
+	}
+
+	// Directory containing only kustomization.yaml is not treated as a manifest directory.
+	dirFilters := []targetFilter{{arg: "cert-manager", path: certManagerDir}}
+	_, err = selectManifests(tree, tempDir, false, dirFilters)
+	if err == nil {
+		t.Fatalf("expected error for directory containing only kustomization.yaml, got nil")
+	}
+	expectedErrorMessage := `no manifests found under "cert-manager"`
+	if !strings.Contains(err.Error(), expectedErrorMessage) {
+		t.Errorf("expected error to contain %q, got: %v", expectedErrorMessage, err)
+	}
+}
+
+func TestDeploy_Kustomize_DryRun(t *testing.T) {
+	tempDir := t.TempDir()
+
+	if err := os.MkdirAll(filepath.Join(tempDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir, ".ap"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, ".ap", "ap.yaml"), []byte("imagePrefix: images.local\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	certManagerDir := filepath.Join(tempDir, "cert-manager")
+	if err := os.MkdirAll(certManagerDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	kustomizationPath := filepath.Join(certManagerDir, "kustomization.yaml")
+	if err := os.WriteFile(kustomizationPath, []byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	opt := DeployOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: tempDir,
+			Dir:      tempDir,
+			DryRun:   true,
+		},
+	}
+	if err := opt.Resolve([]string{"cert-manager/kustomization.yaml"}); err != nil {
+		t.Fatalf("opt.Resolve failed: %v", err)
+	}
+
+	output := captureStdout(t, func() {
+		if err := RunDeploy(t.Context(), opt); err != nil {
+			t.Fatalf("RunDeploy failed: %v", err)
+		}
+	})
+
+	expectedTaskName := "kubectl-apply-cert-manager/kustomization.yaml"
+	if !strings.Contains(output, expectedTaskName) {
+		t.Errorf("expected dry-run output to contain %q, got:\n%s", expectedTaskName, output)
+	}
 }
