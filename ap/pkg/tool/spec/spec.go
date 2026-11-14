@@ -247,12 +247,6 @@ func (k *KubernetesRelease) baseURL() string {
 
 // Versions reads the stable tag from https://dl.k8s.io/release/stable.txt (one entry).
 func (k *KubernetesRelease) Versions(ctx context.Context) ([]string, error) {
-	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-	}
-
 	url := fmt.Sprintf("%s/stable.txt", k.baseURL())
 	text, err := fetchText(ctx, url)
 	if err != nil {
@@ -277,12 +271,6 @@ func (k *KubernetesRelease) AssetURL(tag, goos, goarch string) string {
 
 // Digest fetches the .sha256 sidecar next to the asset and trims it.
 func (k *KubernetesRelease) Digest(ctx context.Context, tag, goos, goarch string) (string, error) {
-	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-	}
-
 	shaURL := k.AssetURL(tag, goos, goarch) + ".sha256"
 	shaText, err := fetchText(ctx, shaURL)
 	if err != nil {
@@ -316,12 +304,6 @@ func (h *HelmRelease) AssetURL(tag, goos, goarch string) string {
 
 // Digest fetches the .sha256 sidecar next to the asset and trims it.
 func (h *HelmRelease) Digest(ctx context.Context, tag, goos, goarch string) (string, error) {
-	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-	}
-
 	shaURL := h.AssetURL(tag, goos, goarch) + ".sha256"
 	shaText, err := fetchText(ctx, shaURL)
 	if err != nil {
@@ -343,33 +325,90 @@ func ParseSidecarDigest(text string) (string, error) {
 	return digest, nil
 }
 
-func fetchText(ctx context.Context, url string) (string, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to create request for %s: %w", url, err)
-	}
-	request.Header.Set("User-Agent", "gke-labs-ap")
+const (
+	fetchTextTimeout     = 30 * time.Second
+	fetchTextMaxAttempts = 3
+	fetchTextRetryPause  = 100 * time.Millisecond
+)
 
-	response, err := scoped.HTTPClient(ctx).Do(request)
-	if err != nil {
+// fetchText fetches small text files (such as version feeds or checksum sidecars)
+// and returns the trimmed content. It must not be used for large downloads.
+// Each attempt runs under its own short deadline derived from ctx, and retries
+// transient failures (transport errors, timeouts, and HTTP 5xx/429).
+func fetchText(ctx context.Context, url string) (string, error) {
+	if err := ctx.Err(); err != nil {
 		return "", fmt.Errorf("failed to fetch from %s: %w", url, err)
 	}
-	defer func() {
-		if closeErr := response.Body.Close(); closeErr != nil {
+
+	var lastErr error
+	pause := fetchTextRetryPause
+	for attempt := 0; attempt < fetchTextMaxAttempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return "", fmt.Errorf("failed to fetch from %s: %w", url, ctx.Err())
+			case <-time.After(pause):
+				pause *= 2
+			}
+		}
+
+		if err := ctx.Err(); err != nil {
+			return "", fmt.Errorf("failed to fetch from %s: %w", url, err)
+		}
+
+		attemptCtx, cancel := context.WithTimeout(ctx, fetchTextTimeout)
+
+		req, err := http.NewRequestWithContext(attemptCtx, http.MethodGet, url, nil)
+		if err != nil {
+			cancel()
+			return "", fmt.Errorf("failed to create request for %s: %w", url, err)
+		}
+		req.Header.Set("User-Agent", "gke-labs-ap")
+
+		resp, err := scoped.HTTPClient(attemptCtx).Do(req)
+		if err != nil {
+			cancel()
+			if ctx.Err() != nil {
+				return "", fmt.Errorf("failed to fetch from %s: %w", url, ctx.Err())
+			}
+			lastErr = err
+			continue
+		}
+
+		if resp.StatusCode == http.StatusOK {
+			body, readErr := io.ReadAll(resp.Body)
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				klog.V(2).Infof("failed to close response body: %v", closeErr)
+			}
+			cancel()
+			if readErr != nil {
+				if ctx.Err() != nil {
+					return "", fmt.Errorf("failed to fetch from %s: %w", url, ctx.Err())
+				}
+				lastErr = fmt.Errorf("failed to read response: %w", readErr)
+				continue
+			}
+			return strings.TrimSpace(string(body)), nil
+		}
+
+		if closeErr := resp.Body.Close(); closeErr != nil {
 			klog.V(2).Infof("failed to close response body: %v", closeErr)
 		}
-	}()
+		cancel()
 
-	if response.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to fetch from %s: HTTP %s", url, response.Status)
+		if ctx.Err() != nil {
+			return "", fmt.Errorf("failed to fetch from %s: %w", url, ctx.Err())
+		}
+
+		if resp.StatusCode == http.StatusTooManyRequests || (resp.StatusCode >= 500 && resp.StatusCode <= 599) {
+			lastErr = fmt.Errorf("HTTP %s", resp.Status)
+			continue
+		}
+
+		return "", fmt.Errorf("failed to fetch from %s: HTTP %s", url, resp.Status)
 	}
 
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response from %s: %w", url, err)
-	}
-
-	return strings.TrimSpace(string(body)), nil
+	return "", fmt.Errorf("failed to fetch from %s: %w", url, lastErr)
 }
 
 // Spec defines the configuration and behavior of a managed external tool.
