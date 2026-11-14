@@ -247,12 +247,6 @@ func (k *KubernetesRelease) baseURL() string {
 
 // Versions reads the stable tag from https://dl.k8s.io/release/stable.txt (one entry).
 func (k *KubernetesRelease) Versions(ctx context.Context) ([]string, error) {
-	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-	}
-
 	url := fmt.Sprintf("%s/stable.txt", k.baseURL())
 	text, err := fetchText(ctx, url)
 	if err != nil {
@@ -277,12 +271,6 @@ func (k *KubernetesRelease) AssetURL(tag, goos, goarch string) string {
 
 // Digest fetches the .sha256 sidecar next to the asset and trims it.
 func (k *KubernetesRelease) Digest(ctx context.Context, tag, goos, goarch string) (string, error) {
-	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-	}
-
 	shaURL := k.AssetURL(tag, goos, goarch) + ".sha256"
 	shaText, err := fetchText(ctx, shaURL)
 	if err != nil {
@@ -316,12 +304,6 @@ func (h *HelmRelease) AssetURL(tag, goos, goarch string) string {
 
 // Digest fetches the .sha256 sidecar next to the asset and trims it.
 func (h *HelmRelease) Digest(ctx context.Context, tag, goos, goarch string) (string, error) {
-	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-	}
-
 	shaURL := h.AssetURL(tag, goos, goarch) + ".sha256"
 	shaText, err := fetchText(ctx, shaURL)
 	if err != nil {
@@ -343,16 +325,27 @@ func ParseSidecarDigest(text string) (string, error) {
 	return digest, nil
 }
 
-func fetchText(ctx context.Context, url string) (string, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+const (
+	fetchTextTimeout     = 30 * time.Second
+	fetchTextMaxAttempts = 3
+	fetchTextRetryPause  = 100 * time.Millisecond
+)
+
+// fetchTextAttempt executes a single HTTP GET attempt under a per-attempt deadline.
+// It reports whether an error is retryable (transport error, attempt timeout, HTTP 5xx/429).
+func fetchTextAttempt(ctx context.Context, url string) (text string, retryable bool, err error) {
+	attemptCtx, cancel := context.WithTimeout(ctx, fetchTextTimeout)
+	defer cancel()
+
+	request, err := http.NewRequestWithContext(attemptCtx, http.MethodGet, url, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to create request for %s: %w", url, err)
+		return "", false, fmt.Errorf("failed to create request: %w", err)
 	}
 	request.Header.Set("User-Agent", "gke-labs-ap")
 
-	response, err := scoped.HTTPClient(ctx).Do(request)
+	response, err := scoped.HTTPClient(attemptCtx).Do(request)
 	if err != nil {
-		return "", fmt.Errorf("failed to fetch from %s: %w", url, err)
+		return "", true, err
 	}
 	defer func() {
 		if closeErr := response.Body.Close(); closeErr != nil {
@@ -360,16 +353,53 @@ func fetchText(ctx context.Context, url string) (string, error) {
 		}
 	}()
 
-	if response.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to fetch from %s: HTTP %s", url, response.Status)
+	if response.StatusCode == http.StatusOK {
+		body, err := io.ReadAll(response.Body)
+		if err != nil {
+			return "", true, fmt.Errorf("failed to read response: %w", err)
+		}
+		return strings.TrimSpace(string(body)), false, nil
 	}
 
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response from %s: %w", url, err)
+	if response.StatusCode == http.StatusTooManyRequests || (response.StatusCode >= 500 && response.StatusCode <= 599) {
+		return "", true, fmt.Errorf("HTTP %s", response.Status)
 	}
 
-	return strings.TrimSpace(string(body)), nil
+	return "", false, fmt.Errorf("HTTP %s", response.Status)
+}
+
+// fetchText fetches small text files (such as version feeds or checksum sidecars)
+// and returns the trimmed content. It must not be used for large downloads.
+// Each attempt runs under its own short deadline derived from ctx, and retries
+// transient failures (transport errors, timeouts, and HTTP 5xx/429).
+func fetchText(ctx context.Context, url string) (string, error) {
+	var lastError error
+	pause := fetchTextRetryPause
+	for attempt := 0; attempt < fetchTextMaxAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return "", fmt.Errorf("failed to fetch from %s: %w", url, err)
+		}
+
+		text, retryable, err := fetchTextAttempt(ctx, url)
+		if err == nil {
+			return text, nil
+		}
+		if !retryable {
+			return "", fmt.Errorf("failed to fetch from %s: %w", url, err)
+		}
+		lastError = err
+
+		if attempt < fetchTextMaxAttempts-1 {
+			select {
+			case <-ctx.Done():
+				return "", fmt.Errorf("failed to fetch from %s: %w", url, ctx.Err())
+			case <-time.After(pause):
+				pause *= 2
+			}
+		}
+	}
+
+	return "", fmt.Errorf("failed to fetch from %s: %w", url, lastError)
 }
 
 // Spec defines the configuration and behavior of a managed external tool.
