@@ -15,7 +15,9 @@
 package tool
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -31,6 +33,7 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kind"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kubectl"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kustomize"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/spec"
 	toolversions "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/versions"
 	"k8s.io/klog/v2"
@@ -283,7 +286,7 @@ func TestSpec_ColdRun_DoesNotMutateHome(t *testing.T) {
 }
 
 func TestSpec_VersionsYAML(t *testing.T) {
-	for _, s := range []*spec.Spec{kind.Spec, kubectl.Spec} {
+	for _, s := range []*spec.Spec{kind.Spec, kubectl.Spec, kustomize.Spec} {
 		t.Run(s.Name, func(t *testing.T) {
 			rels, err := toolversions.Parse(s.VersionsYAML, s.Name)
 			if err != nil {
@@ -448,4 +451,131 @@ func TestSpec_ConfigLoad(t *testing.T) {
 			t.Errorf("expected default version %q, got %q", expectedVer, ver)
 		}
 	})
+}
+
+func TestTarGz_Extract(t *testing.T) {
+	tempDir := t.TempDir()
+	tgzPath := filepath.Join(tempDir, "archive.tar.gz")
+
+	binContent := []byte("#!/bin/sh\necho mock binary\n")
+	otherContent := []byte("readme documentation\n")
+
+	f, err := os.Create(tgzPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw := gzip.NewWriter(f)
+	tw := tar.NewWriter(gw)
+
+	// Binary entry
+	if err := tw.WriteHeader(&tar.Header{
+		Name: "mybin",
+		Mode: 0755,
+		Size: int64(len(binContent)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(binContent); err != nil {
+		t.Fatal(err)
+	}
+
+	// Another entry in archive
+	if err := tw.WriteHeader(&tar.Header{
+		Name: "README.md",
+		Mode: 0644,
+		Size: int64(len(otherContent)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(otherContent); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Extract binary entry
+	dest := filepath.Join(tempDir, "extracted", "bin", "mybin")
+	if err := (spec.TarGz{}).Extract(tgzPath, "mybin", dest); err != nil {
+		t.Fatalf("TarGz.Extract failed: %v", err)
+	}
+
+	gotData, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("failed reading extracted binary: %v", err)
+	}
+	if string(gotData) != string(binContent) {
+		t.Errorf("content mismatch: got %q, want %q", string(gotData), string(binContent))
+	}
+	if !fileutils.IsExecutable(dest) {
+		t.Errorf("expected extracted binary %s to be executable", dest)
+	}
+
+	// Missing entry errors
+	missingDest := filepath.Join(tempDir, "extracted", "bin", "missing")
+	if err := (spec.TarGz{}).Extract(tgzPath, "missing", missingDest); err == nil {
+		t.Fatal("expected error extracting missing binary from tar.gz, got nil")
+	}
+}
+
+func TestGitHubReleases_Versions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		releasesJSON := `[
+			{"tag_name": "kustomize/v5.8.3", "draft": false, "prerelease": false},
+			{"tag_name": "api/v0.21.3", "draft": false, "prerelease": false},
+			{"tag_name": "v0.33.0", "draft": false, "prerelease": false},
+			{"tag_name": "kustomize/v5.8.2", "draft": false, "prerelease": false},
+			{"tag_name": "kustomize/v5.8.1-rc1", "draft": false, "prerelease": true},
+			{"tag_name": "v0.32.0", "draft": false, "prerelease": false}
+		]`
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(releasesJSON))
+	}))
+	defer server.Close()
+
+	tests := []struct {
+		name      string
+		tagPrefix string
+		wantVers  []string
+	}{
+		{
+			name:      "no prefix",
+			tagPrefix: "",
+			wantVers:  []string{"v0.33.0", "v0.32.0"},
+		},
+		{
+			name:      "with TagPrefix",
+			tagPrefix: "kustomize/",
+			wantVers:  []string{"v5.8.3", "v5.8.2"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gh := &spec.GitHubReleases{
+				Repo:       "test/repo",
+				TagPrefix:  tc.tagPrefix,
+				APIBaseURL: server.URL,
+			}
+			vers, err := gh.Versions(t.Context())
+			if err != nil {
+				t.Fatalf("Versions failed: %v", err)
+			}
+			if len(vers) != len(tc.wantVers) {
+				t.Fatalf("got %d versions %v, want %d versions %v", len(vers), vers, len(tc.wantVers), tc.wantVers)
+			}
+			for i := range tc.wantVers {
+				if vers[i] != tc.wantVers[i] {
+					t.Errorf("version[%d] = %q, want %q", i, vers[i], tc.wantVers[i])
+				}
+			}
+		})
+	}
 }
