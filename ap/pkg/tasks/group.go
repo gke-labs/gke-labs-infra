@@ -113,7 +113,7 @@ func (g *Group) runParallel(ctx context.Context, scope *TaskContext) error {
 		limit = len(g.Tasks)
 	}
 
-	runCtx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	type taskItem struct {
@@ -144,12 +144,12 @@ func (g *Group) runParallel(ctx context.Context, scope *TaskContext) error {
 			defer wg.Done()
 			for item := range taskCh {
 				select {
-				case <-runCtx.Done():
+				case <-ctx.Done():
 					return
 				default:
 				}
 
-				err := RunTask(runCtx, scope, item.task)
+				err := RunTask(ctx, scope, item.task)
 
 				resultsMu.Lock()
 				results[item.index] = &taskResult{err: err}
