@@ -19,7 +19,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -1892,6 +1895,170 @@ func TestDeploy_Kustomize_DryRun(t *testing.T) {
 
 	output := captureStdout(t, func() {
 		if err := RunDeploy(t.Context(), opt); err != nil {
+			t.Fatalf("RunDeploy failed: %v", err)
+		}
+	})
+
+	expectedTaskName := "kubectl-apply-cert-manager/kustomization.yaml"
+	if !strings.Contains(output, expectedTaskName) {
+		t.Errorf("expected dry-run output to contain %q, got:\n%s", expectedTaskName, output)
+	}
+}
+
+func createTestDeployGitRepo(t *testing.T) string {
+	t.Helper()
+	repoDir := t.TempDir()
+
+	runGit := func(args ...string) string {
+		cmd := exec.Command("git", append([]string{"-C", repoDir}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s failed: %v\nOutput: %s", strings.Join(args, " "), err, string(out))
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	runGit("init")
+	runGit("config", "user.email", "test@example.com")
+	runGit("config", "user.name", "Test User")
+	runGit("checkout", "-b", "main")
+
+	kmDir := filepath.Join(repoDir, "cert-manager")
+	if err := os.MkdirAll(kmDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	kmFile := filepath.Join(kmDir, "kustomization.yaml")
+	kmContent := `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- https://github.com/cert-manager/cert-manager/releases/download/v1.21.3/cert-manager.yaml
+`
+	if err := os.WriteFile(kmFile, []byte(kmContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit("add", "cert-manager/kustomization.yaml")
+	runGit("commit", "-m", "add cert-manager kustomization")
+
+	return repoDir
+}
+
+func TestDeploy_URL_MultipleTargetsFails(t *testing.T) {
+	ctx := t.Context()
+	opt := DeployOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: t.TempDir(),
+			Dir:      t.TempDir(),
+		},
+	}
+
+	err := opt.ResolveContext(ctx, []string{"https://github.com/foo/bar/blob/main/k8s/a.yaml", "extra"})
+	if err == nil || !strings.Contains(err.Error(), "cannot combine URL target with other targets") {
+		t.Errorf("expected 'cannot combine URL target with other targets' error, got %v", err)
+	}
+
+	err = opt.ResolveContext(ctx, []string{"local-path", "https://github.com/foo/bar/blob/main/k8s/a.yaml"})
+	if err == nil || !strings.Contains(err.Error(), "cannot combine URL target with other targets") {
+		t.Errorf("expected 'cannot combine URL target with other targets' error, got %v", err)
+	}
+}
+
+func TestDeploy_URL_KustomizeSyntax_DryRun(t *testing.T) {
+	repoDir := createTestDeployGitRepo(t)
+	cacheDir := t.TempDir()
+	t.Setenv("AP_CACHE_DIR", cacheDir)
+	ctx := t.Context()
+
+	opt := DeployOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: t.TempDir(),
+			Dir:      t.TempDir(),
+			DryRun:   true,
+		},
+	}
+
+	urlStr := "git::" + repoDir + "//cert-manager/kustomization.yaml?ref=main"
+	if err := opt.ResolveContext(ctx, []string{urlStr}); err != nil {
+		t.Fatalf("opt.ResolveContext failed: %v", err)
+	}
+
+	if !strings.HasPrefix(opt.RepoRoot, cacheDir) {
+		t.Errorf("expected opt.RepoRoot to be in cacheDir %s, got %s", cacheDir, opt.RepoRoot)
+	}
+
+	output := captureStdout(t, func() {
+		if err := RunDeploy(ctx, opt); err != nil {
+			t.Fatalf("RunDeploy failed: %v", err)
+		}
+	})
+
+	expectedTaskName := "kubectl-apply-cert-manager/kustomization.yaml"
+	if !strings.Contains(output, expectedTaskName) {
+		t.Errorf("expected dry-run output to contain %q, got:\n%s", expectedTaskName, output)
+	}
+}
+
+func TestDeploy_URL_GithubWeb_DryRun(t *testing.T) {
+	repoDir := createTestDeployGitRepo(t)
+	cacheDir := t.TempDir()
+	t.Setenv("AP_CACHE_DIR", cacheDir)
+	ctx := t.Context()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("x-repository-download", "git clone "+repoDir)
+		w.Header().Set("x-raw-download", "https://raw.githubusercontent.com/justinsb/packages/main/cert-manager/kustomization.yaml")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	opt := DeployOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: t.TempDir(),
+			Dir:      t.TempDir(),
+			DryRun:   true,
+		},
+	}
+
+	urlStr := server.URL + "/justinsb/packages/blob/main/cert-manager/kustomization.yaml"
+	if err := opt.ResolveContext(ctx, []string{urlStr}); err != nil {
+		t.Fatalf("opt.ResolveContext failed: %v", err)
+	}
+
+	output := captureStdout(t, func() {
+		if err := RunDeploy(ctx, opt); err != nil {
+			t.Fatalf("RunDeploy failed: %v", err)
+		}
+	})
+
+	expectedTaskName := "kubectl-apply-cert-manager/kustomization.yaml"
+	if !strings.Contains(output, expectedTaskName) {
+		t.Errorf("expected dry-run output to contain %q, got:\n%s", expectedTaskName, output)
+	}
+}
+
+func TestDeploy_URL_OutsideGitRepo(t *testing.T) {
+	repoDir := createTestDeployGitRepo(t)
+	cacheDir := t.TempDir()
+	t.Setenv("AP_CACHE_DIR", cacheDir)
+	ctx := t.Context()
+
+	// Initial options without RepoRoot (running outside any git repo)
+	opt := DeployOptions{
+		RootOptions: &RootOptions{
+			DryRun: true,
+		},
+	}
+
+	urlStr := "git::" + repoDir + "//cert-manager/kustomization.yaml?ref=main"
+	if err := opt.ResolveContext(ctx, []string{urlStr}); err != nil {
+		t.Fatalf("opt.ResolveContext failed: %v", err)
+	}
+
+	if opt.RepoRoot == "" {
+		t.Fatalf("expected opt.RepoRoot to be populated after URL resolution")
+	}
+
+	output := captureStdout(t, func() {
+		if err := RunDeploy(ctx, opt); err != nil {
 			t.Fatalf("RunDeploy failed: %v", err)
 		}
 	})

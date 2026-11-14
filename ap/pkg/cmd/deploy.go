@@ -24,6 +24,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/applyset"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/git"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/imageref"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
@@ -61,12 +62,12 @@ func BuildDeployCommand(rootOpt *RootOptions) *cobra.Command {
 		Short: "Deploy artifacts",
 		Long: `Deploy artifacts by building container images and applying Kubernetes manifests.
 
-Positional path arguments select either a directory to apply all manifests found under any k8s/ directory beneath it, a single manifest file to apply only that file and build only its referenced images, or an explicit kustomization.yaml file to build with kustomize and apply.
+Positional path arguments select either a directory to apply all manifests found under any k8s/ directory beneath it, a single manifest file to apply only that file and build only its referenced images, or an explicit kustomization.yaml file to build with kustomize and apply. Positional arguments also support Git URLs (e.g. GitHub web links, raw links, or Kustomize-style syntax with ?ref=), cloning locally and deploying the resolved target.
 
 Flags configure the target cluster (--cluster), target namespace (-n, --namespace), remote buildkit daemon (--buildkit-host), and whether to skip pushing images (--skip-push).`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := opt.Resolve(args); err != nil {
+			if err := opt.ResolveContext(cmd.Context(), args); err != nil {
 				return err
 			}
 			return RunDeploy(cmd.Context(), opt)
@@ -82,8 +83,32 @@ Flags configure the target cluster (--cluster), target namespace (-n, --namespac
 	return cmd
 }
 
-// Resolve resolves the target paths based on args for deploy.
-func (opt *DeployOptions) Resolve(args []string) error {
+// ResolveContext resolves the target paths based on args for deploy with a context.
+func (opt *DeployOptions) ResolveContext(ctx context.Context, args []string) error {
+	if len(args) > 0 && git.IsURL(args[0]) {
+		if len(args) > 1 {
+			return fmt.Errorf("cannot combine URL target with other targets")
+		}
+		target, err := git.ResolveTarget(ctx, args[0])
+		if err != nil {
+			return fmt.Errorf("failed to resolve target URL: %w", err)
+		}
+		cloneDir, err := git.CloneOrUpdate(ctx, target)
+		if err != nil {
+			return fmt.Errorf("failed to clone repository: %w", err)
+		}
+		opt.RepoRoot = cloneDir
+		opt.Dir = cloneDir
+		opt.SourceTree = nil
+		args = []string{target.Path}
+	} else {
+		for _, arg := range args {
+			if git.IsURL(arg) {
+				return fmt.Errorf("cannot combine URL target with other targets")
+			}
+		}
+	}
+
 	opt.Targets = args
 	if opt.RepoRoot == "" {
 		return fmt.Errorf("repo root is not set")
@@ -125,6 +150,11 @@ func (opt *DeployOptions) Resolve(args []string) error {
 	}
 	opt.plans = plans
 	return nil
+}
+
+// Resolve resolves the target paths based on args for deploy.
+func (opt *DeployOptions) Resolve(args []string) error {
+	return opt.ResolveContext(context.Background(), args)
 }
 
 type deployPlan struct {

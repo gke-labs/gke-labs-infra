@@ -122,10 +122,11 @@ func BuildRootCommand() *cobra.Command {
 			cmd.SilenceUsage = true
 			cmd.SetContext(scoped.WithLog(cmd.Context(), klog.Background()))
 			repoRoot, err := findRoots()
-			if err != nil {
-				return err
+			if err == nil {
+				opt.RepoRoot = repoRoot
+			} else {
+				klog.V(2).Infof("repository root not found: %v", err)
 			}
-			opt.RepoRoot = repoRoot
 			cwd, err := os.Getwd()
 			if err != nil {
 				return err
