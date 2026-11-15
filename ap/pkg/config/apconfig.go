@@ -34,12 +34,18 @@ type PresubmitConfig struct {
 	SkipIfOnlyChanged []string `json:"skipIfOnlyChanged"`
 }
 
+// TestConfig represents test configuration in ap.yaml.
+type TestConfig struct {
+	Race bool `json:"race"`
+}
+
 // APConfig represents the configuration loaded from .ap/ap.yaml.
 type APConfig struct {
 	Version     string           `json:"version"`
 	ImagePrefix string           `json:"imagePrefix"`
 	Presubmits  *PresubmitConfig `json:"presubmits"`
 	Generate    *GenerateConfig  `json:"generate"`
+	Test        *TestConfig      `json:"test"`
 }
 
 // LoadAPConfig loads the configuration from .ap/ap.yaml using strict unmarshaling.

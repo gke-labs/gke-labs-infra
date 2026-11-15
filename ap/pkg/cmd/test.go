@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
+	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
 )
@@ -26,6 +28,9 @@ import (
 // TestOptions holds the configuration for the "test" command.
 type TestOptions struct {
 	*RootOptions
+	Race bool
+
+	raceExplicit bool
 }
 
 // BuildTestCommand constructs the cobra command for "test".
@@ -42,9 +47,12 @@ func BuildTestCommand(rootOpt *RootOptions) *cobra.Command {
 			if err := opt.Resolve(args); err != nil {
 				return err
 			}
+			opt.raceExplicit = cmd.Flags().Changed("race")
 			return RunTest(cmd.Context(), opt)
 		},
 	}
+
+	cmd.Flags().BoolVar(&opt.Race, "race", false, "Run tests under the data race detector")
 
 	return cmd
 }
@@ -53,6 +61,16 @@ func BuildTestCommand(rootOpt *RootOptions) *cobra.Command {
 func RunTest(ctx context.Context, opt TestOptions) error {
 	if err := requireRepoRoot(opt.RootOptions); err != nil {
 		return err
+	}
+
+	if !opt.raceExplicit && !opt.Race {
+		cfg, err := config.LoadAPConfig(opt.RepoRoot)
+		if err != nil {
+			return err
+		}
+		if cfg != nil && cfg.Test != nil && cfg.Test.Race {
+			opt.Race = true
+		}
 	}
 
 	r, err := opt.GetSourceTree()
@@ -68,6 +86,9 @@ func RunTest(ctx context.Context, opt TestOptions) error {
 	var allTasks []tasks.Task
 	for _, scope := range scopes {
 		if len(scope.TestTasks) > 0 {
+			if opt.Race {
+				setRace(scope.TestTasks, true)
+			}
 			group := &tasks.Group{
 				Name:            fmt.Sprintf("test-%s", filepath.Base(scope.Dir())),
 				Tasks:           scope.TestTasks,
@@ -78,4 +99,15 @@ func RunTest(ctx context.Context, opt TestOptions) error {
 	}
 
 	return tasks.Run(ctx, tasks.NewTaskContext(opt.RepoRoot, opt.RepoRoot, r), allTasks, tasks.RunOptions{DryRun: opt.DryRun, ContinueOnError: true})
+}
+
+func setRace(taskList []tasks.Task, race bool) {
+	for _, t := range taskList {
+		switch task := t.(type) {
+		case *golang.GoTestTask:
+			task.Race = race
+		case *tasks.Group:
+			setRace(task.Tasks, race)
+		}
+	}
 }

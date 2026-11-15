@@ -46,6 +46,7 @@ type GoTestTask struct {
 	Dir        string
 	Name       string
 	ResultFile string
+	Race       bool
 }
 
 func (t *GoTestTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
@@ -53,6 +54,7 @@ func (t *GoTestTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
 	opts := RunGoTestOptions{
 		Stdout: scope.Stdout(),
 		Stderr: scope.Stderr(),
+		Race:   t.Race,
 	}
 	if err := RunGoTest(ctx, t.Dir, t.ResultFile, opts); err != nil {
 		return fmt.Errorf("go test failed in %s: %w", t.Dir, err)
@@ -171,6 +173,7 @@ type RunGoTestOptions struct {
 	Args   []string
 	Stdout io.Writer
 	Stderr io.Writer
+	Race   bool
 }
 
 func writef(w io.Writer, format string, args ...any) {
@@ -194,6 +197,9 @@ func RunGoTest(ctx context.Context, dir string, resultFile string, opts RunGoTes
 	}()
 
 	args := []string{"test", "-json"}
+	if opts.Race {
+		args = append(args, "-race")
+	}
 	if len(opts.Args) > 0 {
 		args = append(args, opts.Args...)
 	} else {

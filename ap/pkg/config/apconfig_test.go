@@ -207,3 +207,34 @@ func TestLoadAPConfig_ValidationErrorIncludesPath(t *testing.T) {
 		t.Errorf("expected error to contain %s, got: %v", configFile, err)
 	}
 }
+
+func TestLoadAPConfig_TestRace(t *testing.T) {
+	tempDir := t.TempDir()
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.MkdirAll(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	content := `
+version: "!self"
+test:
+  race: true
+`
+	if err := os.WriteFile(filepath.Join(apDir, "ap.yaml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadAPConfig(tempDir)
+	if err != nil {
+		t.Fatalf("LoadAPConfig failed: %v", err)
+	}
+	if cfg == nil {
+		t.Fatalf("expected non-nil config")
+	}
+	if cfg.Test == nil {
+		t.Fatalf("expected non-nil Test config")
+	}
+	if !cfg.Test.Race {
+		t.Errorf("expected Test.Race to be true, got false")
+	}
+}
