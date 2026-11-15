@@ -225,7 +225,7 @@ func TestDetectGitUserName(t *testing.T) {
 	if err := cfgCmd.Run(); err != nil {
 		t.Fatal(err)
 	}
-	if name := detectGitUserName(tempDir); name != "Test Specific User" {
+	if name := detectGitUserName(t.Context(), tempDir); name != "Test Specific User" {
 		t.Errorf("expected 'Test Specific User', got %q", name)
 	}
 }
