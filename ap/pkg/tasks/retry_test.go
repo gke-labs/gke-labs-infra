@@ -263,10 +263,12 @@ func TestBufferLogger_Rendering(t *testing.T) {
 	logger.Info("starting port-forward", "namespace", "buildkit", "service", "buildkitd")
 	logger.Info("copying file", "path", "/path with spaces/file")
 	logger.Error(errors.New("connection reset"), "failed to connect", "service", "buildkitd")
+	withValLogger := logger.WithValues("component", "portforward")
+	withValLogger.Info("ready", "port", 1234)
 
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("expected 3 log lines, got %d:\n%s", len(lines), buf.String())
+	if len(lines) != 4 {
+		t.Fatalf("expected 4 log lines, got %d:\n%s", len(lines), buf.String())
 	}
 
 	want0 := "starting port-forward namespace=buildkit service=buildkitd"
@@ -282,5 +284,10 @@ func TestBufferLogger_Rendering(t *testing.T) {
 	want2 := `failed to connect error="connection reset" service=buildkitd`
 	if lines[2] != want2 {
 		t.Errorf("line 2 = %q, want %q", lines[2], want2)
+	}
+
+	want3 := "ready component=portforward port=1234"
+	if lines[3] != want3 {
+		t.Errorf("line 3 = %q, want %q", lines[3], want3)
 	}
 }

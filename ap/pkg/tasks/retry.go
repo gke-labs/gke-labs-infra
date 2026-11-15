@@ -21,14 +21,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/go-logr/logr"
-	"github.com/go-logr/logr/funcr"
 )
 
 // RetryPolicy reports whether a failed attempt (0-based) should be retried, and after how long.
@@ -92,116 +90,111 @@ func RunTask(ctx context.Context, scope *TaskContext, task Task) error {
 var runnerMu sync.Mutex
 
 type bufferSink struct {
-	logr.LogSink
+	w      io.Writer
 	parent logr.LogSink
+	name   string
+	values []any
 }
 
 var _ logr.LogSink = bufferSink{}
 var _ logr.CallDepthLogSink = bufferSink{}
 
+func (s bufferSink) Init(info logr.RuntimeInfo) {}
+
 func (s bufferSink) Enabled(level int) bool {
 	if s.parent != nil {
 		return s.parent.Enabled(level)
 	}
-	return false
+	return true
+}
+
+func (s bufferSink) Info(level int, msg string, keysAndValues ...any) {
+	kvs := make([]any, 0, len(s.values)+len(keysAndValues))
+	kvs = append(kvs, s.values...)
+	kvs = append(kvs, keysAndValues...)
+	s.writeLine(msg, kvs)
+}
+
+func (s bufferSink) Error(err error, msg string, keysAndValues ...any) {
+	kvs := make([]any, 0, 2+len(s.values)+len(keysAndValues))
+	kvs = append(kvs, "error", err)
+	kvs = append(kvs, s.values...)
+	kvs = append(kvs, keysAndValues...)
+	s.writeLine(msg, kvs)
 }
 
 func (s bufferSink) WithValues(keysAndValues ...any) logr.LogSink {
+	var parent logr.LogSink
+	if s.parent != nil {
+		parent = s.parent.WithValues(keysAndValues...)
+	}
+	newValues := make([]any, 0, len(s.values)+len(keysAndValues))
+	newValues = append(newValues, s.values...)
+	newValues = append(newValues, keysAndValues...)
 	return bufferSink{
-		LogSink: s.LogSink.WithValues(keysAndValues...),
-		parent:  s.parent,
+		w:      s.w,
+		parent: parent,
+		name:   s.name,
+		values: newValues,
 	}
 }
 
 func (s bufferSink) WithName(name string) logr.LogSink {
+	var parent logr.LogSink
+	if s.parent != nil {
+		parent = s.parent.WithName(name)
+	}
+	if s.name != "" {
+		name = s.name + "/" + name
+	}
 	return bufferSink{
-		LogSink: s.LogSink.WithName(name),
-		parent:  s.parent,
+		w:      s.w,
+		parent: parent,
+		name:   name,
+		values: s.values,
 	}
 }
 
 func (s bufferSink) WithCallDepth(depth int) logr.LogSink {
-	if cd, ok := s.LogSink.(logr.CallDepthLogSink); ok {
-		return bufferSink{
-			LogSink: cd.WithCallDepth(depth),
-			parent:  s.parent,
+	return s
+}
+
+func (s bufferSink) writeLine(msg string, kvs []any) {
+	var parts []string
+	if msg != "" {
+		parts = append(parts, msg)
+	}
+	for i := 0; i < len(kvs); i += 2 {
+		key := fmt.Sprint(kvs[i])
+		var val any
+		if i+1 < len(kvs) {
+			val = kvs[i+1]
+		} else {
+			val = "<no-value>"
 		}
+		parts = append(parts, fmt.Sprintf("%s=%s", key, formatValue(val)))
+	}
+	line := strings.Join(parts, " ")
+	if s.name != "" {
+		writef(s.w, "%s: %s\n", s.name, line)
+	} else {
+		writef(s.w, "%s\n", line)
+	}
+}
+
+func formatValue(v any) string {
+	s := fmt.Sprint(v)
+	if strings.Contains(s, " ") {
+		return fmt.Sprintf("%q", s)
 	}
 	return s
 }
 
 func newBufferLogger(w io.Writer, parent logr.Logger) logr.Logger {
-	empty := ""
-	fnLog := funcr.New(func(prefix, args string) {
-		line := formatTaskLogLine(args)
-		if prefix != "" {
-			writef(w, "%s: %s\n", prefix, line)
-		} else {
-			writef(w, "%s\n", line)
-		}
-	}, funcr.Options{
-		LogInfoLevel:       &empty,
-		RenderBuiltinsHook: func(kvList []any) []any { return kvList },
-		RenderArgsHook:     func(kvList []any) []any { return kvList },
-	})
 	return logr.New(bufferSink{
-		LogSink: fnLog.GetSink(),
-		parent:  parent.GetSink(),
+		w:      w,
+		parent: parent.GetSink(),
 	})
-}
-
-func formatTaskLogLine(args string) string {
-	var msg string
-	var pairs []string
-
-	for s := strings.TrimSpace(args); len(s) > 0; s = strings.TrimPrefix(s, " ") {
-		keyQuoted, err := strconv.QuotedPrefix(s)
-		if err != nil {
-			pairs = append(pairs, s)
-			break
-		}
-		key, err := strconv.Unquote(keyQuoted)
-		if err != nil {
-			key = keyQuoted
-		}
-		s = s[len(keyQuoted):]
-		if !strings.HasPrefix(s, "=") {
-			pairs = append(pairs, key)
-			break
-		}
-		s = s[1:]
-
-		var val string
-		if valQuoted, err := strconv.QuotedPrefix(s); err == nil {
-			unquoted, err := strconv.Unquote(valQuoted)
-			if err != nil {
-				val = valQuoted
-			} else {
-				val = unquoted
-			}
-			s = s[len(valQuoted):]
-		} else if end := strings.IndexByte(s, ' '); end != -1 {
-			val, s = s[:end], s[end:]
-		} else {
-			val, s = s, ""
-		}
-
-		if key == "msg" {
-			msg = val
-		} else if strings.Contains(val, " ") {
-			pairs = append(pairs, fmt.Sprintf("%s=%q", key, val))
-		} else {
-			pairs = append(pairs, fmt.Sprintf("%s=%s", key, val))
-		}
-	}
-
-	if msg != "" && len(pairs) > 0 {
-		return msg + " " + strings.Join(pairs, " ")
-	}
-	if msg != "" {
-		return msg
-	}
-	return strings.Join(pairs, " ")
 }
 
 func sanitizeLogTaskName(name string) string {
