@@ -90,7 +90,7 @@ func RunTask(ctx context.Context, scope *TaskContext, task Task) error {
 var runnerMu sync.Mutex
 
 type bufferSink struct {
-	w      io.Writer
+	writer io.Writer
 	parent logr.LogSink
 	name   string
 	values []any
@@ -105,51 +105,43 @@ func (s bufferSink) Enabled(level int) bool {
 	if s.parent != nil {
 		return s.parent.Enabled(level)
 	}
-	return true
+	return false
 }
 
 func (s bufferSink) Info(level int, msg string, keysAndValues ...any) {
-	kvs := make([]any, 0, len(s.values)+len(keysAndValues))
-	kvs = append(kvs, s.values...)
-	kvs = append(kvs, keysAndValues...)
-	s.writeLine(msg, kvs)
+	allKeysAndValues := make([]any, 0, len(s.values)+len(keysAndValues))
+	allKeysAndValues = append(allKeysAndValues, s.values...)
+	allKeysAndValues = append(allKeysAndValues, keysAndValues...)
+	s.writeLine(msg, allKeysAndValues)
 }
 
 func (s bufferSink) Error(err error, msg string, keysAndValues ...any) {
-	kvs := make([]any, 0, 2+len(s.values)+len(keysAndValues))
-	kvs = append(kvs, "error", err)
-	kvs = append(kvs, s.values...)
-	kvs = append(kvs, keysAndValues...)
-	s.writeLine(msg, kvs)
+	allKeysAndValues := make([]any, 0, 2+len(s.values)+len(keysAndValues))
+	allKeysAndValues = append(allKeysAndValues, "error", err)
+	allKeysAndValues = append(allKeysAndValues, s.values...)
+	allKeysAndValues = append(allKeysAndValues, keysAndValues...)
+	s.writeLine(msg, allKeysAndValues)
 }
 
 func (s bufferSink) WithValues(keysAndValues ...any) logr.LogSink {
-	var parent logr.LogSink
-	if s.parent != nil {
-		parent = s.parent.WithValues(keysAndValues...)
-	}
 	newValues := make([]any, 0, len(s.values)+len(keysAndValues))
 	newValues = append(newValues, s.values...)
 	newValues = append(newValues, keysAndValues...)
 	return bufferSink{
-		w:      s.w,
-		parent: parent,
+		writer: s.writer,
+		parent: s.parent,
 		name:   s.name,
 		values: newValues,
 	}
 }
 
 func (s bufferSink) WithName(name string) logr.LogSink {
-	var parent logr.LogSink
-	if s.parent != nil {
-		parent = s.parent.WithName(name)
-	}
 	if s.name != "" {
 		name = s.name + "/" + name
 	}
 	return bufferSink{
-		w:      s.w,
-		parent: parent,
+		writer: s.writer,
+		parent: s.parent,
 		name:   name,
 		values: s.values,
 	}
@@ -159,40 +151,40 @@ func (s bufferSink) WithCallDepth(depth int) logr.LogSink {
 	return s
 }
 
-func (s bufferSink) writeLine(msg string, kvs []any) {
+func (s bufferSink) writeLine(msg string, keysAndValues []any) {
 	var parts []string
 	if msg != "" {
 		parts = append(parts, msg)
 	}
-	for i := 0; i < len(kvs); i += 2 {
-		key := fmt.Sprint(kvs[i])
-		var val any
-		if i+1 < len(kvs) {
-			val = kvs[i+1]
+	for i := 0; i < len(keysAndValues); i += 2 {
+		key := fmt.Sprint(keysAndValues[i])
+		var value any
+		if i+1 < len(keysAndValues) {
+			value = keysAndValues[i+1]
 		} else {
-			val = "<no-value>"
+			value = "<no-value>"
 		}
-		parts = append(parts, fmt.Sprintf("%s=%s", key, formatValue(val)))
+		parts = append(parts, fmt.Sprintf("%s=%s", key, formatValue(value)))
 	}
 	line := strings.Join(parts, " ")
 	if s.name != "" {
-		writef(s.w, "%s: %s\n", s.name, line)
+		writef(s.writer, "%s: %s\n", s.name, line)
 	} else {
-		writef(s.w, "%s\n", line)
+		writef(s.writer, "%s\n", line)
 	}
 }
 
-func formatValue(v any) string {
-	s := fmt.Sprint(v)
-	if strings.Contains(s, " ") {
-		return fmt.Sprintf("%q", s)
+func formatValue(value any) string {
+	formatted := fmt.Sprint(value)
+	if strings.Contains(formatted, " ") {
+		return fmt.Sprintf("%q", formatted)
 	}
-	return s
+	return formatted
 }
 
-func newBufferLogger(w io.Writer, parent logr.Logger) logr.Logger {
+func newBufferLogger(writer io.Writer, parent logr.Logger) logr.Logger {
 	return logr.New(bufferSink{
-		w:      w,
+		writer: writer,
 		parent: parent.GetSink(),
 	})
 }
