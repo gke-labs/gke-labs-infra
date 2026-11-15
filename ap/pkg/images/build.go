@@ -510,7 +510,6 @@ func FindImageNames(r *sourcetree.SourceTree, root string) ([]string, error) {
 
 // BuildTasksForImages returns a task group for building only the specified docker images.
 func BuildTasksForImages(r *sourcetree.SourceTree, root string, push bool, buildkitHost string, imageNames []string, naming ImageNaming, cluster k8s.KubeCluster) (tasks.Task, error) {
-	naming = naming.WithRefs()
 	if _, err := FindImageNames(r, root); err != nil {
 		return nil, err
 	}
