@@ -262,6 +262,7 @@ func (t *Task) Run(ctx context.Context, scope *tasks.TaskContext) error {
 		Mode:            string(t.Mode),
 		Stdout:          scope.Stdout(),
 		Stderr:          scope.Stderr(),
+		Log:             scope.Log(),
 	})
 	return err
 }

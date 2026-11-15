@@ -17,6 +17,7 @@ package baseline
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"go/ast"
 	"go/token"
@@ -27,7 +28,8 @@ import (
 	"sort"
 	"strings"
 
-	"k8s.io/klog/v2"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
+	"github.com/go-logr/logr"
 )
 
 const (
@@ -418,6 +420,7 @@ type ApplyOptions struct {
 	Mode            string
 	Stdout          io.Writer
 	Stderr          io.Writer
+	Log             logr.Logger
 }
 
 func relPath(base, target string) string {
@@ -434,6 +437,11 @@ func relPath(base, target string) string {
 // Apply handles baseline resolution, relative path normalization, deterministic sorting,
 // baseline writing or matching, diagnostic reporting, and mode-based error generation.
 func Apply(findings []Finding, opts ApplyOptions) ([]Finding, error) {
+	log := opts.Log
+	if log.GetSink() == nil {
+		log = scoped.Log(context.Background())
+	}
+
 	baselineRoot := opts.RepoRoot
 	if baselineRoot == "" {
 		baselineRoot = opts.Dir
@@ -515,7 +523,7 @@ func Apply(findings []Finding, opts ApplyOptions) ([]Finding, error) {
 			}
 			if opts.Stdout != nil {
 				if _, err := fmt.Fprintf(opts.Stdout, "Wrote %d baseline entries to %s\n", len(finalEntries), baselinePath); err != nil {
-					klog.V(2).Infof("failed to write baseline message: %v", err)
+					log.V(2).Info("failed to write baseline message", "error", err)
 				}
 			}
 		}
@@ -535,7 +543,7 @@ func Apply(findings []Finding, opts ApplyOptions) ([]Finding, error) {
 	if opts.Stdout != nil {
 		for _, stale := range staleEntries {
 			if _, err := fmt.Fprintf(opts.Stdout, "stale baseline entry: %s (remove from baseline)\n", stale); err != nil {
-				klog.V(2).Infof("failed to write stale entry: %v", err)
+				log.V(2).Info("failed to write stale entry", "error", err)
 			}
 		}
 	}
@@ -552,11 +560,11 @@ func Apply(findings []Finding, opts ApplyOptions) ([]Finding, error) {
 				msg = f.Detail
 			}
 			if _, err := fmt.Fprintf(opts.Stderr, "%s: %s\n", f.Pos, msg); err != nil {
-				klog.V(2).Infof("failed to write diagnostic: %v", err)
+				log.V(2).Info("failed to write diagnostic", "error", err)
 			}
 			for _, rel := range f.Related {
 				if _, err := fmt.Fprintf(opts.Stderr, "%s:\t%s\n", rel.Pos, rel.Message); err != nil {
-					klog.V(2).Infof("failed to write related info: %v", err)
+					log.V(2).Info("failed to write related info", "error", err)
 				}
 			}
 		}
@@ -566,7 +574,18 @@ func Apply(findings []Finding, opts ApplyOptions) ([]Finding, error) {
 		if opts.Mode == "error" || opts.Mode == "" {
 			return findingsToReport, fmt.Errorf("%s check failed in %s", opts.Name, opts.Dir)
 		} else if opts.Mode == "warn" {
-			klog.Warningf("%s check failed in %s: %d diagnostics found", opts.Name, opts.Dir, len(findingsToReport))
+			log.Info("check failed", "level", "warning", "name", opts.Name, "dir", opts.Dir, "diagnostics", len(findingsToReport))
+			for _, f := range findingsToReport {
+				msg := f.Message
+				if msg == "" {
+					msg = f.Detail
+				}
+				file := f.Pos.Filename
+				if file == "" {
+					file = f.RelFile
+				}
+				log.Info("analyzer finding", "level", "warning", "name", opts.Name, "file", file, "line", f.Pos.Line, "message", msg)
+			}
 		}
 	}
 	return findingsToReport, nil

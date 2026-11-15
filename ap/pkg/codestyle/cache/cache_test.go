@@ -74,7 +74,7 @@ func TestManager_DoneCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m, err := NewManagerWithDir(tmpDir)
+	m, err := NewManagerWithDir(t.Context(), tmpDir)
 	if err != nil {
 		t.Fatalf("NewManagerWithDir failed: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestManager_DoneCache(t *testing.T) {
 	}
 
 	// Reload in a new manager
-	m2, err := NewManagerWithDir(tmpDir)
+	m2, err := NewManagerWithDir(t.Context(), tmpDir)
 	if err != nil {
 		t.Fatalf("NewManagerWithDir reload failed: %v", err)
 	}

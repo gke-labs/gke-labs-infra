@@ -28,8 +28,8 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/cache"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
-	"k8s.io/klog/v2"
 )
 
 var tidyRunner = func(ctx context.Context, r *sourcetree.SourceTree, dir string) error {
@@ -48,16 +48,16 @@ var tidyRunner = func(ctx context.Context, r *sourcetree.SourceTree, dir string)
 
 // Run runs gostyle formatting and mod tidy, directing command output to the provided writers.
 func Run(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files []string, stdout, stderr io.Writer) error {
-	log := klog.FromContext(ctx)
+	log := scoped.Log(ctx)
 
 	// Initialize cache
-	cm, err := cache.NewManager()
+	cm, err := cache.NewManager(ctx)
 	if err != nil {
-		log.V(2).Info("Failed to initialize cache", "error", err)
+		log.V(2).Info("failed to initialize cache", "error", err)
 	} else {
 		defer func() {
 			if err := cm.Save(); err != nil {
-				log.Error(err, "Failed to save cache")
+				log.Error(err, "failed to save cache")
 			}
 		}()
 	}
@@ -79,7 +79,7 @@ func Run(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files [
 }
 
 func runGofmt(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files []string, skip []string, cm *cache.Manager, stdout, stderr io.Writer) error {
-	log := klog.FromContext(ctx)
+	log := scoped.Log(ctx)
 
 	ignoreList := walker.NewIgnoreList(append([]string{"vendor", ".git"}, skip...))
 	expandedFiles, err := walker.ExpandPaths(r, repoRoot, files, ignoreList)
@@ -186,7 +186,7 @@ func runGofmt(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, fi
 }
 
 func runGoModTidy(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files []string, skip []string, cm *cache.Manager) error {
-	log := klog.FromContext(ctx)
+	log := scoped.Log(ctx)
 
 	ignoreList := walker.NewIgnoreList(append([]string{"vendor", ".git"}, skip...))
 	expandedFiles, err := walker.ExpandPaths(r, repoRoot, files, ignoreList)
