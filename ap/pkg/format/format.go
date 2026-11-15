@@ -25,7 +25,6 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/gostyle"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
-	"k8s.io/klog/v2"
 )
 
 // CodestyleTask represents a task to run codestyle checks (headers, gofmt, etc).
@@ -35,7 +34,7 @@ type CodestyleTask struct {
 }
 
 func (t *CodestyleTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
-	klog.Infof("Running codestyle in %s...", t.Root)
+	scope.Log().Info("running codestyle", "root", t.Root)
 	r := scope.SourceTree()
 	if err := fileheaders.Run(ctx, r, t.Root, t.Files); err != nil {
 		return fmt.Errorf("fileheaders failed in %s: %w", t.Root, err)
@@ -61,7 +60,7 @@ type LegacyFormatScriptTask struct {
 }
 
 func (t *LegacyFormatScriptTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
-	klog.Infof("Running legacy format script: %s", t.Name)
+	scope.Log().Info("running legacy format script", "script", t.Name)
 	cmd := exec.CommandContext(ctx, t.Path)
 	cmd.Dir = scope.Dir()
 	env, err := scope.ScriptEnv()
