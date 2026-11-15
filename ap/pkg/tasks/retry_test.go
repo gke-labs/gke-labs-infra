@@ -15,6 +15,7 @@
 package tasks
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
@@ -112,17 +113,17 @@ func TestRunTask_Retry(t *testing.T) {
 		}
 
 		logOutput := outBuf.String()
-		if !strings.Contains(logOutput, `"task"="fake-task"`) || !strings.Contains(logOutput, `"attempt"=1`) {
+		if !strings.Contains(logOutput, "task=fake-task") || !strings.Contains(logOutput, "attempt=1") {
 			t.Errorf("expected log to contain retry warning for attempt 1, got: %s", logOutput)
 		}
-		if !strings.Contains(logOutput, `"wait"="10ms"`) {
-			t.Errorf("expected log to contain '\"wait\"=\"10ms\"', got: %s", logOutput)
+		if !strings.Contains(logOutput, "wait=10ms") {
+			t.Errorf("expected log to contain 'wait=10ms', got: %s", logOutput)
 		}
-		if !strings.Contains(logOutput, `"attempt"=2`) {
+		if !strings.Contains(logOutput, "attempt=2") {
 			t.Errorf("expected log to contain retry warning for attempt 2, got: %s", logOutput)
 		}
-		if !strings.Contains(logOutput, `"wait"="20ms"`) {
-			t.Errorf("expected log to contain '\"wait\"=\"20ms\"', got: %s", logOutput)
+		if !strings.Contains(logOutput, "wait=20ms") {
+			t.Errorf("expected log to contain 'wait=20ms', got: %s", logOutput)
 		}
 	})
 
@@ -158,10 +159,10 @@ func TestRunTask_Retry(t *testing.T) {
 		}
 
 		logOutput := outBuf.String()
-		if !strings.Contains(logOutput, `"task"="fake-task"`) || !strings.Contains(logOutput, `"attempt"=1`) {
+		if !strings.Contains(logOutput, "task=fake-task") || !strings.Contains(logOutput, "attempt=1") {
 			t.Errorf("expected log to contain retry warning for attempt 1, got: %s", logOutput)
 		}
-		if !strings.Contains(logOutput, `"attempt"=2`) {
+		if !strings.Contains(logOutput, "attempt=2") {
 			t.Errorf("expected log to contain retry warning for attempt 2, got: %s", logOutput)
 		}
 	})
@@ -253,4 +254,33 @@ func TestRunTask_Retry(t *testing.T) {
 			t.Errorf("expected error to be sentinelErr directly, got: %v", err)
 		}
 	})
+}
+
+func TestBufferLogger_Rendering(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newBufferLogger(&buf, klog.Background())
+
+	logger.Info("starting port-forward", "namespace", "buildkit", "service", "buildkitd")
+	logger.Info("copying file", "path", "/path with spaces/file")
+	logger.Error(errors.New("connection reset"), "failed to connect", "service", "buildkitd")
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 log lines, got %d:\n%s", len(lines), buf.String())
+	}
+
+	want0 := "starting port-forward namespace=buildkit service=buildkitd"
+	if lines[0] != want0 {
+		t.Errorf("line 0 = %q, want %q", lines[0], want0)
+	}
+
+	want1 := `copying file path="/path with spaces/file"`
+	if lines[1] != want1 {
+		t.Errorf("line 1 = %q, want %q", lines[1], want1)
+	}
+
+	want2 := `failed to connect error="connection reset" service=buildkitd`
+	if lines[2] != want2 {
+		t.Errorf("line 2 = %q, want %q", lines[2], want2)
+	}
 }

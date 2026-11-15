@@ -21,6 +21,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -132,18 +133,75 @@ func (s bufferSink) WithCallDepth(depth int) logr.LogSink {
 func newBufferLogger(w io.Writer, parent logr.Logger) logr.Logger {
 	empty := ""
 	fnLog := funcr.New(func(prefix, args string) {
+		line := formatTaskLogLine(args)
 		if prefix != "" {
-			writef(w, "%s: %s\n", prefix, args)
+			writef(w, "%s: %s\n", prefix, line)
 		} else {
-			writef(w, "%s\n", args)
+			writef(w, "%s\n", line)
 		}
 	}, funcr.Options{
-		LogInfoLevel: &empty,
+		LogInfoLevel:       &empty,
+		RenderBuiltinsHook: func(kvList []any) []any { return kvList },
+		RenderArgsHook:     func(kvList []any) []any { return kvList },
 	})
 	return logr.New(bufferSink{
 		LogSink: fnLog.GetSink(),
 		parent:  parent.GetSink(),
 	})
+}
+
+func formatTaskLogLine(args string) string {
+	var msg string
+	var pairs []string
+
+	for s := strings.TrimSpace(args); len(s) > 0; s = strings.TrimPrefix(s, " ") {
+		keyQuoted, err := strconv.QuotedPrefix(s)
+		if err != nil {
+			pairs = append(pairs, s)
+			break
+		}
+		key, err := strconv.Unquote(keyQuoted)
+		if err != nil {
+			key = keyQuoted
+		}
+		s = s[len(keyQuoted):]
+		if !strings.HasPrefix(s, "=") {
+			pairs = append(pairs, key)
+			break
+		}
+		s = s[1:]
+
+		var val string
+		if valQuoted, err := strconv.QuotedPrefix(s); err == nil {
+			unquoted, err := strconv.Unquote(valQuoted)
+			if err != nil {
+				val = valQuoted
+			} else {
+				val = unquoted
+			}
+			s = s[len(valQuoted):]
+		} else if end := strings.IndexByte(s, ' '); end != -1 {
+			val, s = s[:end], s[end:]
+		} else {
+			val, s = s, ""
+		}
+
+		if key == "msg" {
+			msg = val
+		} else if strings.Contains(val, " ") {
+			pairs = append(pairs, fmt.Sprintf("%s=%q", key, val))
+		} else {
+			pairs = append(pairs, fmt.Sprintf("%s=%s", key, val))
+		}
+	}
+
+	if msg != "" && len(pairs) > 0 {
+		return msg + " " + strings.Join(pairs, " ")
+	}
+	if msg != "" {
+		return msg
+	}
+	return strings.Join(pairs, " ")
 }
 
 func sanitizeLogTaskName(name string) string {
