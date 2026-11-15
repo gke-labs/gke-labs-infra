@@ -16,8 +16,6 @@ package plugins_test
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/plugins"
@@ -29,7 +27,7 @@ type trivialPlugin struct {
 	ran bool
 }
 
-func (p *trivialPlugin) Describe(ctx context.Context) (*plugins.PluginManifest, error) {
+func (plugin *trivialPlugin) Describe(ctx context.Context) (*plugins.PluginManifest, error) {
 	return &plugins.PluginManifest{
 		APIVersion: "ap.plugin/v1alpha1",
 		Name:       "trivial",
@@ -44,9 +42,10 @@ func (p *trivialPlugin) Describe(ctx context.Context) (*plugins.PluginManifest, 
 	}, nil
 }
 
-func (p *trivialPlugin) DiscoverTasks(ctx context.Context, dir string, scope *tasks.TaskContext) ([]plugins.PluginTask, error) {
+func (plugin *trivialPlugin) DiscoverTasks(ctx context.Context, dir string, scope *tasks.TaskContext) ([]plugins.PluginTask, error) {
 	return []plugins.PluginTask{
 		{
+			Plugin: "trivial",
 			TaskMetadata: plugins.TaskMetadata{
 				Name:        "trivial-task",
 				Verb:        "test",
@@ -55,7 +54,7 @@ func (p *trivialPlugin) DiscoverTasks(ctx context.Context, dir string, scope *ta
 			Task: &tasks.FuncTask{
 				Name: "trivial-task",
 				RunFn: func(ctx context.Context, scope *tasks.TaskContext) error {
-					p.ran = true
+					plugin.ran = true
 					return nil
 				},
 			},
@@ -64,62 +63,34 @@ func (p *trivialPlugin) DiscoverTasks(ctx context.Context, dir string, scope *ta
 }
 
 func TestTrivialPluginDiscoveryAndRun(t *testing.T) {
-	tp := &trivialPlugin{}
-	cleanup := plugins.Register(tp)
-	defer cleanup()
+	secondPlugin := &trivialPlugin{}
+	tempDir := t.TempDir()
 
-	tmpDir := t.TempDir()
-	markerFile := filepath.Join(tmpDir, "sample.trivial")
-	if err := os.WriteFile(markerFile, []byte("data"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	tree, err := sourcetree.Open(tmpDir)
+	tree, err := sourcetree.Open(tempDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := tasks.NewTaskContext(tmpDir, tmpDir, tree)
+	scope := tasks.NewTaskContext(tempDir, tempDir, tree)
 
-	// Verify plugin discovery for the "test" verb
-	discovered, err := plugins.TasksForVerb(t.Context(), "test", scope, tmpDir)
+	pluginList := []plugins.Plugin{secondPlugin}
+	discoveredTasks, err := plugins.DiscoverTasks(t.Context(), pluginList, scope, tempDir)
 	if err != nil {
-		t.Fatalf("TasksForVerb failed: %v", err)
+		t.Fatalf("DiscoverTasks failed: %v", err)
 	}
 
-	var trivialTask tasks.Task
-	for _, pt := range discovered {
-		if pt.Name == "trivial-task" {
-			trivialTask = pt.Task
-			break
-		}
-	}
-	if trivialTask == nil {
-		t.Fatalf("trivial-task was not discovered in %v", discovered)
+	if len(discoveredTasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(discoveredTasks))
 	}
 
-	// Run the discovered task
-	if err := trivialTask.Run(t.Context(), scope); err != nil {
-		t.Fatalf("trivial task Run failed: %v", err)
-	}
-	if !tp.ran {
-		t.Fatalf("expected trivial task to execute and set ran=true")
+	pluginTask := discoveredTasks[0]
+	if pluginTask.Name != "trivial-task" {
+		t.Fatalf("expected task name trivial-task, got %s", pluginTask.Name)
 	}
 
-	// Verify plugin does not activate in an empty directory
-	emptyDir := t.TempDir()
-	emptyTree, err := sourcetree.Open(emptyDir)
-	if err != nil {
-		t.Fatal(err)
+	if err := pluginTask.Task.Run(t.Context(), scope); err != nil {
+		t.Fatalf("task Run failed: %v", err)
 	}
-	emptyScope := tasks.NewTaskContext(emptyDir, emptyDir, emptyTree)
-
-	emptyDiscovered, err := plugins.TasksForVerb(t.Context(), "test", emptyScope, emptyDir)
-	if err != nil {
-		t.Fatalf("TasksForVerb failed on emptyDir: %v", err)
-	}
-	for _, pt := range emptyDiscovered {
-		if pt.Name == "trivial-task" {
-			t.Fatalf("trivial-task should not be discovered in emptyDir")
-		}
+	if !secondPlugin.ran {
+		t.Fatalf("expected trivial plugin task to run and set ran=true")
 	}
 }

@@ -22,50 +22,48 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
-func init() {
-	plugins.Register(&Plugin{})
-}
+var (
+	taskMetadataTest = plugins.TaskMetadata{
+		Name:        "test",
+		Verb:        "test",
+		Description: "Run Go tests",
+	}
+	taskMetadataLint = plugins.TaskMetadata{
+		Name:        "lint",
+		Verb:        "lint",
+		Description: "Run Go linters",
+	}
+)
 
 // Plugin implements plugins.Plugin for Go tooling.
 type Plugin struct{}
 
 // Describe returns the manifest describing the Go plugin.
-func (p *Plugin) Describe(ctx context.Context) (*plugins.PluginManifest, error) {
+func (plugin *Plugin) Describe(ctx context.Context) (*plugins.PluginManifest, error) {
 	return &plugins.PluginManifest{
 		APIVersion: "ap.plugin/v1alpha1",
 		Name:       "go",
 		Activation: []string{"go.mod"},
 		Tasks: []plugins.TaskMetadata{
-			{
-				Name:        "test",
-				Verb:        "test",
-				Description: "Run Go tests",
-			},
-			{
-				Name:        "lint",
-				Verb:        "lint",
-				Description: "Run Go linters",
-			},
+			taskMetadataTest,
+			taskMetadataLint,
 		},
 	}, nil
 }
 
 // DiscoverTasks discovers test and lint tasks for the Go module in dir.
-func (p *Plugin) DiscoverTasks(ctx context.Context, dir string, scope *tasks.TaskContext) ([]plugins.PluginTask, error) {
-	var out []plugins.PluginTask
+func (plugin *Plugin) DiscoverTasks(ctx context.Context, dir string, scope *tasks.TaskContext) ([]plugins.PluginTask, error) {
+	var discoveredTasks []plugins.PluginTask
 
 	testTasks, err := TestTasks(scope.SourceTree(), dir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to discover Go test tasks in %s: %w", dir, err)
 	}
 	if testTasks != nil {
-		out = append(out, plugins.PluginTask{
-			TaskMetadata: plugins.TaskMetadata{
-				Name:        "test",
-				Verb:        "test",
-				Description: "Run Go tests",
-			},
-			Task: testTasks,
+		discoveredTasks = append(discoveredTasks, plugins.PluginTask{
+			Plugin:       "go",
+			TaskMetadata: taskMetadataTest,
+			Task:         testTasks,
 		})
 	}
 
@@ -74,15 +72,12 @@ func (p *Plugin) DiscoverTasks(ctx context.Context, dir string, scope *tasks.Tas
 		return nil, fmt.Errorf("failed to discover Go lint tasks in %s: %w", dir, err)
 	}
 	if lintTasks != nil {
-		out = append(out, plugins.PluginTask{
-			TaskMetadata: plugins.TaskMetadata{
-				Name:        "lint",
-				Verb:        "lint",
-				Description: "Run Go linters",
-			},
-			Task: lintTasks,
+		discoveredTasks = append(discoveredTasks, plugins.PluginTask{
+			Plugin:       "go",
+			TaskMetadata: taskMetadataLint,
+			Task:         lintTasks,
 		})
 	}
 
-	return out, nil
+	return discoveredTasks, nil
 }

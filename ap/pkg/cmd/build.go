@@ -117,7 +117,7 @@ func RunBuild(ctx context.Context, opt BuildOptions) error {
 		group.Tasks = append(group.Tasks, imageTasks)
 	}
 
-	scopes, err := DiscoverScopes(r, opt.RepoRoot, opt.RepoRoot)
+	scopes, err := DiscoverScopes(ctx, r, opt.RepoRoot, opt.RepoRoot)
 	if err != nil {
 		return err
 	}

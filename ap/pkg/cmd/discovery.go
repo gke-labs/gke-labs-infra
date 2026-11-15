@@ -29,8 +29,12 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
+var builtInPlugins = []plugins.Plugin{
+	&golang.Plugin{},
+}
+
 // DiscoverScopes discovers all tasks under the given directory subtree.
-func DiscoverScopes(r *sourcetree.SourceTree, repoRoot, dir string) ([]*tasks.TaskContext, error) {
+func DiscoverScopes(ctx context.Context, r *sourcetree.SourceTree, repoRoot, dir string) ([]*tasks.TaskContext, error) {
 	if dir == "" {
 		dir = repoRoot
 	}
@@ -114,27 +118,26 @@ func DiscoverScopes(r *sourcetree.SourceTree, repoRoot, dir string) ([]*tasks.Ta
 	}
 
 	// Discover plugin tasks (e.g. Go tooling)
-	pluginTasks, err := plugins.DiscoverTasks(context.Background(), scope, dir)
+	pluginTasks, err := plugins.DiscoverTasks(ctx, builtInPlugins, scope, dir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to discover plugin tasks in %s: %w", dir, err)
 	}
-	for _, pt := range pluginTasks {
-		if pt.Task == nil {
-			continue
-		}
-		switch pt.Verb {
+	for _, pluginTask := range pluginTasks {
+		switch pluginTask.Verb {
 		case "test":
-			scope.TestTasks = append(scope.TestTasks, pt.Task)
+			scope.TestTasks = append(scope.TestTasks, pluginTask.Task)
 		case "lint":
-			scope.LintTasks = append(scope.LintTasks, pt.Task)
+			scope.LintTasks = append(scope.LintTasks, pluginTask.Task)
 		case "build":
-			scope.BuildTasks = append(scope.BuildTasks, pt.Task)
+			scope.BuildTasks = append(scope.BuildTasks, pluginTask.Task)
 		case "format":
-			scope.FormatTasks = append(scope.FormatTasks, pt.Task)
+			scope.FormatTasks = append(scope.FormatTasks, pluginTask.Task)
 		case "generate":
-			scope.GenerateTasks = append(scope.GenerateTasks, pt.Task)
+			scope.GenerateTasks = append(scope.GenerateTasks, pluginTask.Task)
 		case "e2e":
-			scope.E2ETasks = append(scope.E2ETasks, pt.Task)
+			scope.E2ETasks = append(scope.E2ETasks, pluginTask.Task)
+		default:
+			return nil, fmt.Errorf("plugin %q task %q has unknown verb %q", pluginTask.Plugin, pluginTask.Name, pluginTask.Verb)
 		}
 	}
 
