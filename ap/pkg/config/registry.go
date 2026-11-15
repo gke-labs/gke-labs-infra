@@ -16,32 +16,75 @@ package config
 
 import (
 	"sort"
+	"sync"
 )
 
-var linterRegistry = make(map[string]func() LinterConfig)
+var (
+	registryMu sync.RWMutex
+	analyzers  = make(map[string]bool)
+)
 
-// RegisterLinter registers a constructor for a linter's settings type under name and any aliases.
-func RegisterLinter(name string, newConfig func() LinterConfig, aliases ...string) {
-	if newConfig == nil {
-		newConfig = func() LinterConfig { return &CommonLinterConfig{} }
-	}
-	linterRegistry[name] = newConfig
-	for _, alias := range aliases {
-		linterRegistry[alias] = newConfig
-	}
+var wellKnownAnalyzers = []string{
+	"closeWriter",
+	"deferInLoop",
+	"droppedErrors",
+	"portability",
+	"replaceEmptyInterfaceWithAny",
+	"testOnlyImports",
+	"testcontext",
+	"unused",
+	"unusedparameters",
 }
 
-// RegisteredLinters returns a sorted list of registered linter names.
-func RegisteredLinters() []string {
-	names := make([]string, 0, len(linterRegistry))
-	for name := range linterRegistry {
+// RegisterAnalyzer registers a canonical analyzer name.
+func RegisterAnalyzer(name string) {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	analyzers[name] = true
+}
+
+// RegisterLinter registers a canonical analyzer name (alias for RegisterAnalyzer).
+func RegisterLinter(name string) {
+	RegisterAnalyzer(name)
+}
+
+// RegisteredAnalyzers returns a sorted list of registered analyzer names.
+func RegisteredAnalyzers() []string {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+	if len(analyzers) == 0 {
+		out := make([]string, len(wellKnownAnalyzers))
+		copy(out, wellKnownAnalyzers)
+		sort.Strings(out)
+		return out
+	}
+	names := make([]string, 0, len(analyzers))
+	for name := range analyzers {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	return names
 }
 
-// RegisteredLinterConstructor returns the constructor for the named linter, or nil if not registered.
-func RegisteredLinterConstructor(name string) func() LinterConfig {
-	return linterRegistry[name]
+// RegisteredLinters returns a sorted list of registered analyzer names.
+func RegisteredLinters() []string {
+	return RegisteredAnalyzers()
+}
+
+func isRegisteredAnalyzer(name string) bool {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+	return analyzers[name]
+}
+
+func isAnalyzer(name string) bool {
+	if isRegisteredAnalyzer(name) {
+		return true
+	}
+	for _, k := range wellKnownAnalyzers {
+		if k == name {
+			return true
+		}
+	}
+	return false
 }

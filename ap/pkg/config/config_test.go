@@ -147,13 +147,14 @@ func TestCloseWriterConfig(t *testing.T) {
 
 	yamlContent := `
 lint:
-  closeWriter:
-    mode: warn
-    types:
-      - "*bufio.Writer"
-      - example.com/custom.MyWriter
-    skipGenerated: true
-    skipTests: true
+  analyzers:
+    closeWriter:
+      mode: warn
+      types:
+        - "*bufio.Writer"
+        - example.com/custom.MyWriter
+      skipGenerated: true
+      skipTests: true
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 		t.Fatal(err)
@@ -196,8 +197,9 @@ func TestConfig_InvalidCloseWriterMode(t *testing.T) {
 
 	yamlContent := `
 lint:
-  closeWriter:
-    mode: invalid
+  analyzers:
+    closeWriter:
+      mode: invalid
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 		t.Fatal(err)
@@ -226,13 +228,14 @@ func TestTestOnlyImportsConfig(t *testing.T) {
 
 	yamlContent := `
 lint:
-  testOnlyImports:
-    mode: warn
-    packages:
-      - github.com/google/go-cmp
-      - example.com/custom
-    skipGenerated: true
-    skipTests: true
+  analyzers:
+    testOnlyImports:
+      mode: warn
+      packages:
+        - github.com/google/go-cmp
+        - example.com/custom
+      skipGenerated: true
+      skipTests: true
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 		t.Fatal(err)
@@ -321,7 +324,7 @@ func TestConfig_InvalidLinterModes(t *testing.T) {
 			if err := os.Mkdir(apDir, 0755); err != nil {
 				t.Fatal(err)
 			}
-			yamlContent := fmt.Sprintf("lint:\n  %s:\n    mode: invalid\n", linter)
+			yamlContent := fmt.Sprintf("lint:\n  analyzers:\n    %s:\n      mode: invalid\n", linter)
 			if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 				t.Fatal(err)
 			}
@@ -351,8 +354,9 @@ func TestConfig_InvalidTestOnlyImportsMode(t *testing.T) {
 
 	yamlContent := `
 lint:
-  testOnlyImports:
-    mode: invalid
+  analyzers:
+    testOnlyImports:
+      mode: invalid
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 		t.Fatal(err)
@@ -367,7 +371,7 @@ lint:
 	}
 }
 
-func TestCommonLinterConfig_ModeIgnore(t *testing.T) {
+func TestAnalyzerConfig_ModeIgnore(t *testing.T) {
 	tempDir := t.TempDir()
 	apDir := filepath.Join(tempDir, ".ap")
 	if err := os.Mkdir(apDir, 0755); err != nil {
@@ -376,10 +380,11 @@ func TestCommonLinterConfig_ModeIgnore(t *testing.T) {
 
 	yamlContent := `
 lint:
-  unused:
-    mode: ignore
-  replaceEmptyInterfaceWithAny:
-    mode: ignore
+  analyzers:
+    unused:
+      mode: ignore
+    replaceEmptyInterfaceWithAny:
+      mode: ignore
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 		t.Fatal(err)
@@ -398,7 +403,7 @@ lint:
 	}
 }
 
-func TestCommonLinterConfig_Baseline(t *testing.T) {
+func TestAnalyzerConfig_Baseline(t *testing.T) {
 	tempDir := t.TempDir()
 	apDir := filepath.Join(tempDir, ".ap")
 	if err := os.Mkdir(apDir, 0755); err != nil {
@@ -407,10 +412,11 @@ func TestCommonLinterConfig_Baseline(t *testing.T) {
 
 	yamlContent := `
 lint:
-  closeWriter:
-    baseline: .ap/custom-closewriter.txt
-  unused:
-    baseline: .ap/custom-unused.txt
+  analyzers:
+    closeWriter:
+      baseline: .ap/custom-closewriter.txt
+    unused:
+      baseline: .ap/custom-unused.txt
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 		t.Fatal(err)
@@ -441,8 +447,9 @@ func TestConfig_InvalidUnusedMode(t *testing.T) {
 
 	yamlContent := `
 lint:
-  unused:
-    mode: badmode
+  analyzers:
+    unused:
+      mode: badmode
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 		t.Fatal(err)
@@ -454,6 +461,35 @@ lint:
 	}
 	if !strings.Contains(err.Error(), "invalid unused mode") {
 		t.Errorf("expected error to mention 'invalid unused mode', got: %v", err)
+	}
+}
+
+func TestConfig_Validate_UnknownAnalyzer(t *testing.T) {
+	tempDir := t.TempDir()
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.Mkdir(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	yamlContent := `
+lint:
+  analyzers:
+    nonExistentAnalyzer:
+      mode: error
+`
+	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(tempDir)
+	if err == nil {
+		t.Fatalf("expected Load to fail on unknown analyzer")
+	}
+	if !strings.Contains(err.Error(), `unknown analyzer "nonExistentAnalyzer"`) {
+		t.Errorf("expected error to name unknown analyzer, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "valid analyzers:") {
+		t.Errorf("expected error to list valid analyzers, got: %v", err)
 	}
 }
 
@@ -473,14 +509,15 @@ func TestDroppedErrorsConfig(t *testing.T) {
 lint:
   goos:
     - linux
-  droppedErrors:
-    mode: error
-    exclude:
-      - fmt.Fprintln
-    baseline: .ap/droppederrors-baseline.txt
-    skipTests: false
-    skipGenerated: true
-    useDefaultExcludes: false
+  analyzers:
+    droppedErrors:
+      mode: error
+      exclude:
+        - fmt.Fprintln
+      baseline: .ap/droppederrors-baseline.txt
+      skipTests: false
+      skipGenerated: true
+      useDefaultExcludes: false
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 		t.Fatal(err)
@@ -602,8 +639,9 @@ func TestLintConfig_SkipGenerated(t *testing.T) {
 	yamlContent := `
 lint:
   skipGenerated: true
-  droppedErrors:
-    skipGenerated: false
+  analyzers:
+    droppedErrors:
+      skipGenerated: false
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 		t.Fatal(err)
@@ -652,8 +690,9 @@ func TestLintConfig_SkipTests(t *testing.T) {
 	yamlContent := `
 lint:
   skipTests: true
-  droppedErrors:
-    skipTests: false
+  analyzers:
+    droppedErrors:
+      skipTests: false
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 		t.Fatal(err)
@@ -725,7 +764,7 @@ platforms:
 	}
 }
 
-func TestLintConfig_MarshalJSON_RoundTrip(t *testing.T) {
+func TestLintConfig_RoundTrip(t *testing.T) {
 	trueVal := true
 	falseVal := false
 	tests := []struct {
@@ -740,11 +779,11 @@ func TestLintConfig_MarshalJSON_RoundTrip(t *testing.T) {
 			name: "lint with droppederrors exclude and unused mode",
 			cfg: &Config{
 				Lint: &LintConfig{
-					linters: map[string]LinterConfig{
-						"droppedErrors": &DroppedErrorsConfig{
+					Analyzers: map[string]AnalyzerConfig{
+						"droppedErrors": {
 							Exclude: []string{"fmt.Fprintln", "os.Remove"},
 						},
-						"unused": &CommonLinterConfig{
+						"unused": {
 							Mode: "warn",
 						},
 					},
@@ -761,16 +800,14 @@ func TestLintConfig_MarshalJSON_RoundTrip(t *testing.T) {
 					SkipGenerated: &trueVal,
 					SkipTests:     &falseVal,
 					GOOS:          []string{"linux", "darwin"},
-					linters: map[string]LinterConfig{
-						"droppedErrors": &DroppedErrorsConfig{
-							CommonLinterConfig: CommonLinterConfig{
-								Mode:     "error",
-								Baseline: ".ap/droppederrors-baseline.txt",
-							},
+					Analyzers: map[string]AnalyzerConfig{
+						"droppedErrors": {
+							Mode:               "error",
+							Baseline:           ".ap/droppederrors-baseline.txt",
 							Exclude:            []string{"fmt.Println"},
 							UseDefaultExcludes: &falseVal,
 						},
-						"unused": &CommonLinterConfig{
+						"unused": {
 							Mode:     "ignore",
 							Baseline: ".ap/unused-baseline.txt",
 						},
@@ -815,14 +852,12 @@ func TestConfig_DeepCopy(t *testing.T) {
 			SkipGenerated: &trueVal,
 			SkipTests:     &falseVal,
 			GOOS:          []string{"linux", "darwin"},
-			linters: map[string]LinterConfig{
-				"droppedErrors": &DroppedErrorsConfig{
-					CommonLinterConfig: CommonLinterConfig{
-						Mode: "error",
-					},
+			Analyzers: map[string]AnalyzerConfig{
+				"droppedErrors": {
+					Mode:    "error",
 					Exclude: []string{"fmt.Println"},
 				},
-				"unused": &CommonLinterConfig{
+				"unused": {
 					Mode: "warn",
 				},
 			},

@@ -28,9 +28,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/baseline"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/closewriter"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/testonlyimports"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
@@ -98,7 +96,7 @@ type AnalyzersTask struct {
 	Analyzers     []*analysis.Analyzer
 	Enabled       map[string]codestyle.Mode
 	Policies      map[string]fileset.Policy
-	Settings      map[string]config.LinterConfig
+	Settings      map[string]*config.AnalyzerConfig
 	GOOS          []string
 	HostGOOS      string
 	LoadCount     int
@@ -124,7 +122,7 @@ func (t *AnalyzersTask) SkipTests(name string) bool {
 
 // Packages returns any packages configured for the named analyzer.
 func (t *AnalyzersTask) Packages(name string) []string {
-	if s, ok := t.Settings[name].(*testonlyimports.Settings); ok && s != nil {
+	if s := t.Settings[name]; s != nil {
 		return s.Packages
 	}
 	return nil
@@ -132,7 +130,7 @@ func (t *AnalyzersTask) Packages(name string) []string {
 
 // Types returns any types configured for the named analyzer.
 func (t *AnalyzersTask) Types(name string) []string {
-	if s, ok := t.Settings[name].(*closewriter.Settings); ok && s != nil {
+	if s := t.Settings[name]; s != nil {
 		return s.Types
 	}
 	return nil
@@ -431,7 +429,7 @@ func LintTasks(r *sourcetree.SourceTree, root string) (tasks.Task, error) {
 			RepoRoot: root,
 			Enabled:  make(map[string]codestyle.Mode),
 			Policies: make(map[string]fileset.Policy),
-			Settings: make(map[string]config.LinterConfig),
+			Settings: make(map[string]*config.AnalyzerConfig),
 		}
 
 		if explicitGOOS := cfg.LintGOOS(); len(explicitGOOS) > 0 {

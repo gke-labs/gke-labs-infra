@@ -80,22 +80,6 @@ func validateUnknownKeys(rawMap map[string]any, targetType reflect.Type, parentP
 
 	fields, names := getStructFields(targetType)
 
-	if targetType == reflect.TypeOf(LintConfig{}) {
-		for name, newFn := range linterRegistry {
-			if _, exists := fields[name]; !exists {
-				cfg := newFn()
-				fields[name] = structFieldInfo{
-					field: reflect.StructField{
-						Name: name,
-						Type: reflect.TypeOf(cfg),
-					},
-					name: name,
-				}
-				names = append(names, name)
-			}
-		}
-	}
-
 	var rawKeys []string
 	for k := range rawMap {
 		rawKeys = append(rawKeys, k)
@@ -110,6 +94,14 @@ func validateUnknownKeys(rawMap map[string]any, targetType reflect.Type, parentP
 
 		fieldInfo, ok := fields[k]
 		if !ok {
+			if targetType == reflect.TypeOf(LintConfig{}) {
+				if isAnalyzer(k) {
+					return fmt.Errorf("unknown key %q: analyzer settings moved to lint.analyzers.%s", fullPath, k)
+				}
+				if k == "replace-empty-interface-with-any" {
+					return fmt.Errorf("unknown key %q: analyzer settings moved to lint.analyzers.replaceEmptyInterfaceWithAny", fullPath)
+				}
+			}
 			closest := findClosest(k, names)
 			if closest != "" {
 				return fmt.Errorf("unknown key %q (did you mean %q?)", fullPath, closest)

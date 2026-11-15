@@ -17,21 +17,22 @@ package unused
 import (
 	"testing"
 
-	"sigs.k8s.io/yaml"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 )
 
-func TestDecodeParametersSettings(t *testing.T) {
-	yamlContent := `
-mode: error
-`
-	var ps ParametersSettings
-	if err := yaml.Unmarshal([]byte(yamlContent), &ps); err != nil {
-		t.Fatalf("failed to unmarshal ParametersSettings: %v", err)
+func TestNewWithConfig(t *testing.T) {
+	cfg := &config.Config{
+		Lint: &config.LintConfig{
+			Analyzers: map[string]config.AnalyzerConfig{
+				"unusedparameters": {
+					Mode: "error",
+				},
+			},
+		},
 	}
-	if ps.Mode != "error" {
-		t.Errorf("expected Mode error, got %q", ps.Mode)
-	}
-	if !ps.CheckParameters() {
-		t.Errorf("expected CheckParameters true")
+	a := New(fileset.Policy{}, cfg)
+	if a == nil {
+		t.Fatal("expected non-nil analyzer")
 	}
 }

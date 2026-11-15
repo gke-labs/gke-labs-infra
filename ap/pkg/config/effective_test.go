@@ -263,9 +263,10 @@ func TestEffective_LintAndToolchainOverrides(t *testing.T) {
 toolchain: go1.27.1
 lint:
   skipGenerated: false
-  droppedErrors:
-    mode: error
-    baseline: .ap/droppederrors-baseline.txt
+  analyzers:
+    droppedErrors:
+      mode: error
+      baseline: .ap/droppederrors-baseline.txt
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(baseYAML), 0644); err != nil {
 		t.Fatal(err)
@@ -279,9 +280,10 @@ lint:
 	subYAML := `
 toolchain: go1.27.3
 lint:
-  droppedErrors:
-    mode: warn
-    baseline: .ap/local-baseline.txt
+  analyzers:
+    droppedErrors:
+      mode: warn
+      baseline: .ap/local-baseline.txt
 `
 	if err := os.WriteFile(filepath.Join(subApDir, "go.yaml"), []byte(subYAML), 0644); err != nil {
 		t.Fatal(err)
@@ -316,8 +318,9 @@ func TestEffective_ExplicitEmptyOverride(t *testing.T) {
 	baseYAML := `
 toolchain: go1.27.1
 lint:
-  unused:
-    mode: error
+  analyzers:
+    unused:
+      mode: error
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(baseYAML), 0644); err != nil {
 		t.Fatal(err)
@@ -331,8 +334,9 @@ lint:
 	subYAML := `
 toolchain: ""
 lint:
-  unused:
-    mode: ""
+  analyzers:
+    unused:
+      mode: ""
 `
 	if err := os.WriteFile(filepath.Join(subApDir, "go.yaml"), []byte(subYAML), 0644); err != nil {
 		t.Fatal(err)

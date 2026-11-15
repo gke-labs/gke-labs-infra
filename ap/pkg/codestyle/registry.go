@@ -43,13 +43,11 @@ type Registered struct {
 	Analyzer             *analysis.Analyzer
 	Name                 string
 	ConfigName           string
-	Aliases              []string
 	DefaultMode          Mode
 	DefaultSkipGenerated bool
 	DefaultSkipTests     bool
 
-	NewSettings func() config.LinterConfig
-	New         func(policy fileset.Policy, cfg *config.Config) *analysis.Analyzer
+	New func(policy fileset.Policy, cfg *config.Config) *analysis.Analyzer
 }
 
 // ConfigKey returns the configuration key used in Config.Linter.
@@ -60,18 +58,13 @@ func (r *Registered) ConfigKey() string {
 	return r.Name
 }
 
-// Matches reports whether the registered analyzer matches the given name or any alias.
+// Matches reports whether the registered analyzer matches the given name.
 func (r *Registered) Matches(name string) bool {
 	if strings.EqualFold(r.Name, name) {
 		return true
 	}
 	if r.ConfigName != "" && strings.EqualFold(r.ConfigName, name) {
 		return true
-	}
-	for _, a := range r.Aliases {
-		if strings.EqualFold(a, name) {
-			return true
-		}
 	}
 	return false
 }
@@ -114,7 +107,6 @@ var Analyzers = []Registered{
 		DefaultMode:          ModeError,
 		DefaultSkipGenerated: true,
 		DefaultSkipTests:     false,
-		NewSettings:          unused.NewSettings,
 		New:                  unused.New,
 	},
 	{
@@ -123,7 +115,6 @@ var Analyzers = []Registered{
 		DefaultMode:          ModeWarn,
 		DefaultSkipGenerated: false,
 		DefaultSkipTests:     false,
-		NewSettings:          func() config.LinterConfig { return &config.CommonLinterConfig{} },
 		New: func(policy fileset.Policy, _ *config.Config) *analysis.Analyzer {
 			return testcontext.NewAnalyzer(policy)
 		},
@@ -131,11 +122,9 @@ var Analyzers = []Registered{
 	{
 		Name:                 "replaceEmptyInterfaceWithAny",
 		ConfigName:           "replaceEmptyInterfaceWithAny",
-		Aliases:              []string{"replace-empty-interface-with-any"},
 		DefaultMode:          ModeWarn,
 		DefaultSkipGenerated: true,
 		DefaultSkipTests:     false,
-		NewSettings:          func() config.LinterConfig { return &config.CommonLinterConfig{} },
 		New: func(policy fileset.Policy, _ *config.Config) *analysis.Analyzer {
 			return any.NewAnalyzer(policy)
 		},
@@ -146,7 +135,6 @@ var Analyzers = []Registered{
 		DefaultMode:          ModeError,
 		DefaultSkipGenerated: false,
 		DefaultSkipTests:     false,
-		NewSettings:          testonlyimports.NewSettings,
 		New:                  testonlyimports.New,
 	},
 	{
@@ -155,7 +143,6 @@ var Analyzers = []Registered{
 		DefaultMode:          ModeError,
 		DefaultSkipGenerated: false,
 		DefaultSkipTests:     true,
-		NewSettings:          func() config.LinterConfig { return &config.DroppedErrorsConfig{} },
 		New:                  droppederrors.New,
 	},
 	{
@@ -164,7 +151,6 @@ var Analyzers = []Registered{
 		DefaultMode:          ModeError,
 		DefaultSkipGenerated: false,
 		DefaultSkipTests:     false,
-		NewSettings:          closewriter.NewSettings,
 		New:                  closewriter.New,
 	},
 	{
@@ -173,7 +159,6 @@ var Analyzers = []Registered{
 		DefaultMode:          ModeError,
 		DefaultSkipGenerated: false,
 		DefaultSkipTests:     false,
-		NewSettings:          func() config.LinterConfig { return &config.CommonLinterConfig{} },
 		New: func(policy fileset.Policy, _ *config.Config) *analysis.Analyzer {
 			return deferinloop.NewAnalyzer(policy)
 		},
@@ -184,17 +169,14 @@ var Analyzers = []Registered{
 		DefaultMode:          ModeError,
 		DefaultSkipGenerated: false,
 		DefaultSkipTests:     false,
-		NewSettings:          func() config.LinterConfig { return &config.CommonLinterConfig{} },
 	},
 }
 
 func init() {
 	for _, reg := range Analyzers {
-		if reg.NewSettings != nil {
-			config.RegisterLinter(reg.ConfigKey(), reg.NewSettings, reg.Aliases...)
-		}
+		config.RegisterAnalyzer(reg.ConfigKey())
 	}
-	config.RegisterLinter("unusedparameters", unused.NewParametersSettings)
+	config.RegisterAnalyzer("unusedparameters")
 }
 
 // Find finds a registered analyzer by name or alias.

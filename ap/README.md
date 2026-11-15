@@ -119,36 +119,37 @@ lint:
   # Cross-cutting options across all linters (default: false)
   skipGenerated: false
   skipTests: false
-
-  # Per-linter configurations (mode: error | warn | ignore)
-  unused:
-    mode: error
-    skipGenerated: true
-  unusedparameters:
-    mode: error
-  testcontext:
-    mode: warn
-  replaceEmptyInterfaceWithAny:
-    mode: warn
-  testOnlyImports:
-    mode: error
-    packages:
-      - github.com/google/go-cmp
-  closeWriter:
-    mode: error
-    types:
-      - "*bufio.Writer"
   goos:
     - linux
     - darwin
-  droppedErrors:
-    mode: error
-    baseline: .ap/droppederrors-baseline.txt
-    exclude:
-      - fmt.Fprintln
-    useDefaultExcludes: true
-  deferInLoop:
-    mode: error
+
+  # Per-analyzer configurations (mode: error | warn | ignore)
+  analyzers:
+    unused:
+      mode: error
+      skipGenerated: true
+    unusedparameters:
+      mode: error
+    testcontext:
+      mode: warn
+    replaceEmptyInterfaceWithAny:
+      mode: warn
+    testOnlyImports:
+      mode: error
+      packages:
+        - github.com/google/go-cmp
+    closeWriter:
+      mode: error
+      types:
+        - "*bufio.Writer"
+    droppedErrors:
+      mode: error
+      baseline: .ap/droppederrors-baseline.txt
+      exclude:
+        - fmt.Fprintln
+      useDefaultExcludes: true
+    deferInLoop:
+      mode: error
 ```
 
 `go.yaml` options:
@@ -162,13 +163,13 @@ lint:
 - `lint.goos`: An optional list of target `GOOS` platforms to check (e.g. `[linux, darwin]`), which overrides automatic detection; omit it for auto (automatically detects non-host GOOS targets referenced by in-scope Go files via filename suffixes and `//go:build` constraints).
 - `lint.skipGenerated`: Cross-cutting boolean flag. When `false` (the default), generated code is linted unless a linter specifies its own default or per-linter override.
 - `lint.skipTests`: Cross-cutting boolean flag. When `false` (the default), test code (`*_test.go`) is linted unless a linter specifies its own default or per-linter override.
-- Analyzers and modes: Every check is on at `mode: error` unless configured (except `testcontext` and `replaceEmptyInterfaceWithAny` which default to `mode: warn`, and `unusedparameters` which is opt-in). Valid modes are `error`, `warn`, and `ignore`.
-- Per-linter options:
+- Analyzers and modes: Every check is configured under `lint.analyzers.<name>` and is on at `mode: error` unless configured (except `testcontext` and `replaceEmptyInterfaceWithAny` which default to `mode: warn`, and `unusedparameters` which is opt-in). Valid modes are `error`, `warn`, and `ignore`.
+- Per-analyzer options under `lint.analyzers`:
   - `unusedparameters.mode`: Enables parameter checking in the `unused` analyzer (`error | warn | ignore`).
   - `testOnlyImports.packages`: List of package import paths permitted only in test files (`*_test.go`).
   - `closeWriter.types`: List of type names whose instances must check errors when closed.
   - `droppedErrors`: Checks for dropped errors (calls whose returned `error` is ignored). Supports `exclude` (additional functions/methods to exclude), and `useDefaultExcludes` (boolean, defaults to `true` to exclude standard library functions).
-  - Baseline ratchet: `baseline:` is accepted on every linter section (`lint.<check>.baseline: <path>`); the default file is `.ap/<analyzer>-baseline.txt`. Every analyzer uses a one-line format (`file:enclosingFunc:detail`, with the optional category field `droppederrors` writes). Running `ap lint --write-baseline` writes a baseline for each enabled analyzer that has findings (`ap lint droppederrors --write-baseline` still works). Matched findings are suppressed, and stale entries are reported so they can be removed and the baseline ratchets toward zero. This is the way to adopt a check at `mode: error` in a repo with existing findings, instead of `mode: warn`.
+  - Baseline ratchet: `baseline:` is accepted on every analyzer section (`lint.analyzers.<check>.baseline: <path>`); the default file is `.ap/<analyzer>-baseline.txt`. Every analyzer uses a one-line format (`file:enclosingFunc:detail`, with the optional category field `droppederrors` writes). Running `ap lint --write-baseline` writes a baseline for each enabled analyzer that has findings (`ap lint droppederrors --write-baseline` still works). Matched findings are suppressed, and stale entries are reported so they can be removed and the baseline ratchets toward zero. This is the way to adopt a check at `mode: error` in a repo with existing findings, instead of `mode: warn`.
 
 ### proto.yaml
 

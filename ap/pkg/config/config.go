@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -49,113 +50,37 @@ type TidyConfig struct {
 }
 
 type LintConfig struct {
-	SkipGenerated *bool    `json:"skipGenerated"`
-	SkipTests     *bool    `json:"skipTests"`
-	GOOS          []string `json:"goos"`
-
-	linters map[string]LinterConfig
+	SkipGenerated *bool                     `json:"skipGenerated,omitempty"`
+	SkipTests     *bool                     `json:"skipTests,omitempty"`
+	GOOS          []string                  `json:"goos,omitempty"`
+	Analyzers     map[string]AnalyzerConfig `json:"analyzers,omitempty"`
 }
 
-// UnmarshalJSON unmarshals shared lint config and dynamic per-linter configurations.
-// Unknown keys under lint: are skipped here; strict.go validates them at load time.
-func (l *LintConfig) UnmarshalJSON(data []byte) error {
-	type plain LintConfig
-	var p plain
-	if err := json.Unmarshal(data, &p); err != nil {
-		return err
-	}
-	l.SkipGenerated = p.SkipGenerated
-	l.SkipTests = p.SkipTests
-	l.GOOS = p.GOOS
-
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-
-	for key, rawVal := range raw {
-		if key == "skipGenerated" || key == "skipTests" || key == "goos" {
-			continue
-		}
-		newFn, ok := linterRegistry[key]
-		if !ok {
-			continue
-		}
-		if l.linters == nil {
-			l.linters = make(map[string]LinterConfig)
-		}
-		cfg := newFn()
-		if len(rawVal) > 0 && string(rawVal) != "null" {
-			if err := json.Unmarshal(rawVal, cfg); err != nil {
-				return fmt.Errorf("error unmarshaling %s: %w", key, err)
-			}
-		}
-		l.linters[key] = cfg
-	}
-	return nil
+type AnalyzerConfig struct {
+	Mode               string   `json:"mode,omitempty"`
+	SkipGenerated      *bool    `json:"skipGenerated,omitempty"`
+	SkipTests          *bool    `json:"skipTests,omitempty"`
+	Baseline           string   `json:"baseline,omitempty"`
+	Exclude            []string `json:"exclude,omitempty"`
+	UseDefaultExcludes *bool    `json:"useDefaultExcludes,omitempty"`
+	Types              []string `json:"types,omitempty"`
+	Packages           []string `json:"packages,omitempty"`
 }
 
-// MarshalJSON marshals the shared lint config fields and dynamic per-linter configurations.
-func (l *LintConfig) MarshalJSON() ([]byte, error) {
-	m := make(map[string]any)
-	if l.SkipGenerated != nil {
-		m["skipGenerated"] = l.SkipGenerated
-	}
-	if l.SkipTests != nil {
-		m["skipTests"] = l.SkipTests
-	}
-	if l.GOOS != nil {
-		m["goos"] = l.GOOS
-	}
-	for key, cfg := range l.linters {
-		if cfg != nil {
-			m[key] = cfg
-		}
-	}
-	return json.Marshal(m)
-}
-
-// LinterConfig represents common configuration options for a linter.
-type LinterConfig interface {
-	IsEnabled() bool
-	IsError() bool
-	GetMode() string
-	SkipGeneratedOverride() *bool
-	SkipTestsOverride() *bool
-	GetBaseline() string
-}
-
-// CommonLinterConfig holds configuration common across linters.
-type CommonLinterConfig struct {
-	Mode          string `json:"mode"`
-	SkipGenerated *bool  `json:"skipGenerated"`
-	SkipTests     *bool  `json:"skipTests"`
-	Baseline      string `json:"baseline"`
-}
-
-var _ LinterConfig = (*CommonLinterConfig)(nil)
-
-type DroppedErrorsConfig struct {
-	CommonLinterConfig
-	Exclude            []string `json:"exclude"`
-	UseDefaultExcludes *bool    `json:"useDefaultExcludes"`
-}
-
-// Linter returns the LinterConfig for the named linter.
+// Linter returns the AnalyzerConfig for the named linter.
 // It panics if the linter name is not registered.
-// If the linter is not explicitly configured, it returns a nil-safe LinterConfig with defaults.
-func (c *Config) Linter(name string) LinterConfig {
-	_, ok := linterRegistry[name]
-	if !ok {
+// If the linter is not explicitly configured, it returns a nil-safe *AnalyzerConfig.
+func (c *Config) Linter(name string) *AnalyzerConfig {
+	if !isAnalyzer(name) {
 		panic(fmt.Sprintf("unknown linter %q", name))
 	}
-	if c == nil || c.Lint == nil || c.Lint.linters == nil {
-		return (*CommonLinterConfig)(nil)
+	if c == nil || c.Lint == nil || c.Lint.Analyzers == nil {
+		return (*AnalyzerConfig)(nil)
 	}
-	if lc, ok := c.Lint.linters[name]; ok && lc != nil {
-		return lc
+	if ac, ok := c.Lint.Analyzers[name]; ok {
+		return &ac
 	}
-	return (*CommonLinterConfig)(nil)
+	return (*AnalyzerConfig)(nil)
 }
 
 // DeepCopy returns a deep copy of c using JSON marshal and unmarshal.
@@ -199,11 +124,20 @@ func (c *Config) Validate() error {
 			}
 			return nil
 		}
-		names := RegisteredLinters()
-		for _, name := range names {
-			lc := c.Linter(name)
-			if lc != nil {
-				if err := checkMode(name, lc.GetMode()); err != nil {
+		if c.Lint.Analyzers != nil {
+			var names []string
+			for k := range c.Lint.Analyzers {
+				names = append(names, k)
+			}
+			sort.Strings(names)
+
+			known := RegisteredAnalyzers()
+			for _, name := range names {
+				if !isAnalyzer(name) {
+					return fmt.Errorf("unknown analyzer %q (valid analyzers: %s)", name, strings.Join(known, ", "))
+				}
+				ac := c.Lint.Analyzers[name]
+				if err := checkMode(name, ac.GetMode()); err != nil {
 					return err
 				}
 			}
@@ -266,13 +200,12 @@ func (c *Config) DroppedErrorsMode() string {
 }
 
 // DroppedErrors returns the configuration for droppedErrors, or nil if not configured.
-func (c *Config) DroppedErrors() *DroppedErrorsConfig {
-	if c == nil || c.Lint == nil {
+func (c *Config) DroppedErrors() *AnalyzerConfig {
+	if c == nil || c.Lint == nil || c.Lint.Analyzers == nil {
 		return nil
 	}
-	lc := c.Linter("droppedErrors")
-	if de, ok := lc.(*DroppedErrorsConfig); ok {
-		return de
+	if de, ok := c.Lint.Analyzers["droppedErrors"]; ok {
+		return &de
 	}
 	return nil
 }
@@ -294,7 +227,7 @@ func (c *Config) DroppedErrorsExclude() []string {
 }
 
 // GetMode returns the configured mode, or empty string if unset.
-func (c *CommonLinterConfig) GetMode() string {
+func (c *AnalyzerConfig) GetMode() string {
 	if c == nil {
 		return ""
 	}
@@ -302,7 +235,7 @@ func (c *CommonLinterConfig) GetMode() string {
 }
 
 // GetBaseline returns the configured baseline file path, or empty string if unset.
-func (c *CommonLinterConfig) GetBaseline() string {
+func (c *AnalyzerConfig) GetBaseline() string {
 	if c == nil {
 		return ""
 	}
@@ -310,7 +243,7 @@ func (c *CommonLinterConfig) GetBaseline() string {
 }
 
 // IsEnabled returns true if the linter is enabled (defaulting to true, mode != "ignore").
-func (c *CommonLinterConfig) IsEnabled() bool {
+func (c *AnalyzerConfig) IsEnabled() bool {
 	if c != nil && c.Mode != "" {
 		return c.Mode != "ignore"
 	}
@@ -318,7 +251,7 @@ func (c *CommonLinterConfig) IsEnabled() bool {
 }
 
 // IsError returns true if violations should be reported as errors (defaulting to true, mode == "error").
-func (c *CommonLinterConfig) IsError() bool {
+func (c *AnalyzerConfig) IsError() bool {
 	if c != nil && c.Mode != "" {
 		return c.Mode == "error"
 	}
@@ -326,7 +259,7 @@ func (c *CommonLinterConfig) IsError() bool {
 }
 
 // SkipGeneratedOverride returns the configured skipGenerated override, or nil if unset.
-func (c *CommonLinterConfig) SkipGeneratedOverride() *bool {
+func (c *AnalyzerConfig) SkipGeneratedOverride() *bool {
 	if c == nil {
 		return nil
 	}
@@ -334,7 +267,7 @@ func (c *CommonLinterConfig) SkipGeneratedOverride() *bool {
 }
 
 // SkipTestsOverride returns the configured skipTests override, or nil if unset.
-func (c *CommonLinterConfig) SkipTestsOverride() *bool {
+func (c *AnalyzerConfig) SkipTestsOverride() *bool {
 	if c == nil {
 		return nil
 	}
@@ -359,10 +292,10 @@ func (c *Config) IsLintSkipTests() bool {
 
 // ResolveSkipGenerated resolves whether generated files should be skipped,
 // checking a per-check override first, then lint.skipGenerated, then analyzerDefault.
-func (c *Config) ResolveSkipGenerated(lc LinterConfig, analyzerDefault bool) bool {
+func (c *Config) ResolveSkipGenerated(ac *AnalyzerConfig, analyzerDefault bool) bool {
 	var override *bool
-	if lc != nil {
-		override = lc.SkipGeneratedOverride()
+	if ac != nil {
+		override = ac.SkipGeneratedOverride()
 	}
 	var shared *bool
 	if c != nil && c.Lint != nil {
@@ -373,10 +306,10 @@ func (c *Config) ResolveSkipGenerated(lc LinterConfig, analyzerDefault bool) boo
 
 // ResolveSkipTests resolves whether test files should be skipped,
 // checking a per-check override first, then lint.skipTests, then analyzerDefault.
-func (c *Config) ResolveSkipTests(lc LinterConfig, analyzerDefault bool) bool {
+func (c *Config) ResolveSkipTests(ac *AnalyzerConfig, analyzerDefault bool) bool {
 	var override *bool
-	if lc != nil {
-		override = lc.SkipTestsOverride()
+	if ac != nil {
+		override = ac.SkipTestsOverride()
 	}
 	var shared *bool
 	if c != nil && c.Lint != nil {

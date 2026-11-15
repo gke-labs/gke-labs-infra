@@ -46,8 +46,8 @@ func TestRegistry_FindAndDefaults(t *testing.T) {
 			wantDefaultSkipTests: false,
 		},
 		{
-			name:                 "replaceEmptyInterfaceWithAny alias",
-			lookup:               "replace-empty-interface-with-any",
+			name:                 "replaceEmptyInterfaceWithAny",
+			lookup:               "replaceEmptyInterfaceWithAny",
 			wantName:             "replaceEmptyInterfaceWithAny",
 			wantDefaultMode:      ModeWarn,
 			wantDefaultSkipGen:   true,
@@ -128,12 +128,13 @@ func TestRegistry_ResolveWithConfig(t *testing.T) {
 	yamlContent := `
 lint:
   skipGenerated: true
-  testcontext:
-    mode: error
-    skipTests: true
-  unused:
-    mode: ignore
-    skipGenerated: false
+  analyzers:
+    testcontext:
+      mode: error
+      skipTests: true
+    unused:
+      mode: ignore
+      skipGenerated: false
 `
 	var cfg config.Config
 	if err := config.UnmarshalStrict([]byte(yamlContent), &cfg); err != nil {

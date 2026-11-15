@@ -320,8 +320,9 @@ func main() {
 	// 3. lint.skipGenerated: true, but droppedErrors.skipGenerated: false override -> should flag gen.go
 	overrideYaml := `lint:
   skipGenerated: true
-  droppedErrors:
-    skipGenerated: false
+  analyzers:
+    droppedErrors:
+      skipGenerated: false
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(overrideYaml), 0644); err != nil {
 		t.Fatal(err)
