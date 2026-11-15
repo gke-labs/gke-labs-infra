@@ -58,14 +58,12 @@ func DiscoverTasks(ctx context.Context, availablePlugins []Plugin, scope *tasks.
 		if err != nil {
 			return nil, err
 		}
-		tasks, err := plugin.DiscoverTasks(ctx, dir, scope)
+		pluginTasks, err := plugin.DiscoverTasks(ctx, dir, scope)
 		if err != nil {
 			return nil, err
 		}
-		for _, task := range tasks {
-			if task.Plugin == "" {
-				task.Plugin = manifest.Name
-			}
+		for _, task := range pluginTasks {
+			task.Plugin = manifest.Name
 			discoveredTasks = append(discoveredTasks, task)
 		}
 	}

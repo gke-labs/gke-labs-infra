@@ -61,7 +61,6 @@ func (plugin *Plugin) DiscoverTasks(ctx context.Context, dir string, scope *task
 	}
 	if testTasks != nil {
 		discoveredTasks = append(discoveredTasks, plugins.PluginTask{
-			Plugin:       "go",
 			TaskMetadata: taskMetadataTest,
 			Task:         testTasks,
 		})
@@ -73,7 +72,6 @@ func (plugin *Plugin) DiscoverTasks(ctx context.Context, dir string, scope *task
 	}
 	if lintTasks != nil {
 		discoveredTasks = append(discoveredTasks, plugins.PluginTask{
-			Plugin:       "go",
 			TaskMetadata: taskMetadataLint,
 			Task:         lintTasks,
 		})

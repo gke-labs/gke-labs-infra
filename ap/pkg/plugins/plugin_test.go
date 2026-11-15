@@ -45,7 +45,6 @@ func (plugin *trivialPlugin) Describe(ctx context.Context) (*plugins.PluginManif
 func (plugin *trivialPlugin) DiscoverTasks(ctx context.Context, dir string, scope *tasks.TaskContext) ([]plugins.PluginTask, error) {
 	return []plugins.PluginTask{
 		{
-			Plugin: "trivial",
 			TaskMetadata: plugins.TaskMetadata{
 				Name:        "trivial-task",
 				Verb:        "test",
@@ -83,6 +82,9 @@ func TestTrivialPluginDiscoveryAndRun(t *testing.T) {
 	}
 
 	pluginTask := discoveredTasks[0]
+	if pluginTask.Plugin != "trivial" {
+		t.Fatalf("expected task plugin trivial, got %s", pluginTask.Plugin)
+	}
 	if pluginTask.Name != "trivial-task" {
 		t.Fatalf("expected task name trivial-task, got %s", pluginTask.Name)
 	}
