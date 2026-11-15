@@ -15,6 +15,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,6 +24,7 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/portability"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/format"
 	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/plugins"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
@@ -111,22 +113,29 @@ func DiscoverScopes(r *sourcetree.SourceTree, repoRoot, dir string) ([]*tasks.Ta
 		}
 	}
 
-	// Go Test tasks
-	goTestTasks, err := golang.TestTasks(scope.SourceTree(), dir)
+	// Discover plugin tasks (e.g. Go tooling)
+	pluginTasks, err := plugins.DiscoverTasks(context.Background(), scope, dir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to discover test tasks in %s: %w", dir, err)
+		return nil, fmt.Errorf("failed to discover plugin tasks in %s: %w", dir, err)
 	}
-	if goTestTasks != nil {
-		scope.TestTasks = append(scope.TestTasks, goTestTasks)
-	}
-
-	// Go lint tasks
-	goLintTasks, err := golang.LintTasks(scope.SourceTree(), dir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to discover lint tasks in %s: %w", dir, err)
-	}
-	if goLintTasks != nil {
-		scope.LintTasks = append(scope.LintTasks, goLintTasks)
+	for _, pt := range pluginTasks {
+		if pt.Task == nil {
+			continue
+		}
+		switch pt.Verb {
+		case "test":
+			scope.TestTasks = append(scope.TestTasks, pt.Task)
+		case "lint":
+			scope.LintTasks = append(scope.LintTasks, pt.Task)
+		case "build":
+			scope.BuildTasks = append(scope.BuildTasks, pt.Task)
+		case "format":
+			scope.FormatTasks = append(scope.FormatTasks, pt.Task)
+		case "generate":
+			scope.GenerateTasks = append(scope.GenerateTasks, pt.Task)
+		case "e2e":
+			scope.E2ETasks = append(scope.E2ETasks, pt.Task)
+		}
 	}
 
 	// Portability lint tasks
