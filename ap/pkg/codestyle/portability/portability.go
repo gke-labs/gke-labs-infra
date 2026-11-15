@@ -252,7 +252,7 @@ func (t *Task) Run(ctx context.Context, scope *tasks.TaskContext) error {
 		}
 	}
 
-	_, err := baseline.Apply(allFindings, baseline.ApplyOptions{
+	_, err := baseline.Apply(ctx, allFindings, baseline.ApplyOptions{
 		Name:            "portability",
 		RepoRoot:        t.RepoRoot,
 		Dir:             t.Dir,
@@ -262,7 +262,6 @@ func (t *Task) Run(ctx context.Context, scope *tasks.TaskContext) error {
 		Mode:            string(t.Mode),
 		Stdout:          scope.Stdout(),
 		Stderr:          scope.Stderr(),
-		Log:             scope.Log(),
 	})
 	return err
 }

@@ -29,7 +29,6 @@ import (
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
-	"github.com/go-logr/logr"
 )
 
 const (
@@ -420,7 +419,6 @@ type ApplyOptions struct {
 	Mode            string
 	Stdout          io.Writer
 	Stderr          io.Writer
-	Log             logr.Logger
 }
 
 func relPath(base, target string) string {
@@ -436,11 +434,8 @@ func relPath(base, target string) string {
 
 // Apply handles baseline resolution, relative path normalization, deterministic sorting,
 // baseline writing or matching, diagnostic reporting, and mode-based error generation.
-func Apply(findings []Finding, opts ApplyOptions) ([]Finding, error) {
-	log := opts.Log
-	if log.GetSink() == nil {
-		log = scoped.Log(context.Background())
-	}
+func Apply(ctx context.Context, findings []Finding, opts ApplyOptions) ([]Finding, error) {
+	log := scoped.Log(ctx)
 
 	baselineRoot := opts.RepoRoot
 	if baselineRoot == "" {
@@ -575,17 +570,6 @@ func Apply(findings []Finding, opts ApplyOptions) ([]Finding, error) {
 			return findingsToReport, fmt.Errorf("%s check failed in %s", opts.Name, opts.Dir)
 		} else if opts.Mode == "warn" {
 			log.Info("check failed", "level", "warning", "name", opts.Name, "dir", opts.Dir, "diagnostics", len(findingsToReport))
-			for _, f := range findingsToReport {
-				msg := f.Message
-				if msg == "" {
-					msg = f.Detail
-				}
-				file := f.Pos.Filename
-				if file == "" {
-					file = f.RelFile
-				}
-				log.Info("analyzer finding", "level", "warning", "name", opts.Name, "file", file, "line", f.Pos.Line, "message", msg)
-			}
 		}
 	}
 	return findingsToReport, nil

@@ -710,7 +710,7 @@ func isUseReachingCaller(id *ast.Ident, fnNode ast.Node, parentMap map[ast.Node]
 
 	// In a CallExpr:
 	if call, ok := parent.(*ast.CallExpr); ok {
-		// panic(cerr), os.Exit(...), log.Fatalf(...), klog Fatalf(...), etc.
+		// panic(cerr), os.Exit(...), log.Fatalf(...), klog.Fatalf(...), etc.
 		if isProcessTerminatingCall(call, info) {
 			return true
 		}
@@ -883,7 +883,7 @@ func isProcessTerminatingCall(call *ast.CallExpr, info *types.Info) bool {
 		return true
 	}
 
-	// klog Fatal*, klog Exit*
+	// klog.Fatal*, klog.Exit*
 	if (pkgPath == "k8s.io/klog" || pkgPath == "k8s.io/klog/v2") && (strings.HasPrefix(fnName, "Fatal") || strings.HasPrefix(fnName, "Exit")) {
 		return true
 	}
@@ -996,7 +996,7 @@ func isErrorOnlyLogged(call *ast.CallExpr, fnNode ast.Node, parentMap map[ast.No
 		return false
 	}
 
-	// Direct call inside a log call: log.Infof("close: %v", f.Close())
+	// Direct call inside a log call: klog.Infof("close: %v", f.Close())
 	if callParent, ok := parent.(*ast.CallExpr); ok {
 		if isLogCall(callParent, info) {
 			return true

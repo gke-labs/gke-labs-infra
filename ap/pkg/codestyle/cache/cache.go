@@ -34,13 +34,6 @@ type Manager struct {
 	mu   sync.Mutex
 }
 
-func (m *Manager) logger() logr.Logger {
-	if m != nil && m.log.GetSink() != nil {
-		return m.log
-	}
-	return scoped.Log(context.Background())
-}
-
 func NewManager(ctx context.Context) (*Manager, error) {
 	cacheDir, err := fileutils.CacheDir()
 	if err != nil {
@@ -61,14 +54,14 @@ func NewManagerWithDir(ctx context.Context, dir string) (*Manager, error) {
 		log:  scoped.Log(ctx),
 	}
 	if err := m.load(); err != nil {
-		m.logger().Info("falling back to empty codestyle cache", "level", "warning", "error", err)
+		m.log.Info("falling back to empty codestyle cache", "level", "warning", "error", err)
 	}
 	return m, nil
 }
 
 func (m *Manager) removeLegacyFile(path string) {
 	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		m.logger().V(2).Info("failed to remove legacy cache file", "path", path, "error", err)
+		m.log.V(2).Info("failed to remove legacy cache file", "path", path, "error", err)
 	}
 }
 
@@ -83,11 +76,11 @@ func (m *Manager) load() error {
 	doneBinPath := filepath.Join(m.dir, "done.bin")
 	if data, err := os.ReadFile(doneBinPath); err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
-			m.logger().V(2).Info("failed to read done cache, starting with empty cache", "path", doneBinPath, "error", err)
+			m.log.V(2).Info("failed to read done cache, starting with empty cache", "path", doneBinPath, "error", err)
 		}
 		m.done = NewDoneIndex()
 	} else if idx, err := LoadDone(data); err != nil {
-		m.logger().V(2).Info("invalid done cache, starting with empty cache", "path", doneBinPath, "error", err)
+		m.log.V(2).Info("invalid done cache, starting with empty cache", "path", doneBinPath, "error", err)
 		m.done = NewDoneIndex()
 	} else {
 		m.done = idx
@@ -128,6 +121,6 @@ func (m *Manager) MarkDone(step Step, hash string) {
 		m.done = NewDoneIndex()
 	}
 	if err := m.done.MarkDone(step, hash); err != nil {
-		m.logger().V(2).Info("failed to mark done", "step", int(step), "error", err)
+		m.log.V(2).Info("failed to mark done", "step", int(step), "error", err)
 	}
 }
