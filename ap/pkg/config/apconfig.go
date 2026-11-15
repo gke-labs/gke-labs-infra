@@ -36,11 +36,10 @@ type PresubmitConfig struct {
 
 // APConfig represents the configuration loaded from .ap/ap.yaml.
 type APConfig struct {
-	Version     string                       `json:"version"`
-	ImagePrefix string                       `json:"imagePrefix"`
-	Presubmits  *PresubmitConfig             `json:"presubmits"`
-	Generate    *GenerateConfig              `json:"generate"`
-	Plugins     map[string]PluginDeclaration `json:"plugins,omitempty"`
+	Version     string           `json:"version"`
+	ImagePrefix string           `json:"imagePrefix"`
+	Presubmits  *PresubmitConfig `json:"presubmits"`
+	Generate    *GenerateConfig  `json:"generate"`
 }
 
 // LoadAPConfig loads the configuration from .ap/ap.yaml using strict unmarshaling.
@@ -66,13 +65,6 @@ func LoadAPConfig(root string) (*APConfig, error) {
 func (c *APConfig) Validate() error {
 	if c.Version != "" && c.Version != "!self" && c.Version != "latest" && !semver.IsValid(c.Version) {
 		return fmt.Errorf("invalid version %q: must be '!self', 'latest', or a module version string", c.Version)
-	}
-
-	if c.Plugins != nil {
-		pluginsCfg := &PluginsConfig{Plugins: c.Plugins}
-		if err := pluginsCfg.Validate(); err != nil {
-			return err
-		}
 	}
 
 	if c.Presubmits != nil {

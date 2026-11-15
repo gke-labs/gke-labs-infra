@@ -16,6 +16,8 @@ package plugins_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/plugins"
@@ -94,5 +96,64 @@ func TestTrivialPluginDiscoveryAndRun(t *testing.T) {
 	}
 	if !secondPlugin.ran {
 		t.Fatalf("expected trivial plugin task to run and set ran=true")
+	}
+}
+
+func TestFindActivatedDirs_HonoursSkips(t *testing.T) {
+	sourcetree.ResetCache()
+	tempDir := t.TempDir()
+
+	files := map[string]string{
+		".git/config":                 "",
+		"docs/astro.config.mjs":       "export default {}",
+		"site/nested/astro.config.ts": "export default {}",
+		"ignored/astro.config.mjs":    "export default {}",
+		"vendor/astro.config.mjs":     "export default {}",
+	}
+
+	for relativePath, content := range files {
+		fullPath := filepath.Join(tempDir, relativePath)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tree, err := sourcetree.Open(tempDir, sourcetree.WithSkip("ignored/**"))
+	if err != nil {
+		t.Fatalf("sourcetree.Open failed: %v", err)
+	}
+
+	activatedDirectories, err := plugins.FindActivatedDirs(tree, "astro", []string{"astro.config.*"})
+	if err != nil {
+		t.Fatalf("FindActivatedDirs failed: %v", err)
+	}
+
+	docsDir := filepath.Join(tempDir, "docs")
+	nestedDir := filepath.Join(tempDir, "site", "nested")
+	ignoredDir := filepath.Join(tempDir, "ignored")
+	vendorDir := filepath.Join(tempDir, "vendor")
+
+	hasDocs := false
+	hasNested := false
+	for _, directory := range activatedDirectories {
+		if directory == docsDir {
+			hasDocs = true
+		}
+		if directory == nestedDir {
+			hasNested = true
+		}
+		if directory == ignoredDir {
+			t.Errorf("FindActivatedDirs returned skipped directory %s", directory)
+		}
+		if directory == vendorDir {
+			t.Errorf("FindActivatedDirs returned vendor directory %s", directory)
+		}
+	}
+
+	if !hasDocs || !hasNested || len(activatedDirectories) != 2 {
+		t.Errorf("expected [docs, site/nested], got %v", activatedDirectories)
 	}
 }

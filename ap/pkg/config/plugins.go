@@ -33,50 +33,46 @@ type PluginDeclaration struct {
 	Enabled    *bool  `json:"enabled,omitempty"`
 }
 
-// IsEnabled returns true if the plugin is enabled (defaulting to true).
-func (p PluginDeclaration) IsEnabled() bool {
-	if p.Enabled == nil {
+// IsEnabled reports whether the plugin is enabled (defaulting to true).
+func (declaration PluginDeclaration) IsEnabled() bool {
+	if declaration.Enabled == nil {
 		return true
 	}
-	return *p.Enabled
+	return *declaration.Enabled
 }
 
 // Validate checks the plugins configuration for semantic errors.
-func (c *PluginsConfig) Validate() error {
-	if c == nil {
-		return nil
-	}
-	for name, decl := range c.Plugins {
-		if !decl.IsEnabled() {
+func (config *PluginsConfig) Validate() error {
+	for name, declaration := range config.Plugins {
+		if !declaration.IsEnabled() {
 			continue
 		}
-		if (decl.Image == "" && decl.Dockerfile == "") || (decl.Image != "" && decl.Dockerfile != "") {
-			return fmt.Errorf("plugin %q must specify either image or dockerfile", name)
+		if declaration.Dockerfile != "" {
+			return fmt.Errorf("plugin %q: dockerfile plugins are not supported yet", name)
 		}
-		if decl.Image != "" && !strings.Contains(decl.Image, "@sha256:") {
-			return fmt.Errorf("plugin %q image %q must be pinned by digest (@sha256:...)", name, decl.Image)
+		if declaration.Image == "" {
+			return fmt.Errorf("plugin %q must specify image", name)
+		}
+		if !strings.Contains(declaration.Image, "@sha256:") {
+			return fmt.Errorf("plugin %q image %q must be pinned by digest (@sha256:...)", name, declaration.Image)
 		}
 	}
 	return nil
 }
 
-// LoadPluginsConfig loads plugin declarations from .ap/plugins.yaml or .ap/ap.yaml.
+// LoadPluginsConfig loads plugin declarations from .ap/plugins.yaml.
 func LoadPluginsConfig(root string) (*PluginsConfig, error) {
 	configFile := filepath.Join(root, ".ap", "plugins.yaml")
-	var cfg PluginsConfig
-	found, err := LoadYAML(configFile, &cfg)
+	var config PluginsConfig
+	found, err := LoadYAML(configFile, &config)
 	if err != nil {
 		return nil, err
 	}
 	if !found {
-		apCfg, err := LoadAPConfig(root)
-		if err != nil || apCfg == nil || len(apCfg.Plugins) == 0 {
-			return nil, err
-		}
-		cfg.Plugins = apCfg.Plugins
+		return &PluginsConfig{}, nil
 	}
-	if err := cfg.Validate(); err != nil {
+	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", configFile, err)
 	}
-	return &cfg, nil
+	return &config, nil
 }

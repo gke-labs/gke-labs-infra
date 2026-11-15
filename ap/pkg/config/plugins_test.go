@@ -21,7 +21,7 @@ import (
 	"testing"
 )
 
-func TestLoadPluginsConfig(t *testing.T) {
+func TestLoadPluginsConfig_UnknownKey(t *testing.T) {
 	tempDir := t.TempDir()
 	apDir := filepath.Join(tempDir, ".ap")
 	if err := os.Mkdir(apDir, 0755); err != nil {
@@ -32,74 +32,42 @@ func TestLoadPluginsConfig(t *testing.T) {
 plugins:
   astro:
     image: ghcr.io/gke-labs/astro-builder@sha256:4b22
-    network: false
-  local:
-    dockerfile: images/local/Dockerfile
-    network: true
+    netwrok: false
 `
 	if err := os.WriteFile(filepath.Join(apDir, "plugins.yaml"), []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	cfg, err := LoadPluginsConfig(tempDir)
-	if err != nil {
-		t.Fatalf("LoadPluginsConfig failed: %v", err)
+	_, err := LoadPluginsConfig(tempDir)
+	if err == nil {
+		t.Fatalf("expected LoadPluginsConfig to fail on unknown key")
 	}
-	if len(cfg.Plugins) != 2 || !cfg.Plugins["astro"].IsEnabled() || !cfg.Plugins["local"].Network {
-		t.Errorf("unexpected loaded plugins: %+v", cfg.Plugins)
+	if !strings.Contains(err.Error(), "netwrok") {
+		t.Errorf("expected error to name unknown key netwrok, got %v", err)
 	}
 }
 
-func TestLoadPluginsConfig_StrictAndValidation(t *testing.T) {
-	tests := []struct {
-		name    string
-		yaml    string
-		wantErr string
-	}{
-		{
-			name: "unknown key",
-			yaml: `
-plugins:
-  astro:
-    image: ghcr.io/gke-labs/astro-builder@sha256:4b22
-    netwrok: false
-`,
-			wantErr: "netwrok",
-		},
-		{
-			name: "missing image and dockerfile",
-			yaml: `
-plugins:
-  astro:
-    network: false
-`,
-			wantErr: "must specify either image or dockerfile",
-		},
-		{
-			name: "unpinned image",
-			yaml: `
+func TestLoadPluginsConfig_UnpinnedImageRejected(t *testing.T) {
+	tempDir := t.TempDir()
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.Mkdir(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	content := `
 plugins:
   astro:
     image: ghcr.io/gke-labs/astro-builder:latest
-`,
-			wantErr: "must be pinned by digest (@sha256:...)",
-		},
+`
+	if err := os.WriteFile(filepath.Join(apDir, "plugins.yaml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			tempDir := t.TempDir()
-			apDir := filepath.Join(tempDir, ".ap")
-			if err := os.Mkdir(apDir, 0755); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(apDir, "plugins.yaml"), []byte(tc.yaml), 0644); err != nil {
-				t.Fatal(err)
-			}
-			_, err := LoadPluginsConfig(tempDir)
-			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-				t.Errorf("expected error containing %q, got: %v", tc.wantErr, err)
-			}
-		})
+	_, err := LoadPluginsConfig(tempDir)
+	if err == nil {
+		t.Fatalf("expected LoadPluginsConfig to fail on unpinned image")
+	}
+	if !strings.Contains(err.Error(), "must be pinned by digest (@sha256:...)") {
+		t.Errorf("expected error to require digest pinning, got %v", err)
 	}
 }
