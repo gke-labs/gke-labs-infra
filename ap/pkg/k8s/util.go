@@ -15,10 +15,11 @@
 package k8s
 
 import (
+	"context"
 	"os"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
-	"k8s.io/klog/v2"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 )
 
 var serviceAccountTokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
@@ -30,7 +31,7 @@ func IsInCluster() bool {
 	}
 	exists, err := fileutils.FileExists(serviceAccountTokenPath)
 	if err != nil {
-		klog.Warningf("failed to check for service account token at %s: %v", serviceAccountTokenPath, err)
+		scoped.Log(context.Background()).Info("failed to check for service account token", "level", "warning", "path", serviceAccountTokenPath, "error", err)
 		return false
 	}
 	return exists

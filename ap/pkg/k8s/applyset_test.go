@@ -137,7 +137,7 @@ func TestResolveParentRef(t *testing.T) {
 			Kind: "configmaps",
 			Name: "foo",
 		}
-		if err := ResolveParentRef(parent, "my-ns", KubeCluster{}, ""); err != nil {
+		if err := ResolveParentRef(t.Context(), parent, "my-ns", KubeCluster{}, ""); err != nil {
 			t.Fatal(err)
 		}
 		if parent.Kind != "ConfigMap" {
@@ -153,7 +153,7 @@ func TestResolveParentRef(t *testing.T) {
 			Kind: "configmaps",
 			Name: "foo",
 		}
-		err := ResolveParentRef(parent, "", KubeCluster{}, "")
+		err := ResolveParentRef(t.Context(), parent, "", KubeCluster{}, "")
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}

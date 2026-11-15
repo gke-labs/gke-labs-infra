@@ -513,7 +513,7 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 	}
 
 	if opt.parentRef != nil {
-		if err := k8s.ResolveParentRef(opt.parentRef, opt.Namespace, opt.TargetCluster, kubectlBin); err != nil {
+		if err := k8s.ResolveParentRef(ctx, opt.parentRef, opt.Namespace, opt.TargetCluster, kubectlBin); err != nil {
 			return err
 		}
 	}

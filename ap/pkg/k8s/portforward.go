@@ -27,8 +27,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
-	"k8s.io/klog/v2"
 )
 
 // PortForwardTask wraps another task and ensures a port-forward is running while it executes.
@@ -55,7 +55,7 @@ func (t *PortForwardTask) buildArgs(localPort int) []string {
 
 func (t *PortForwardTask) Run(ctx context.Context, scope *tasks.TaskContext) (retErr error) {
 	if IsInCluster() {
-		klog.Infof("Running in-cluster, skipping port-forward to %s/%s", t.Namespace, t.Service)
+		scope.Log().Info("running in-cluster, skipping port-forward", "namespace", t.Namespace, "service", t.Service)
 		return t.Child.Run(ctx, scope)
 	}
 
@@ -97,7 +97,7 @@ func (t *PortForwardTask) Run(ctx context.Context, scope *tasks.TaskContext) (re
 		return fmt.Errorf("kubectl binary is required")
 	}
 
-	klog.Infof("Starting port-forward to %s/%s (%d:%d)...", t.Namespace, t.Service, localPort, t.RemotePort)
+	scope.Log().Info("starting port-forward", "namespace", t.Namespace, "service", t.Service, "localPort", localPort, "remotePort", t.RemotePort)
 
 	pfCmd := exec.CommandContext(ctx, kubectlBin, t.buildArgs(localPort)...)
 
@@ -117,7 +117,7 @@ func (t *PortForwardTask) Run(ctx context.Context, scope *tasks.TaskContext) (re
 			}
 		}
 		if hasProxy {
-			klog.Infof("Stopping docker registry proxy container...")
+			scope.Log().Info("stopping docker registry proxy container")
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			if err := exec.CommandContext(cleanupCtx, "docker", "rm", "-f", "ap-registry-proxy").Run(); err != nil {
@@ -140,20 +140,20 @@ func (t *PortForwardTask) Run(ctx context.Context, scope *tasks.TaskContext) (re
 		}
 		select {
 		case err := <-pfExited:
-			logPortForwardOutput(&stdout, &stderr)
+			logPortForwardOutput(ctx, &stdout, &stderr)
 			return fmt.Errorf("port-forward to %s/%s exited before becoming ready: %v", t.Namespace, t.Service, err)
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
 
 	if !ready {
-		klog.Errorf("port-forward to %s/%s did not become ready", t.Namespace, t.Service)
-		logPortForwardOutput(&stdout, &stderr)
+		scope.Log().Error(nil, "port-forward did not become ready", "namespace", t.Namespace, "service", t.Service)
+		logPortForwardOutput(ctx, &stdout, &stderr)
 		return fmt.Errorf("port-forward did not become ready")
 	}
 
 	if useProxy {
-		klog.Infof("Starting docker registry proxy container (VM localhost:%d -> host localhost:%d)...", t.LocalPort, localPort)
+		scope.Log().Info("starting docker registry proxy container", "vmPort", t.LocalPort, "hostPort", localPort)
 		proxyCmd := exec.CommandContext(ctx, "docker", "run", "-d",
 			"--name", "ap-registry-proxy",
 			"-p", fmt.Sprintf("127.0.0.1:%d:%d", t.LocalPort, t.LocalPort),
@@ -166,10 +166,10 @@ func (t *PortForwardTask) Run(ctx context.Context, scope *tasks.TaskContext) (re
 			return fmt.Errorf("failed to start docker registry proxy: %w (output: %s)", err, out)
 		}
 		hasProxy = true
-		klog.Infof("Docker registry proxy container started successfully.")
+		scope.Log().Info("docker registry proxy container started successfully")
 	}
 
-	klog.Infof("Port-forward ready, running child task %s", t.Child.GetName())
+	scope.Log().Info("port-forward ready, running child task", "child", t.Child.GetName())
 	return t.Child.Run(ctx, scope)
 }
 
@@ -181,18 +181,18 @@ func PickFreePort() (int, error) {
 	}
 	defer func() {
 		if err := l.Close(); err != nil {
-			klog.Warningf("failed to close listener: %v", err)
+			scoped.Log(context.Background()).Info("failed to close listener", "level", "warning", "error", err)
 		}
 	}()
 	return l.Addr().(*net.TCPAddr).Port, nil
 }
 
-func logPortForwardOutput(stdout, stderr *syncBuffer) {
+func logPortForwardOutput(ctx context.Context, stdout, stderr *syncBuffer) {
 	if s := stdout.String(); s != "" {
-		klog.Errorf("kubectl port-forward stdout: %s", s)
+		scoped.Log(ctx).Error(nil, "kubectl port-forward stdout", "output", s)
 	}
 	if s := stderr.String(); s != "" {
-		klog.Errorf("kubectl port-forward stderr: %s", s)
+		scoped.Log(ctx).Error(nil, "kubectl port-forward stderr", "output", s)
 	}
 }
 
