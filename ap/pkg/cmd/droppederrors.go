@@ -161,7 +161,7 @@ func RunDroppedErrors(ctx context.Context, cmd *cobra.Command, opt DroppedErrors
 		configuredBaseline = cfg.DroppedErrorsBaseline()
 	}
 
-	deSettings := &config.AnalyzerConfig{
+	droppedErrorsSettings := &config.AnalyzerConfig{
 		Mode:               mode,
 		SkipGenerated:      &skipGenerated,
 		SkipTests:          &skipTests,
@@ -175,7 +175,7 @@ func RunDroppedErrors(ctx context.Context, cmd *cobra.Command, opt DroppedErrors
 		RepoRoot:      repoRoot,
 		Enabled:       map[string]codestyle.Mode{"droppederrors": codestyle.Mode(mode)},
 		Policies:      map[string]fileset.Policy{"droppederrors": policy},
-		Settings:      map[string]*config.AnalyzerConfig{"droppederrors": deSettings},
+		Settings:      map[string]*config.AnalyzerConfig{"droppederrors": droppedErrorsSettings},
 		Analyzers:     []*analysis.Analyzer{analyzer},
 		GOOS:          goosList,
 		WriteBaseline: opt.WriteBaseline,

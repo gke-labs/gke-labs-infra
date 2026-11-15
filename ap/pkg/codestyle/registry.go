@@ -74,9 +74,9 @@ func (r *Registered) ResolveMode(cfg *config.Config) Mode {
 	if cfg == nil {
 		return r.DefaultMode
 	}
-	lc := cfg.Linter(r.ConfigKey())
-	if m := lc.GetMode(); m != "" {
-		return Mode(m)
+	analyzerConfig := cfg.Linter(r.ConfigKey())
+	if mode := analyzerConfig.GetMode(); mode != "" {
+		return Mode(mode)
 	}
 	return r.DefaultMode
 }
@@ -86,8 +86,8 @@ func (r *Registered) ResolveSkipGenerated(cfg *config.Config) bool {
 	if cfg == nil {
 		return r.DefaultSkipGenerated
 	}
-	lc := cfg.Linter(r.ConfigKey())
-	return cfg.ResolveSkipGenerated(lc, r.DefaultSkipGenerated)
+	analyzerConfig := cfg.Linter(r.ConfigKey())
+	return cfg.ResolveSkipGenerated(analyzerConfig, r.DefaultSkipGenerated)
 }
 
 // ResolveSkipTests returns whether test files should be skipped for this analyzer.
@@ -95,8 +95,8 @@ func (r *Registered) ResolveSkipTests(cfg *config.Config) bool {
 	if cfg == nil {
 		return r.DefaultSkipTests
 	}
-	lc := cfg.Linter(r.ConfigKey())
-	return cfg.ResolveSkipTests(lc, r.DefaultSkipTests)
+	analyzerConfig := cfg.Linter(r.ConfigKey())
+	return cfg.ResolveSkipTests(analyzerConfig, r.DefaultSkipTests)
 }
 
 // Analyzers is the central registry of code style analyzers.

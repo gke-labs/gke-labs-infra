@@ -64,6 +64,9 @@ func Effective(repoRoot, dir string) (*Config, error) {
 		if err := UnmarshalStrict(data, &check); err != nil {
 			return nil, fmt.Errorf("error parsing %s: %w", f, err)
 		}
+		if err := check.Validate(); err != nil {
+			return nil, fmt.Errorf("error parsing %s: %w", f, err)
+		}
 		var fileMap map[string]any
 		if err := yaml.Unmarshal(data, &fileMap); err != nil {
 			return nil, fmt.Errorf("error parsing %s: %w", f, err)

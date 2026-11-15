@@ -122,16 +122,16 @@ func (t *AnalyzersTask) SkipTests(name string) bool {
 
 // Packages returns any packages configured for the named analyzer.
 func (t *AnalyzersTask) Packages(name string) []string {
-	if s := t.Settings[name]; s != nil {
-		return s.Packages
+	if settings := t.Settings[name]; settings != nil {
+		return settings.Packages
 	}
 	return nil
 }
 
 // Types returns any types configured for the named analyzer.
 func (t *AnalyzersTask) Types(name string) []string {
-	if s := t.Settings[name]; s != nil {
-		return s.Types
+	if settings := t.Settings[name]; settings != nil {
+		return settings.Types
 	}
 	return nil
 }

@@ -77,8 +77,8 @@ func (c *Config) Linter(name string) *AnalyzerConfig {
 	if c == nil || c.Lint == nil || c.Lint.Analyzers == nil {
 		return (*AnalyzerConfig)(nil)
 	}
-	if ac, ok := c.Lint.Analyzers[name]; ok {
-		return &ac
+	if analyzerConfig, ok := c.Lint.Analyzers[name]; ok {
+		return &analyzerConfig
 	}
 	return (*AnalyzerConfig)(nil)
 }
@@ -92,11 +92,11 @@ func (c *Config) DeepCopy() *Config {
 	if err != nil {
 		panic(fmt.Sprintf("failed to marshal Config in DeepCopy: %v", err))
 	}
-	var out Config
-	if err := json.Unmarshal(data, &out); err != nil {
+	var copyConfig Config
+	if err := json.Unmarshal(data, &copyConfig); err != nil {
 		panic(fmt.Sprintf("failed to unmarshal Config in DeepCopy: %v", err))
 	}
-	return &out
+	return &copyConfig
 }
 
 // Load loads the configuration from .ap/go.yaml in the repository root.
@@ -109,7 +109,7 @@ func Load(repoRoot string) (*Config, error) {
 	}
 
 	if err := config.Validate(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error parsing %s: %w", configFile, err)
 	}
 
 	return &config, nil
@@ -118,16 +118,16 @@ func Load(repoRoot string) (*Config, error) {
 // Validate checks the configuration for semantic errors.
 func (c *Config) Validate() error {
 	if c.Lint != nil {
-		checkMode := func(name, m string) error {
-			if m != "" && m != "error" && m != "warn" && m != "ignore" {
-				return fmt.Errorf("invalid %s mode %q: must be one of 'error', 'warn', 'ignore'", name, m)
+		checkMode := func(name, mode string) error {
+			if mode != "" && mode != "error" && mode != "warn" && mode != "ignore" {
+				return fmt.Errorf("invalid %s mode %q: must be one of 'error', 'warn', 'ignore'", name, mode)
 			}
 			return nil
 		}
 		if c.Lint.Analyzers != nil {
 			var names []string
-			for k := range c.Lint.Analyzers {
-				names = append(names, k)
+			for analyzerName := range c.Lint.Analyzers {
+				names = append(names, analyzerName)
 			}
 			sort.Strings(names)
 
@@ -136,8 +136,8 @@ func (c *Config) Validate() error {
 				if !isAnalyzer(name) {
 					return fmt.Errorf("unknown analyzer %q (valid analyzers: %s)", name, strings.Join(known, ", "))
 				}
-				ac := c.Lint.Analyzers[name]
-				if err := checkMode(name, ac.GetMode()); err != nil {
+				analyzerConfig := c.Lint.Analyzers[name]
+				if err := checkMode(name, analyzerConfig.GetMode()); err != nil {
 					return err
 				}
 			}
@@ -192,9 +192,9 @@ func (c *Config) IsDroppedErrorsError() bool {
 // DroppedErrorsMode returns the mode for dropped error checking: "ignore", "warn", or "error".
 // Default is "error".
 func (c *Config) DroppedErrorsMode() string {
-	m := c.Linter("droppedErrors").GetMode()
-	if m != "" {
-		return m
+	mode := c.Linter("droppedErrors").GetMode()
+	if mode != "" {
+		return mode
 	}
 	return "error"
 }
@@ -204,26 +204,34 @@ func (c *Config) DroppedErrors() *AnalyzerConfig {
 	if c == nil || c.Lint == nil || c.Lint.Analyzers == nil {
 		return nil
 	}
-	if de, ok := c.Lint.Analyzers["droppedErrors"]; ok {
-		return &de
+	if droppedErrorsConfig, ok := c.Lint.Analyzers["droppedErrors"]; ok {
+		return &droppedErrorsConfig
 	}
 	return nil
 }
 
 // DroppedErrorsBaseline returns the configured baseline file path, or empty string.
 func (c *Config) DroppedErrorsBaseline() string {
-	if de := c.DroppedErrors(); de != nil {
-		return de.Baseline
+	if droppedErrors := c.DroppedErrors(); droppedErrors != nil {
+		return droppedErrors.Baseline
 	}
 	return ""
 }
 
 // DroppedErrorsExclude returns the configured excluded symbols.
 func (c *Config) DroppedErrorsExclude() []string {
-	if de := c.DroppedErrors(); de != nil {
-		return de.Exclude
+	if droppedErrors := c.DroppedErrors(); droppedErrors != nil {
+		return droppedErrors.Exclude
 	}
 	return nil
+}
+
+// DroppedErrorsUseDefaultExcludes returns true if default exclusions should be used (default true).
+func (c *Config) DroppedErrorsUseDefaultExcludes() bool {
+	if droppedErrors := c.DroppedErrors(); droppedErrors != nil && droppedErrors.UseDefaultExcludes != nil {
+		return *droppedErrors.UseDefaultExcludes
+	}
+	return true
 }
 
 // GetMode returns the configured mode, or empty string if unset.
@@ -292,10 +300,10 @@ func (c *Config) IsLintSkipTests() bool {
 
 // ResolveSkipGenerated resolves whether generated files should be skipped,
 // checking a per-check override first, then lint.skipGenerated, then analyzerDefault.
-func (c *Config) ResolveSkipGenerated(ac *AnalyzerConfig, analyzerDefault bool) bool {
+func (c *Config) ResolveSkipGenerated(analyzerConfig *AnalyzerConfig, analyzerDefault bool) bool {
 	var override *bool
-	if ac != nil {
-		override = ac.SkipGeneratedOverride()
+	if analyzerConfig != nil {
+		override = analyzerConfig.SkipGeneratedOverride()
 	}
 	var shared *bool
 	if c != nil && c.Lint != nil {
@@ -306,10 +314,10 @@ func (c *Config) ResolveSkipGenerated(ac *AnalyzerConfig, analyzerDefault bool) 
 
 // ResolveSkipTests resolves whether test files should be skipped,
 // checking a per-check override first, then lint.skipTests, then analyzerDefault.
-func (c *Config) ResolveSkipTests(ac *AnalyzerConfig, analyzerDefault bool) bool {
+func (c *Config) ResolveSkipTests(analyzerConfig *AnalyzerConfig, analyzerDefault bool) bool {
 	var override *bool
-	if ac != nil {
-		override = ac.SkipTestsOverride()
+	if analyzerConfig != nil {
+		override = analyzerConfig.SkipTestsOverride()
 	}
 	var shared *bool
 	if c != nil && c.Lint != nil {
@@ -336,14 +344,6 @@ func (c *Config) DroppedErrorsSkipTests() bool {
 // DroppedErrorsSkipGenerated returns true if generated files should be skipped (default false).
 func (c *Config) DroppedErrorsSkipGenerated() bool {
 	return c.ResolveSkipGenerated(c.Linter("droppedErrors"), false)
-}
-
-// DroppedErrorsUseDefaultExcludes returns true if default exclusions should be used (default true).
-func (c *Config) DroppedErrorsUseDefaultExcludes() bool {
-	if de := c.DroppedErrors(); de != nil && de.UseDefaultExcludes != nil {
-		return *de.UseDefaultExcludes
-	}
-	return true
 }
 
 // LintGOOS returns the list of target GOOS values configured under lint.goos,

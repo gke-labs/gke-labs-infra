@@ -24,8 +24,8 @@ import (
 func New(policy fileset.Policy, cfg *config.Config) *analysis.Analyzer {
 	c := Config{Policy: policy}
 	if cfg != nil {
-		if s := cfg.Linter("closeWriter"); s != nil {
-			c.Types = s.Types
+		if analyzerConfig := cfg.Linter("closeWriter"); analyzerConfig != nil {
+			c.Types = analyzerConfig.Types
 		}
 	}
 	return NewAnalyzer(c)

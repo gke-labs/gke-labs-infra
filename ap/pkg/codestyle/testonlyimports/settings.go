@@ -24,8 +24,8 @@ import (
 func New(policy fileset.Policy, cfg *config.Config) *analysis.Analyzer {
 	c := Config{Policy: policy}
 	if cfg != nil {
-		if s := cfg.Linter("testOnlyImports"); s != nil {
-			c.Packages = s.Packages
+		if analyzerConfig := cfg.Linter("testOnlyImports"); analyzerConfig != nil {
+			c.Packages = analyzerConfig.Packages
 		}
 	}
 	return NewAnalyzer(c)

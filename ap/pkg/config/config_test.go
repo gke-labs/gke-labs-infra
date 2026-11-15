@@ -165,20 +165,20 @@ lint:
 		t.Fatalf("Load failed: %v", err)
 	}
 
-	cw := cfg.Linter("closeWriter")
-	if !cw.IsEnabled() {
+	closeWriterConfig := cfg.Linter("closeWriter")
+	if !closeWriterConfig.IsEnabled() {
 		t.Errorf("expected closeWriter to be enabled")
 	}
-	if cw.IsError() {
+	if closeWriterConfig.IsError() {
 		t.Errorf("expected closeWriter not to be error mode (warn)")
 	}
-	if cw.GetMode() != "warn" {
-		t.Errorf("expected mode warn, got %q", cw.GetMode())
+	if closeWriterConfig.GetMode() != "warn" {
+		t.Errorf("expected mode warn, got %q", closeWriterConfig.GetMode())
 	}
-	if cw.SkipGeneratedOverride() == nil || *cw.SkipGeneratedOverride() != true {
+	if closeWriterConfig.SkipGeneratedOverride() == nil || *closeWriterConfig.SkipGeneratedOverride() != true {
 		t.Errorf("expected skipGenerated to be true")
 	}
-	if cw.SkipTestsOverride() == nil || *cw.SkipTestsOverride() != true {
+	if closeWriterConfig.SkipTestsOverride() == nil || *closeWriterConfig.SkipTestsOverride() != true {
 		t.Errorf("expected skipTests to be true")
 	}
 }
@@ -246,20 +246,20 @@ lint:
 		t.Fatalf("Load failed: %v", err)
 	}
 
-	toi := cfg.Linter("testOnlyImports")
-	if !toi.IsEnabled() {
+	testOnlyImportsConfig := cfg.Linter("testOnlyImports")
+	if !testOnlyImportsConfig.IsEnabled() {
 		t.Errorf("expected testOnlyImports to be enabled")
 	}
-	if toi.IsError() {
+	if testOnlyImportsConfig.IsError() {
 		t.Errorf("expected testOnlyImports not to be error mode (warn)")
 	}
-	if toi.GetMode() != "warn" {
-		t.Errorf("expected mode warn, got %q", toi.GetMode())
+	if testOnlyImportsConfig.GetMode() != "warn" {
+		t.Errorf("expected mode warn, got %q", testOnlyImportsConfig.GetMode())
 	}
-	if toi.SkipGeneratedOverride() == nil || *toi.SkipGeneratedOverride() != true {
+	if testOnlyImportsConfig.SkipGeneratedOverride() == nil || *testOnlyImportsConfig.SkipGeneratedOverride() != true {
 		t.Errorf("expected skipGenerated to be true")
 	}
-	if toi.SkipTestsOverride() == nil || *toi.SkipTestsOverride() != true {
+	if testOnlyImportsConfig.SkipTestsOverride() == nil || *testOnlyImportsConfig.SkipTestsOverride() != true {
 		t.Errorf("expected skipTests to be true")
 	}
 }
@@ -427,14 +427,14 @@ lint:
 		t.Fatalf("Load failed: %v", err)
 	}
 
-	cw := cfg.Linter("closeWriter")
-	if cw.GetBaseline() != ".ap/custom-closewriter.txt" {
-		t.Errorf("expected closewriter baseline .ap/custom-closewriter.txt, got %q", cw.GetBaseline())
+	closeWriterConfig := cfg.Linter("closeWriter")
+	if closeWriterConfig.GetBaseline() != ".ap/custom-closewriter.txt" {
+		t.Errorf("expected closewriter baseline .ap/custom-closewriter.txt, got %q", closeWriterConfig.GetBaseline())
 	}
 
-	u := cfg.Linter("unused")
-	if u.GetBaseline() != ".ap/custom-unused.txt" {
-		t.Errorf("expected unused baseline .ap/custom-unused.txt, got %q", u.GetBaseline())
+	unusedConfig := cfg.Linter("unused")
+	if unusedConfig.GetBaseline() != ".ap/custom-unused.txt" {
+		t.Errorf("expected unused baseline .ap/custom-unused.txt, got %q", unusedConfig.GetBaseline())
 	}
 }
 
@@ -484,6 +484,9 @@ lint:
 	_, err := Load(tempDir)
 	if err == nil {
 		t.Fatalf("expected Load to fail on unknown analyzer")
+	}
+	if !strings.Contains(err.Error(), ".ap/go.yaml") {
+		t.Errorf("expected error to name .ap/go.yaml, got: %v", err)
 	}
 	if !strings.Contains(err.Error(), `unknown analyzer "nonExistentAnalyzer"`) {
 		t.Errorf("expected error to name unknown analyzer, got: %v", err)
@@ -817,9 +820,9 @@ func TestLintConfig_RoundTrip(t *testing.T) {
 		},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			data, err := yaml.Marshal(tc.cfg)
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			data, err := yaml.Marshal(testCase.cfg)
 			if err != nil {
 				t.Fatalf("yaml.Marshal failed: %v", err)
 			}
@@ -829,8 +832,8 @@ func TestLintConfig_RoundTrip(t *testing.T) {
 				t.Fatalf("UnmarshalStrict failed: %v\nYAML:\n%s", err, string(data))
 			}
 
-			if !reflect.DeepEqual(tc.cfg, &got) {
-				t.Errorf("round-trip mismatch:\nwant: %+v\ngot:  %+v", tc.cfg, &got)
+			if !reflect.DeepEqual(testCase.cfg, &got) {
+				t.Errorf("round-trip mismatch:\nwant: %+v\ngot:  %+v", testCase.cfg, &got)
 			}
 		})
 	}
@@ -874,8 +877,8 @@ func TestConfig_DeepCopy(t *testing.T) {
 	copyCfg.Skip[0] = "mutated"
 	copyCfg.Lint.GOOS[0] = "windows"
 	*copyCfg.Gofmt.Enabled = false
-	de := copyCfg.DroppedErrors()
-	de.Exclude[0] = "mutated"
+	droppedErrorsConfig := copyCfg.DroppedErrors()
+	droppedErrorsConfig.Exclude[0] = "mutated"
 
 	if orig.Toolchain == "go1.28.0" {
 		t.Errorf("mutating copy affected orig.Toolchain")

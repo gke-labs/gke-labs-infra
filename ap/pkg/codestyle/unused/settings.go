@@ -24,8 +24,8 @@ import (
 func New(policy fileset.Policy, cfg *config.Config) *analysis.Analyzer {
 	checkParams := false
 	if cfg != nil {
-		if ps := cfg.Linter("unusedparameters"); ps != nil {
-			checkParams = ps.IsEnabled() && ps.GetMode() != ""
+		if parametersConfig := cfg.Linter("unusedparameters"); parametersConfig != nil {
+			checkParams = parametersConfig.IsEnabled() && parametersConfig.GetMode() != ""
 		}
 	}
 	return NewAnalyzer(Config{

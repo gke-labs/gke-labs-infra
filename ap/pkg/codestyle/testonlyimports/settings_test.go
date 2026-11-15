@@ -22,6 +22,7 @@ import (
 )
 
 func TestNewWithConfig(t *testing.T) {
+	config.RegisterAnalyzer("testOnlyImports")
 	cfg := &config.Config{
 		Lint: &config.LintConfig{
 			Analyzers: map[string]config.AnalyzerConfig{
@@ -32,8 +33,8 @@ func TestNewWithConfig(t *testing.T) {
 			},
 		},
 	}
-	a := New(fileset.Policy{}, cfg)
-	if a == nil {
+	analyzer := New(fileset.Policy{}, cfg)
+	if analyzer == nil {
 		t.Fatal("expected non-nil analyzer")
 	}
 }

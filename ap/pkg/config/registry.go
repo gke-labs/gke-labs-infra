@@ -16,48 +16,17 @@ package config
 
 import (
 	"sort"
-	"sync"
 )
 
-var (
-	registryMu sync.RWMutex
-	analyzers  = make(map[string]bool)
-)
-
-var wellKnownAnalyzers = []string{
-	"closeWriter",
-	"deferInLoop",
-	"droppedErrors",
-	"portability",
-	"replaceEmptyInterfaceWithAny",
-	"testOnlyImports",
-	"testcontext",
-	"unused",
-	"unusedparameters",
-}
+var analyzers = make(map[string]bool)
 
 // RegisterAnalyzer registers a canonical analyzer name.
 func RegisterAnalyzer(name string) {
-	registryMu.Lock()
-	defer registryMu.Unlock()
 	analyzers[name] = true
-}
-
-// RegisterLinter registers a canonical analyzer name (alias for RegisterAnalyzer).
-func RegisterLinter(name string) {
-	RegisterAnalyzer(name)
 }
 
 // RegisteredAnalyzers returns a sorted list of registered analyzer names.
 func RegisteredAnalyzers() []string {
-	registryMu.RLock()
-	defer registryMu.RUnlock()
-	if len(analyzers) == 0 {
-		out := make([]string, len(wellKnownAnalyzers))
-		copy(out, wellKnownAnalyzers)
-		sort.Strings(out)
-		return out
-	}
 	names := make([]string, 0, len(analyzers))
 	for name := range analyzers {
 		names = append(names, name)
@@ -66,25 +35,6 @@ func RegisteredAnalyzers() []string {
 	return names
 }
 
-// RegisteredLinters returns a sorted list of registered analyzer names.
-func RegisteredLinters() []string {
-	return RegisteredAnalyzers()
-}
-
-func isRegisteredAnalyzer(name string) bool {
-	registryMu.RLock()
-	defer registryMu.RUnlock()
-	return analyzers[name]
-}
-
 func isAnalyzer(name string) bool {
-	if isRegisteredAnalyzer(name) {
-		return true
-	}
-	for _, k := range wellKnownAnalyzers {
-		if k == name {
-			return true
-		}
-	}
-	return false
+	return analyzers[name]
 }
