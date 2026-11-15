@@ -39,9 +39,6 @@ func OpenUntrustedRoot(directory string) (*UntrustedRoot, error) {
 
 // Close closes the underlying root directory.
 func (r *UntrustedRoot) Close() error {
-	if r == nil || r.root == nil {
-		return nil
-	}
 	return r.root.Close()
 }
 
@@ -49,30 +46,18 @@ func (r *UntrustedRoot) Close() error {
 // directories as needed. Paths that escape the directory (by ".." or through a
 // symlink) or that have a ".git" component are rejected.
 func (r *UntrustedRoot) WriteFile(relativePath string, content []byte, permissions os.FileMode) error {
-	if relativePath == "" {
-		return fmt.Errorf("empty path")
-	}
 	if hasGitComponent(relativePath) {
 		return fmt.Errorf("%s: is under .git", relativePath)
 	}
-	if filepath.IsAbs(relativePath) {
-		return fmt.Errorf("%s: escapes the directory", relativePath)
-	}
 
-	dir := filepath.Dir(relativePath)
-	if dir != "." && dir != "" {
-		if err := r.root.MkdirAll(dir, 0755); err != nil {
-			if strings.Contains(err.Error(), "escapes") {
-				return fmt.Errorf("%s: escapes the directory: %w", relativePath, err)
-			}
+	directory := filepath.Dir(relativePath)
+	if directory != "." {
+		if err := r.root.MkdirAll(directory, 0755); err != nil {
 			return fmt.Errorf("%s: %w", relativePath, err)
 		}
 	}
 
 	if err := r.root.WriteFile(relativePath, content, permissions); err != nil {
-		if strings.Contains(err.Error(), "escapes") {
-			return fmt.Errorf("%s: escapes the directory: %w", relativePath, err)
-		}
 		return fmt.Errorf("%s: %w", relativePath, err)
 	}
 
@@ -81,15 +66,10 @@ func (r *UntrustedRoot) WriteFile(relativePath string, content []byte, permissio
 
 // hasGitComponent reports whether any path component is ".git".
 func hasGitComponent(path string) bool {
-	check := func(p string) bool {
-		for _, part := range strings.FieldsFunc(p, func(r rune) bool {
-			return r == '/' || r == '\\'
-		}) {
-			if part == ".git" {
-				return true
-			}
+	for _, component := range strings.Split(filepath.ToSlash(filepath.Clean(path)), "/") {
+		if strings.EqualFold(component, ".git") {
+			return true
 		}
-		return false
 	}
-	return check(path) || check(filepath.Clean(path))
+	return false
 }

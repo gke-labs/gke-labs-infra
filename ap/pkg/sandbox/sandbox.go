@@ -150,18 +150,18 @@ func Run(ctx context.Context, root string, args []string) (retErr error) {
 	// Copy back changed files/results
 	if len(resp.ChangedFiles) > 0 {
 		klog.Infof("Copying back %d changed files...", len(resp.ChangedFiles))
-		dest, err := fileutils.OpenUntrustedRoot(root)
+		untrustedRoot, err := fileutils.OpenUntrustedRoot(root)
 		if err != nil {
 			return fmt.Errorf("failed to open root directory %s: %w", root, err)
 		}
 		defer func() {
-			if err := dest.Close(); err != nil {
+			if err := untrustedRoot.Close(); err != nil {
 				retErr = errors.Join(retErr, fmt.Errorf("failed to close untrusted root: %w", err))
 			}
 		}()
 
 		for _, file := range resp.ChangedFiles {
-			if err := dest.WriteFile(file.Path, file.Content, 0644); err != nil {
+			if err := untrustedRoot.WriteFile(file.Path, file.Content, 0644); err != nil {
 				return fmt.Errorf("failed to write local file %s: %w", file.Path, err)
 			}
 		}
