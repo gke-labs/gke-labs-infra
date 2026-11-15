@@ -30,9 +30,9 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/format"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
-	"k8s.io/klog/v2"
 )
 
 // AuditOptions holds settings for running the audit.
@@ -71,6 +71,7 @@ type candidateFileInfo struct {
 // RunAudit performs the audit to find generated files lacking a generated-file header.
 // It executes in a scratch git worktree to avoid mutating the user's working copy.
 func RunAudit(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext, opts AuditOptions) error {
+	log := scoped.Log(ctx)
 	start := time.Now()
 
 	cfg, err := config.LoadAPConfig(repoRoot)
@@ -152,7 +153,7 @@ func RunAudit(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext,
 	// 5. Open repo in scratch tree and discover scopes & generators
 	goCfg, err := config.Load(scratchDir)
 	if err != nil && !os.IsNotExist(err) {
-		klog.V(2).Infof("warning: failed to load config from %s: %v", scratchDir, err)
+		log.V(2).Info("failed to load config", "path", scratchDir, "error", err)
 	}
 	var skipPatterns []string
 	if goCfg != nil {
@@ -260,7 +261,7 @@ func RunAudit(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext,
 	elapsed := time.Since(start)
 
 	// 9. Output report
-	printAuditReport(findings, skippedUncommentable, generatorErrors, len(candidates), elapsed)
+	printAuditReport(ctx, findings, skippedUncommentable, generatorErrors, len(candidates), elapsed)
 
 	if opts.Strict && len(findings) > 0 {
 		return fmt.Errorf("audit-generated failed: %d generated file(s) lack a generated header (run with --strict)", len(findings))
@@ -269,7 +270,7 @@ func RunAudit(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext,
 	return nil
 }
 
-func printAuditReport(findings []AuditFinding, skipped []string, genErrors []string, totalCandidates int, elapsed time.Duration) {
+func printAuditReport(ctx context.Context, findings []AuditFinding, skipped []string, genErrors []string, totalCandidates int, elapsed time.Duration) {
 	fmt.Printf("\n=== ap generate --audit-generated ===\n")
 	fmt.Println("Auditing against HEAD in a scratch worktree (uncommitted changes are not visible).")
 	fmt.Printf("Audited %d candidate file(s) in %v.\n", totalCandidates, elapsed.Round(time.Millisecond))
@@ -292,7 +293,7 @@ func printAuditReport(findings []AuditFinding, skipped []string, genErrors []str
 	}
 
 	if len(skipped) > 0 {
-		klog.V(2).Infof("Skipped %d uncommentable or binary file(s)", len(skipped))
+		scoped.Log(ctx).V(2).Info("skipped uncommentable or binary files", "count", len(skipped))
 	}
 }
 
@@ -369,6 +370,8 @@ func findAuditCandidates(repoRoot string, r *sourcetree.SourceTree, auditPaths [
 }
 
 func createScratchWorktree(ctx context.Context, repoRoot string) (string, func(), error) {
+	log := scoped.Log(ctx)
+
 	scratchDir, err := os.MkdirTemp("", "ap-audit-worktree-*")
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to create temp dir: %w", err)
@@ -383,16 +386,16 @@ func createScratchWorktree(ctx context.Context, repoRoot string) (string, func()
 		cmd := exec.CommandContext(ctx, "git", "worktree", "add", "--detach", scratchDir, "HEAD")
 		cmd.Dir = repoRoot
 		if out, err := cmd.CombinedOutput(); err != nil {
-			klog.V(2).Infof("git worktree add failed (%v: %s), falling back to file copy", err, string(out))
+			log.V(2).Info("git worktree add failed, falling back to file copy", "error", err, "output", string(out))
 			if copyErr := copyDirExcludingGit(repoRoot, scratchDir); copyErr != nil {
 				if rmErr := os.RemoveAll(scratchDir); rmErr != nil {
-					klog.V(2).Infof("failed to remove scratch dir: %v", rmErr)
+					log.V(2).Info("failed to remove scratch dir", "error", rmErr)
 				}
 				return "", nil, fmt.Errorf("copy fallback failed: %w", copyErr)
 			}
 			cleanup := func() {
 				if rmErr := os.RemoveAll(scratchDir); rmErr != nil {
-					klog.V(2).Infof("failed to remove scratch dir: %v", rmErr)
+					log.V(2).Info("failed to remove scratch dir", "error", rmErr)
 				}
 			}
 			return scratchDir, cleanup, nil
@@ -402,10 +405,10 @@ func createScratchWorktree(ctx context.Context, repoRoot string) (string, func()
 			rmCmd := exec.Command("git", "worktree", "remove", "--force", scratchDir)
 			rmCmd.Dir = repoRoot
 			if rmErr := rmCmd.Run(); rmErr != nil {
-				klog.V(2).Infof("git worktree remove failed: %v", rmErr)
+				log.V(2).Info("git worktree remove failed", "error", rmErr)
 			}
 			if rmErr := os.RemoveAll(scratchDir); rmErr != nil {
-				klog.V(2).Infof("failed to remove scratch dir: %v", rmErr)
+				log.V(2).Info("failed to remove scratch dir", "error", rmErr)
 			}
 		}
 		return scratchDir, cleanup, nil
@@ -414,13 +417,13 @@ func createScratchWorktree(ctx context.Context, repoRoot string) (string, func()
 	// Non-git directory (e.g. unit tests)
 	if err := copyDirExcludingGit(repoRoot, scratchDir); err != nil {
 		if rmErr := os.RemoveAll(scratchDir); rmErr != nil {
-			klog.V(2).Infof("failed to remove scratch dir: %v", rmErr)
+			log.V(2).Info("failed to remove scratch dir", "error", rmErr)
 		}
 		return "", nil, fmt.Errorf("failed to copy files to scratch dir: %w", err)
 	}
 	cleanup := func() {
 		if rmErr := os.RemoveAll(scratchDir); rmErr != nil {
-			klog.V(2).Infof("failed to remove scratch dir: %v", rmErr)
+			log.V(2).Info("failed to remove scratch dir", "error", rmErr)
 		}
 	}
 	return scratchDir, cleanup, nil
@@ -507,7 +510,7 @@ func identifyGenerators(ctx context.Context, repoRoot string, scopes []*tasks.Ta
 
 	entries, err := os.ReadDir(presubmitsDir)
 	if err != nil && !os.IsNotExist(err) {
-		klog.Warningf("failed to read presubmits dir %s: %v", presubmitsDir, err)
+		scoped.Log(ctx).Info("failed to read presubmits dir", "level", "warning", "dir", presubmitsDir, "error", err)
 	} else if err == nil {
 		for _, e := range entries {
 			if strings.HasPrefix(e.Name(), "ap-e2e") {

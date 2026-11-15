@@ -28,9 +28,9 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
-	"k8s.io/klog/v2"
 )
 
 // GitHub Actions used in generated workflows, pinned to full commit
@@ -55,7 +55,7 @@ type LegacyScriptTask struct {
 }
 
 func (t *LegacyScriptTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
-	klog.Infof("Running legacy generate script: %s", t.Name)
+	scope.Log().Info("running legacy generate script", "name", t.Name)
 	cmd := exec.CommandContext(ctx, t.Path)
 	cmd.Dir = t.Dir
 	env, err := scope.ScriptEnv()
@@ -94,7 +94,7 @@ type GoGenerateTask struct {
 }
 
 func (t *GoGenerateTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
-	klog.Infof("Running go generate in %s", t.Dir)
+	scope.Log().Info("running go generate", "dir", t.Dir)
 	cmd := exec.CommandContext(ctx, "go", "generate", "./...")
 	cmd.Dir = t.Dir
 	cmd.Stdout = scope.Stdout()
@@ -130,7 +130,7 @@ type BuiltinGeneratorTask struct {
 }
 
 func (t *BuiltinGeneratorTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
-	klog.Infof("Running built-in generator: %s", t.Name)
+	scope.Log().Info("running built-in generator", "name", t.Name)
 	return t.RunFunc(ctx, scope.SourceTree(), scope.RepoRoot())
 }
 
@@ -251,11 +251,11 @@ func Run(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext) erro
 	return t.Run(ctx, tasks.NewTaskContext(repoRoot, repoRoot, r))
 }
 
-func runGenerateVerifierGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot string) error {
+func runGenerateVerifierGenerator(ctx context.Context, r *sourcetree.SourceTree, repoRoot string) error {
 	presubmitsDir := filepath.Join(repoRoot, "dev", "ci", "presubmits")
 
 	targetFile := filepath.Join(presubmitsDir, "ap-verify-generate")
-	klog.Infof("Generating %s", targetFile)
+	scoped.Log(ctx).Info("generating file", "target", targetFile)
 
 	if err := os.MkdirAll(presubmitsDir, 0755); err != nil {
 		return fmt.Errorf("failed to create presubmits dir: %w", err)
@@ -313,7 +313,7 @@ fi
 	return nil
 }
 
-func runAuditGeneratedGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot string) error {
+func runAuditGeneratedGenerator(ctx context.Context, r *sourcetree.SourceTree, repoRoot string) error {
 	rootCfg, err := config.LoadAPConfig(repoRoot)
 	if err != nil {
 		return err
@@ -329,7 +329,7 @@ func runAuditGeneratedGenerator(_ context.Context, r *sourcetree.SourceTree, rep
 		return nil
 	}
 
-	klog.Infof("Generating %s", targetFile)
+	scoped.Log(ctx).Info("generating file", "target", targetFile)
 
 	if err := os.MkdirAll(presubmitsDir, 0755); err != nil {
 		return fmt.Errorf("failed to create presubmits dir: %w", err)
@@ -379,11 +379,11 @@ cd "${REPO_ROOT}"
 	return nil
 }
 
-func runApTestGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot string) error {
+func runApTestGenerator(ctx context.Context, r *sourcetree.SourceTree, repoRoot string) error {
 	presubmitsDir := filepath.Join(repoRoot, "dev", "ci", "presubmits")
 
 	targetFile := filepath.Join(presubmitsDir, "ap-test")
-	klog.Infof("Generating %s", targetFile)
+	scoped.Log(ctx).Info("generating file", "target", targetFile)
 
 	if err := os.MkdirAll(presubmitsDir, 0755); err != nil {
 		return fmt.Errorf("failed to create presubmits dir: %w", err)
@@ -433,11 +433,11 @@ cd "${REPO_ROOT}"
 	return nil
 }
 
-func runApLintGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot string) error {
+func runApLintGenerator(ctx context.Context, r *sourcetree.SourceTree, repoRoot string) error {
 	presubmitsDir := filepath.Join(repoRoot, "dev", "ci", "presubmits")
 
 	targetFile := filepath.Join(presubmitsDir, "ap-lint")
-	klog.Infof("Generating %s", targetFile)
+	scoped.Log(ctx).Info("generating file", "target", targetFile)
 
 	if err := os.MkdirAll(presubmitsDir, 0755); err != nil {
 		return fmt.Errorf("failed to create presubmits dir: %w", err)
@@ -487,7 +487,7 @@ cd "${REPO_ROOT}"
 	return nil
 }
 
-func runApBuildGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot string, scopes []*tasks.TaskContext) error {
+func runApBuildGenerator(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, scopes []*tasks.TaskContext) error {
 	// Check if any apRoot has any images to build OR any build-* scripts
 	hasBuild := false
 	for _, scope := range scopes {
@@ -516,7 +516,7 @@ func runApBuildGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot s
 			return err
 		}
 		if exists {
-			klog.Infof("Removing %s as no build tasks found", targetFile)
+			scoped.Log(ctx).Info("removing build presubmit as no build tasks found", "target", targetFile)
 			if err := r.Remove(targetFile); err != nil {
 				return fmt.Errorf("failed to remove %s: %w", targetFile, err)
 			}
@@ -524,7 +524,7 @@ func runApBuildGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot s
 		return nil
 	}
 
-	klog.Infof("Generating %s", targetFile)
+	scoped.Log(ctx).Info("generating file", "target", targetFile)
 
 	if err := os.MkdirAll(presubmitsDir, 0755); err != nil {
 		return fmt.Errorf("failed to create presubmits dir: %w", err)
@@ -605,7 +605,7 @@ func isGeneratedByApGenerate(path string) (bool, error) {
 	return false, nil
 }
 
-func runApE2eGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot string, scopes []*tasks.TaskContext) error {
+func runApE2eGenerator(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, scopes []*tasks.TaskContext) error {
 	presubmitsDir := filepath.Join(repoRoot, "dev", "ci", "presubmits")
 
 	type e2eTarget struct {
@@ -667,10 +667,10 @@ func runApE2eGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot str
 						return fmt.Errorf("failed to check if %s is generated: %w", p, err)
 					}
 					if !isGen {
-						klog.Infof("Keeping %s as it was not generated by ap generate", p)
+						scoped.Log(ctx).Info("keeping file not generated by ap generate", "target", p)
 						continue
 					}
-					klog.Infof("Removing %s as no matching e2e tasks found", p)
+					scoped.Log(ctx).Info("removing e2e presubmit as no matching e2e tasks found", "target", p)
 					if err := r.Remove(p); err != nil {
 						return fmt.Errorf("failed to remove %s: %w", p, err)
 					}
@@ -720,7 +720,7 @@ func runApE2eGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot str
 	for _, k := range keys {
 		tgt := targets[k]
 		targetFile := filepath.Join(presubmitsDir, "ap-e2e"+tgt.suffix)
-		klog.Infof("Generating %s", targetFile)
+		scoped.Log(ctx).Info("generating file", "target", targetFile)
 
 		content := fmt.Sprintf(`#!/bin/bash
 # Code generated by ap generate. DO NOT EDIT.
@@ -743,11 +743,11 @@ cd "${REPO_ROOT}"
 	return nil
 }
 
-func runGithubActionsGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot string, scopes []*tasks.TaskContext) error {
+func runGithubActionsGenerator(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, scopes []*tasks.TaskContext) error {
 	workflowsDir := filepath.Join(repoRoot, ".github", "workflows")
 	outputFile := filepath.Join(workflowsDir, "ci-presubmits.yaml")
 
-	klog.Infof("Generating %s", outputFile)
+	scoped.Log(ctx).Info("generating file", "target", outputFile)
 
 	var sb strings.Builder
 	headers, err := config.LoadHeaders(repoRoot)
