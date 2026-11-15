@@ -87,12 +87,6 @@ func (t *PortForwardTask) Run(ctx context.Context, scope *tasks.TaskContext) (re
 			return fmt.Errorf("finding free local port for port-forward: %w", err)
 		}
 		localPort = freePort
-	} else if localPort == 0 {
-		freePort, err := PickFreePort()
-		if err != nil {
-			return fmt.Errorf("finding free local port for port-forward: %w", err)
-		}
-		localPort = freePort
 	}
 
 	kubectlBin, err := scope.Tool(ctx, "kubectl")

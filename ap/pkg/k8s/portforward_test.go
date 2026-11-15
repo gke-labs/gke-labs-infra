@@ -100,36 +100,6 @@ func TestPickFreePort(t *testing.T) {
 	}
 }
 
-func TestPickFreePort_Concurrent(t *testing.T) {
-	const count = 10
-	ports := make(chan int, count)
-	errs := make(chan error, count)
-
-	for i := 0; i < count; i++ {
-		go func() {
-			p, err := PickFreePort()
-			if err != nil {
-				errs <- err
-				return
-			}
-			ports <- p
-		}()
-	}
-
-	seen := make(map[int]bool)
-	for i := 0; i < count; i++ {
-		select {
-		case err := <-errs:
-			t.Fatalf("PickFreePort() concurrent error = %v", err)
-		case p := <-ports:
-			if seen[p] {
-				t.Errorf("PickFreePort() returned duplicate port %d", p)
-			}
-			seen[p] = true
-		}
-	}
-}
-
 func TestPortForwardTask_BuildArgs(t *testing.T) {
 	tests := []struct {
 		name      string

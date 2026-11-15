@@ -884,6 +884,7 @@ func TestFormatDuration(t *testing.T) {
 
 func TestBuildTasks_ParallelK8sBuildkitHost(t *testing.T) {
 	t.Setenv("KUBERNETES_SERVICE_HOST", "")
+	t.Setenv("ARTIFACTS", t.TempDir())
 	tmpDir := t.TempDir()
 	for _, name := range []string{"img1", "img2"} {
 		if err := os.MkdirAll(filepath.Join(tmpDir, "images", name), 0755); err != nil {
