@@ -231,6 +231,11 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 		}
 		namespace, service := parts[0], parts[1]
 
+		localPort, err := k8s.PickFreePort()
+		if err != nil {
+			return fmt.Errorf("finding free local port for buildkit port-forward: %w", err)
+		}
+
 		pfTask := &k8s.PortForwardTask{
 			Child: &tasks.FuncTask{
 				Name: "run-buildctl",
@@ -239,18 +244,17 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 					cmd.Dir = root
 					cmd.Stdout = scope.Stdout()
 					cmd.Stderr = io.MultiWriter(scope.Stderr(), &progressBuf)
-					cmd.Env = append(os.Environ(), "BUILDKIT_HOST=tcp://localhost:2375")
+					cmd.Env = append(os.Environ(), fmt.Sprintf("BUILDKIT_HOST=tcp://localhost:%d", localPort))
 					return cmd.Run()
 				},
 			},
 			Service:    service,
 			Namespace:  namespace,
-			LocalPort:  2375,
+			LocalPort:  localPort,
 			RemotePort: 2375,
 			Cluster:    t.Cluster,
 		}
-		childScope := tasks.NewTaskContext(root, root, scope.SourceTree()).WithOutput(scope.Stdout(), scope.Stderr())
-		if err := pfTask.Run(ctx, childScope); err != nil {
+		if err := pfTask.Run(ctx, scope); err != nil {
 			return err
 		}
 	} else {

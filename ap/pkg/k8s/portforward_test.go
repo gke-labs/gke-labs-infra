@@ -91,12 +91,42 @@ func TestIsInCluster(t *testing.T) {
 }
 
 func TestPickFreePort(t *testing.T) {
-	port, err := pickFreePort()
+	port, err := PickFreePort()
 	if err != nil {
-		t.Fatalf("pickFreePort() error = %v", err)
+		t.Fatalf("PickFreePort() error = %v", err)
 	}
 	if port <= 0 || port > 65535 {
-		t.Errorf("pickFreePort() returned invalid port = %d", port)
+		t.Errorf("PickFreePort() returned invalid port = %d", port)
+	}
+}
+
+func TestPickFreePort_Concurrent(t *testing.T) {
+	const count = 10
+	ports := make(chan int, count)
+	errs := make(chan error, count)
+
+	for i := 0; i < count; i++ {
+		go func() {
+			p, err := PickFreePort()
+			if err != nil {
+				errs <- err
+				return
+			}
+			ports <- p
+		}()
+	}
+
+	seen := make(map[int]bool)
+	for i := 0; i < count; i++ {
+		select {
+		case err := <-errs:
+			t.Fatalf("PickFreePort() concurrent error = %v", err)
+		case p := <-ports:
+			if seen[p] {
+				t.Errorf("PickFreePort() returned duplicate port %d", p)
+			}
+			seen[p] = true
+		}
 	}
 }
 
