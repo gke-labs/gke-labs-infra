@@ -1191,7 +1191,7 @@ govulncheck:
 		t.Fatal(err)
 	}
 
-	// Subtree module with govulncheck and tidy disabled in .ap/go.yaml and version: latest in .ap/ap.yaml
+	// Subtree module with govulncheck disabled in .ap/go.yaml and version: latest in .ap/ap.yaml
 	subDir := filepath.Join(repoRoot, "sub")
 	if err := os.MkdirAll(filepath.Join(subDir, ".ap"), 0755); err != nil {
 		t.Fatal(err)
@@ -1199,7 +1199,7 @@ govulncheck:
 	if err := os.WriteFile(filepath.Join(subDir, ".ap", "ap.yaml"), []byte("version: latest\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(subDir, ".ap", "go.yaml"), []byte("govulncheck:\n  enabled: false\ntidy:\n  enabled: false\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(subDir, ".ap", "go.yaml"), []byte("govulncheck:\n  enabled: false\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(subDir, "go.mod"), []byte("module submod\n\ngo 1.27\n"), 0644); err != nil {
@@ -1233,15 +1233,6 @@ govulncheck:
 		return false
 	}
 
-	hasTidy := func(g *tasks.Group) bool {
-		for _, subTask := range g.Tasks {
-			if _, ok := subTask.(*GoTidyTask); ok {
-				return true
-			}
-		}
-		return false
-	}
-
 	var rootGroup, subGroup *tasks.Group
 	for _, task := range outer.Tasks {
 		g, ok := task.(*tasks.Group)
@@ -1268,50 +1259,10 @@ govulncheck:
 	if hasGovulncheck(subGroup) {
 		t.Errorf("expected sub module to have govulncheck disabled via subtree override")
 	}
-	if !hasTidy(rootGroup) {
-		t.Errorf("expected root module to have tidy enabled")
-	}
-	if hasTidy(subGroup) {
-		t.Errorf("expected sub module to have tidy disabled via subtree override")
-	}
-}
-
-func TestGoTidyTask_TidyPasses(t *testing.T) {
-	tmpDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module example.com/test\n\ngo 1.27\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(tmpDir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	task := &GoTidyTask{Dir: tmpDir}
-	if name := task.GetName(); name != "go-mod-tidy" {
-		t.Errorf("expected task name 'go-mod-tidy', got %q", name)
-	}
-	if children := task.GetChildren(); children != nil {
-		t.Errorf("expected no children, got %v", children)
-	}
-
-	r, err := sourcetree.Open(tmpDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var buf bytes.Buffer
-	scope := tasks.NewTaskContext(tmpDir, tmpDir, r).WithOutput(&buf, &buf)
-
-	if err := task.Run(t.Context(), scope); err != nil {
-		t.Fatalf("expected GoTidyTask to pass on tidy module, got: %v", err)
-	}
-	if buf.Len() != 0 {
-		t.Errorf("expected empty output on tidy module, got: %q", buf.String())
-	}
 }
 
 func TestGoTidyTask_UntidyFailsWithDiff(t *testing.T) {
 	tmpDir := t.TempDir()
-	// Unused requirement in go.mod makes it untidy
 	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module example.com/test\n\ngo 1.27\n\nrequire example.com/unused v1.0.0\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -1332,8 +1283,9 @@ func TestGoTidyTask_UntidyFailsWithDiff(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected GoTidyTask to fail on untidy module")
 	}
-	if !strings.Contains(err.Error(), "go mod tidy -diff failed") {
-		t.Errorf("expected error to mention 'go mod tidy -diff failed', got: %v", err)
+	wantMsg := fmt.Sprintf(`go.mod/go.sum in %s are not tidy; run "ap format"`, tmpDir)
+	if !strings.Contains(err.Error(), wantMsg) {
+		t.Errorf("expected error %q, got: %v", wantMsg, err)
 	}
 
 	output := buf.String()
@@ -1345,78 +1297,35 @@ func TestGoTidyTask_UntidyFailsWithDiff(t *testing.T) {
 	}
 }
 
-func TestLintTasks_TidyConfig(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		goYAML     string
-		expectTidy bool
-	}{
-		{
-			name:       "default_enabled",
-			goYAML:     "",
-			expectTidy: true,
-		},
-		{
-			name:       "explicit_enabled",
-			goYAML:     "tidy:\n  enabled: true\n",
-			expectTidy: true,
-		},
-		{
-			name:       "disabled",
-			goYAML:     "tidy:\n  enabled: false\n",
-			expectTidy: false,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			apDir := filepath.Join(dir, ".ap")
-			if err := os.MkdirAll(apDir, 0755); err != nil {
-				t.Fatal(err)
-			}
-			if tc.goYAML != "" {
-				if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(tc.goYAML), 0644); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module testmod\n\ngo 1.27\n"), 0644); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
-				t.Fatal(err)
-			}
+func TestLintTasks_TidyDisabled(t *testing.T) {
+	dir := t.TempDir()
+	apDir := filepath.Join(dir, ".ap")
+	if err := os.MkdirAll(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte("tidy:\n  enabled: false\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module testmod\n\ngo 1.27\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
-			r, err := sourcetree.Open(dir)
-			if err != nil {
-				t.Fatal(err)
-			}
+	r, err := sourcetree.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-			tasksGroup, err := LintTasks(r, dir)
-			if err != nil {
-				t.Fatalf("LintTasks failed: %v", err)
-			}
-			outer, ok := tasksGroup.(*tasks.Group)
-			if !ok {
-				t.Fatalf("expected *tasks.Group, got %T", tasksGroup)
-			}
-			if len(outer.Tasks) != 1 {
-				t.Fatalf("expected 1 module group, got %d", len(outer.Tasks))
-			}
-			modGroup, ok := outer.Tasks[0].(*tasks.Group)
-			if !ok {
-				t.Fatalf("expected *tasks.Group, got %T", outer.Tasks[0])
-			}
-
-			hasTidy := false
-			for _, subTask := range modGroup.Tasks {
-				if _, ok := subTask.(*GoTidyTask); ok {
-					hasTidy = true
-					break
-				}
-			}
-
-			if hasTidy != tc.expectTidy {
-				t.Errorf("hasTidy = %v, want %v", hasTidy, tc.expectTidy)
-			}
-		})
+	tasksGroup, err := LintTasks(r, dir)
+	if err != nil {
+		t.Fatalf("LintTasks failed: %v", err)
+	}
+	modGroup := tasksGroup.(*tasks.Group).Tasks[0].(*tasks.Group)
+	for _, subTask := range modGroup.Tasks {
+		if _, ok := subTask.(*GoTidyTask); ok {
+			t.Errorf("expected GoTidyTask to be omitted when tidy.enabled: false")
+		}
 	}
 }

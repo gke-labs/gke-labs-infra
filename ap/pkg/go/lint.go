@@ -95,18 +95,14 @@ type GoTidyTask struct {
 }
 
 func (t *GoTidyTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
-	if scope != nil {
-		scope.Log().V(1).Info("running go mod tidy -diff", "dir", t.Dir)
-	}
+	scope.Log().V(1).Info("running go mod tidy -diff", "dir", t.Dir)
 	cmd := exec.CommandContext(ctx, "go", "mod", "tidy", "-diff")
 	cmd.Dir = t.Dir
 	cmd.Env = append(os.Environ(), "GOWORK=off")
-	if scope != nil {
-		cmd.Stdout = scope.Stdout()
-		cmd.Stderr = scope.Stderr()
-	}
+	cmd.Stdout = scope.Stdout()
+	cmd.Stderr = scope.Stderr()
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("go mod tidy -diff failed in %s: %w", t.Dir, err)
+		return fmt.Errorf("go.mod/go.sum in %s are not tidy; run \"ap format\"", t.Dir)
 	}
 	return nil
 }
