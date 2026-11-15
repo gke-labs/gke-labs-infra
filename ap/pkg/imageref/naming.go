@@ -14,7 +14,10 @@
 
 package imageref
 
-import "strings"
+import (
+	"strings"
+	"sync"
+)
 
 // ImageRef represents a reference to an image with prefix, name, tag, and optional digest.
 // Tag is never empty ("latest" when unset).
@@ -68,6 +71,7 @@ type ImageNaming struct {
 	Tag       string
 	InCluster bool
 	KindMode  bool
+	mu        *sync.Mutex
 	refs      map[string]*ImageRef
 }
 
@@ -83,6 +87,7 @@ func NewImageNaming(prefix, tag string, inCluster bool) ImageNaming {
 		Prefix:    prefix,
 		Tag:       tag,
 		InCluster: inCluster,
+		mu:        &sync.Mutex{},
 		refs:      make(map[string]*ImageRef),
 	}
 }
@@ -92,11 +97,18 @@ func (n ImageNaming) WithRefs() ImageNaming {
 	if n.refs == nil {
 		n.refs = make(map[string]*ImageRef)
 	}
+	if n.mu == nil {
+		n.mu = &sync.Mutex{}
+	}
 	return n
 }
 
 // Ref returns an ImageRef for the given image name.
 func (n ImageNaming) Ref(name string) *ImageRef {
+	if n.mu != nil {
+		n.mu.Lock()
+		defer n.mu.Unlock()
+	}
 	if n.refs != nil {
 		if ref, ok := n.refs[name]; ok {
 			return ref
