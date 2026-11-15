@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sandbox/api"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kubectl"
 	"google.golang.org/grpc"
@@ -149,16 +150,18 @@ func Run(ctx context.Context, root string, args []string) (retErr error) {
 	// Copy back changed files/results
 	if len(resp.ChangedFiles) > 0 {
 		klog.Infof("Copying back %d changed files...", len(resp.ChangedFiles))
+		untrustedRoot, err := fileutils.OpenUntrustedRoot(root)
+		if err != nil {
+			return fmt.Errorf("failed to open root directory %s: %w", root, err)
+		}
+		defer func() {
+			if err := untrustedRoot.Close(); err != nil {
+				retErr = errors.Join(retErr, fmt.Errorf("failed to close untrusted root: %w", err))
+			}
+		}()
+
 		for _, file := range resp.ChangedFiles {
-			fullPath := filepath.Clean(filepath.Join(root, file.Path))
-			rel, err := filepath.Rel(root, fullPath)
-			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-				return fmt.Errorf("sandbox returned path %q escaping root", file.Path)
-			}
-			if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-				return fmt.Errorf("failed to create local directory for %s: %w", file.Path, err)
-			}
-			if err := os.WriteFile(fullPath, file.Content, 0644); err != nil {
+			if err := untrustedRoot.WriteFile(file.Path, file.Content, 0644); err != nil {
 				return fmt.Errorf("failed to write local file %s: %w", file.Path, err)
 			}
 		}
