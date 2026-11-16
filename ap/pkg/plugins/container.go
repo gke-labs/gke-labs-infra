@@ -16,7 +16,6 @@ package plugins
 
 import (
 	"archive/tar"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -33,109 +32,53 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool"
 )
-
-type verifyKey struct{}
-
-// WithVerify returns a context indicating whether verify mode is active.
-func WithVerify(ctx context.Context, verify bool) context.Context {
-	return context.WithValue(ctx, verifyKey{}, verify)
-}
-
-// IsVerify reports whether verify mode is active in the context.
-func IsVerify(ctx context.Context) bool {
-	v, ok := ctx.Value(verifyKey{}).(bool)
-	return ok && v
-}
-
-// findContainerEngine detects an available container runtime (docker or podman).
-func findContainerEngine(ctx context.Context, scope *tasks.TaskContext) (string, error) {
-	if env := os.Getenv("CONTAINER_ENGINE"); env != "" {
-		bin, err := exec.LookPath(env)
-		if err != nil {
-			return "", fmt.Errorf("container engine %q not found in PATH: %w", env, err)
-		}
-		return bin, nil
-	}
-
-	if scope != nil {
-		bin, err := scope.Tool(ctx, "docker")
-		if err != nil {
-			scope.Log().V(2).Info("failed to resolve tool docker", "error", err)
-		} else if bin != "" {
-			lBin, err := exec.LookPath(bin)
-			if err != nil {
-				scope.Log().V(2).Info("docker tool not in PATH", "path", bin, "error", err)
-			} else {
-				return lBin, nil
-			}
-		}
-	}
-
-	bin, err := exec.LookPath("docker")
-	if err != nil {
-		if scope != nil {
-			scope.Log().V(2).Info("docker not in PATH", "error", err)
-		}
-	} else {
-		return bin, nil
-	}
-
-	bin, err = exec.LookPath("podman")
-	if err != nil {
-		if scope != nil {
-			scope.Log().V(2).Info("podman not in PATH", "error", err)
-		}
-	} else {
-		return bin, nil
-	}
-
-	return "", errors.New("no container runtime (docker or podman) found in PATH")
-}
 
 // DescribeContainer runs `<image> describe` in a container on cold runs and caches the manifest.
 func DescribeContainer(ctx context.Context, repoRoot, cacheDirectory, pluginName string, declaration config.PluginDeclaration) (*PluginManifest, error) {
-	if cacheDirectory == "" {
-		c, err := fileutils.CacheDir()
-		if err != nil {
-			return nil, err
-		}
-		cacheDirectory = c
-	}
-
 	key := CacheKey(declaration)
 	manifest, err := LoadCachedManifest(cacheDirectory, key)
 	if err == nil {
 		return manifest, nil
 	}
 
-	engine, err := findContainerEngine(ctx, nil)
+	dockerTool, ok := tool.Lookup("docker")
+	if !ok {
+		return nil, fmt.Errorf("plugin %q requires a container runtime: docker tool not registered", pluginName)
+	}
+	dockerPath, err := dockerTool.Ensure(ctx, repoRoot)
 	if err != nil {
-		return nil, fmt.Errorf("plugin %q requires a container runtime: %w", pluginName, err)
+		return nil, fmt.Errorf("plugin %q requires a container runtime (docker): %w", pluginName, err)
 	}
 
-	cmd := exec.CommandContext(ctx, engine, "run", "--rm", "--network", "none", declaration.Image, "describe")
-	out, err := cmd.CombinedOutput()
+	command := exec.CommandContext(ctx, dockerPath, "run", "--rm", "--network", "none", declaration.Image, "describe")
+	output, err := command.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("running describe for plugin %q: %w (%s)", pluginName, err, strings.TrimSpace(string(out)))
+		return nil, fmt.Errorf("running describe for plugin %q: %w (%s)", pluginName, err, strings.TrimSpace(string(output)))
 	}
 
-	var m PluginManifest
-	if err := json.Unmarshal(out, &m); err != nil {
+	var parsedManifest PluginManifest
+	if err := json.Unmarshal(output, &parsedManifest); err != nil {
 		return nil, fmt.Errorf("parsing plugin %q manifest: %w", pluginName, err)
 	}
 
 	sanitizedKey := strings.ReplaceAll(strings.ReplaceAll(key, ":", "-"), "/", "-")
-	describeDir := filepath.Join(cacheDirectory, "plugins", "describe")
-	if err := os.MkdirAll(describeDir, 0755); err != nil {
-		return nil, fmt.Errorf("creating describe cache dir %s: %w", describeDir, err)
+	manifestPath := filepath.Join(cacheDirectory, "plugins", "describe", sanitizedKey+".json")
+	tempFile, err := fileutils.CreateTempFile(manifestPath)
+	if err != nil {
+		return nil, fmt.Errorf("creating temp file for %s: %w", manifestPath, err)
 	}
-	manifestPath := filepath.Join(describeDir, sanitizedKey+".json")
-	if err := os.WriteFile(manifestPath, out, 0644); err != nil {
+	defer tempFile.Cleanup()
+
+	if _, err := tempFile.Write(output); err != nil {
 		return nil, fmt.Errorf("writing cached manifest %s: %w", manifestPath, err)
 	}
+	if err := tempFile.Rename(0644); err != nil {
+		return nil, fmt.Errorf("saving cached manifest %s: %w", manifestPath, err)
+	}
 
-	return &m, nil
+	return &parsedManifest, nil
 }
 
 // ContainerPlugin implements Plugin for container-based plugins.
@@ -147,36 +90,32 @@ type ContainerPlugin struct {
 }
 
 // Describe returns the manifest describing the container plugin.
-func (p *ContainerPlugin) Describe(ctx context.Context) (*PluginManifest, error) {
-	return p.Manifest, nil
+func (plugin *ContainerPlugin) Describe(ctx context.Context) (*PluginManifest, error) {
+	return plugin.Manifest, nil
 }
 
-// DiscoverTasks discovers tasks for the container plugin under dir.
-func (p *ContainerPlugin) DiscoverTasks(ctx context.Context, dir string, scope *tasks.TaskContext) ([]PluginTask, error) {
-	if p.Manifest == nil {
-		return nil, nil
-	}
-
-	activatedDirs, err := FindActivatedDirs(scope.SourceTree().Under(dir), p.Name, p.Manifest.Activation)
+// DiscoverTasks discovers tasks for the container plugin under directory.
+func (plugin *ContainerPlugin) DiscoverTasks(ctx context.Context, directory string, scope *tasks.TaskContext) ([]PluginTask, error) {
+	activatedDirectories, err := FindActivatedDirs(scope.SourceTree().Under(directory), plugin.Name, plugin.Manifest.Activation)
 	if err != nil {
 		return nil, err
 	}
 
 	var discoveredTasks []PluginTask
-	for _, actDir := range activatedDirs {
-		for _, taskMeta := range p.Manifest.Tasks {
-			task := &ContainerTask{
-				PluginName:  p.Name,
-				TaskMeta:    taskMeta,
-				Declaration: p.Declaration,
-				Manifest:    p.Manifest,
-				Dir:         actDir,
-				RepoRoot:    p.RepoRoot,
+	for _, activatedDir := range activatedDirectories {
+		for _, taskMetadata := range plugin.Manifest.Tasks {
+			containerTask := &ContainerTask{
+				PluginName:   plugin.Name,
+				TaskMetadata: taskMetadata,
+				Declaration:  plugin.Declaration,
+				Manifest:     plugin.Manifest,
+				Dir:          activatedDir,
+				RepoRoot:     plugin.RepoRoot,
 			}
 			discoveredTasks = append(discoveredTasks, PluginTask{
-				Plugin:       p.Name,
-				TaskMetadata: taskMeta,
-				Task:         task,
+				Plugin:       plugin.Name,
+				TaskMetadata: taskMetadata,
+				Task:         containerTask,
 			})
 		}
 	}
@@ -201,17 +140,17 @@ func LoadContainerPlugins(ctx context.Context, repoRoot, cacheDirectory string) 
 
 	var result []Plugin
 	for _, name := range pluginNames {
-		decl := pluginsConfig.Plugins[name]
-		if !decl.IsEnabled() {
+		declaration := pluginsConfig.Plugins[name]
+		if !declaration.IsEnabled() {
 			continue
 		}
-		manifest, err := DescribeContainer(ctx, repoRoot, cacheDirectory, name, decl)
+		manifest, err := DescribeContainer(ctx, repoRoot, cacheDirectory, name, declaration)
 		if err != nil {
 			return nil, err
 		}
 		result = append(result, &ContainerPlugin{
 			Name:        name,
-			Declaration: decl,
+			Declaration: declaration,
 			Manifest:    manifest,
 			RepoRoot:    repoRoot,
 		})
@@ -221,13 +160,12 @@ func LoadContainerPlugins(ctx context.Context, repoRoot, cacheDirectory string) 
 
 // ContainerTask represents a task executed inside a container plugin.
 type ContainerTask struct {
-	PluginName  string
-	TaskMeta    TaskMetadata
-	Declaration config.PluginDeclaration
-	Manifest    *PluginManifest
-	Dir         string
-	RepoRoot    string
-	Verify      bool
+	PluginName   string
+	TaskMetadata TaskMetadata
+	Declaration  config.PluginDeclaration
+	Manifest     *PluginManifest
+	Dir          string
+	RepoRoot     string
 }
 
 var (
@@ -236,188 +174,178 @@ var (
 )
 
 // GetName returns the hyphenated task name `<plugin>-<task>`.
-func (t *ContainerTask) GetName() string {
-	return fmt.Sprintf("%s-%s", t.PluginName, t.TaskMeta.Name)
+func (task *ContainerTask) GetName() string {
+	return fmt.Sprintf("%s-%s", task.PluginName, task.TaskMetadata.Name)
 }
 
 // GetChildren returns no children for leaf container tasks.
-func (t *ContainerTask) GetChildren() []tasks.Task {
+func (task *ContainerTask) GetChildren() []tasks.Task {
 	return nil
 }
 
 // SourcePath returns the activated directory path for task filtering.
-func (t *ContainerTask) SourcePath() string {
-	return t.Dir
+func (task *ContainerTask) SourcePath() string {
+	return task.Dir
 }
 
 // Run executes the task in a container sandbox.
-func (t *ContainerTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
-	// Network authorization check: manifest requires network, repository must authorize
-	if t.Manifest != nil && t.Manifest.Network && !t.Declaration.Network {
-		return fmt.Errorf("plugin %q requires network access, but network is not authorized in .ap/plugins.yaml", t.PluginName)
+func (task *ContainerTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
+	if task.Manifest.Network && !task.Declaration.Network {
+		return fmt.Errorf("plugin %q requires network access, but network is not authorized in .ap/plugins.yaml", task.PluginName)
 	}
 
-	engine, err := findContainerEngine(ctx, scope)
+	dockerPath, err := scope.Tool(ctx, "docker")
 	if err != nil {
-		return fmt.Errorf("plugin %q in %s requires a container runtime: %w", t.PluginName, t.Dir, err)
+		return fmt.Errorf("plugin %q in %s requires a container runtime (docker): %w", task.PluginName, task.Dir, err)
 	}
 
-	var createArgs []string
-	createArgs = append(createArgs, "create")
-	if t.Manifest == nil || !t.Manifest.Network || !t.Declaration.Network {
-		createArgs = append(createArgs, "--network", "none")
+	relativeDir, err := filepath.Rel(scope.RepoRoot(), task.Dir)
+	if err != nil {
+		return fmt.Errorf("calculating relative directory for %s: %w", task.Dir, err)
 	}
-	createArgs = append(createArgs, t.Declaration.Image, "run", t.TaskMeta.Name, "--src", "/src", "--out", "/out")
+	relativeDir = filepath.ToSlash(relativeDir)
 
-	createCmd := exec.CommandContext(ctx, engine, createArgs...)
-	createOut, err := createCmd.Output()
+	var createArguments []string
+	createArguments = append(createArguments, "create")
+	if !task.Manifest.Network || !task.Declaration.Network {
+		createArguments = append(createArguments, "--network", "none")
+	}
+	createArguments = append(createArguments, task.Declaration.Image, "run", task.TaskMetadata.Name, "--src", "/src", "--dir", relativeDir, "--out", "/out")
+
+	createCommand := exec.CommandContext(ctx, dockerPath, createArguments...)
+	createOutput, err := createCommand.Output()
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			return fmt.Errorf("creating container for plugin %q: %w (%s)", t.PluginName, err, strings.TrimSpace(string(exitErr.Stderr)))
+			return fmt.Errorf("creating container for plugin %q: %w (%s)", task.PluginName, err, strings.TrimSpace(string(exitErr.Stderr)))
 		}
-		return fmt.Errorf("creating container for plugin %q: %w", t.PluginName, err)
+		return fmt.Errorf("creating container for plugin %q: %w", task.PluginName, err)
 	}
-	containerID := strings.TrimSpace(string(createOut))
+	containerID := strings.TrimSpace(string(createOutput))
 
-	// Ensure container is always removed regardless of outcome or cancellation
 	defer func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		cleanupContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if out, err := exec.CommandContext(cleanupCtx, engine, "rm", "-f", containerID).CombinedOutput(); err != nil {
-			scope.Log().V(2).Info("failed to remove plugin container", "container", containerID, "error", err, "output", strings.TrimSpace(string(out)))
+		if output, removeErr := exec.CommandContext(cleanupContext, dockerPath, "rm", "-f", containerID).CombinedOutput(); removeErr != nil {
+			scope.Log().V(2).Info("failed to remove plugin container", "container", containerID, "error", removeErr, "output", strings.TrimSpace(string(output)))
 		}
 	}()
 
-	// Stream input source tree into container /src
-	pr, pw := io.Pipe()
-	cpInCmd := exec.CommandContext(ctx, engine, "cp", "-", containerID+":/")
-	cpInCmd.Stdin = pr
+	pipeReader, pipeWriter := io.Pipe()
+	copyInCommand := exec.CommandContext(ctx, dockerPath, "cp", "-", containerID+":/")
+	copyInCommand.Stdin = pipeReader
 
-	tarErrCh := make(chan error, 1)
+	tarErrorChannel := make(chan error, 1)
 	go func() {
-		tarErr := writeTarStream(scope.SourceTree().Under(t.Dir), t.Dir, pw)
-		_ = pw.CloseWithError(tarErr)
-		tarErrCh <- tarErr
+		tarError := writeTarStream(scope.SourceTree().RepoTree(), scope.RepoRoot(), pipeWriter)
+		_ = pipeWriter.CloseWithError(tarError)
+		tarErrorChannel <- tarError
 	}()
 
-	cpInOutput, cpInErr := cpInCmd.CombinedOutput()
-	_ = pr.CloseWithError(cpInErr)
+	copyInOutput, copyInErr := copyInCommand.CombinedOutput()
+	_ = pipeReader.CloseWithError(copyInErr)
 
-	tarErr := <-tarErrCh
-	if cpInErr != nil {
-		return fmt.Errorf("copying source into plugin container %s: %w (%s)", containerID, cpInErr, strings.TrimSpace(string(cpInOutput)))
+	tarError := <-tarErrorChannel
+	if copyInErr != nil {
+		return fmt.Errorf("copying source into plugin container %s: %w (%s)", containerID, copyInErr, strings.TrimSpace(string(copyInOutput)))
 	}
-	if tarErr != nil && !errors.Is(tarErr, io.ErrClosedPipe) {
-		return fmt.Errorf("creating source archive for plugin %q: %w", t.PluginName, tarErr)
-	}
-
-	// Run task inside container
-	startCmd := exec.CommandContext(ctx, engine, "start", "-a", containerID)
-	startCmd.Stdout = scope.Stdout()
-	startCmd.Stderr = scope.Stderr()
-	if err := startCmd.Run(); err != nil {
-		return fmt.Errorf("plugin %q task %q failed: %w", t.PluginName, t.TaskMeta.Name, err)
+	if tarError != nil && !errors.Is(tarError, io.ErrClosedPipe) {
+		return fmt.Errorf("creating source archive for plugin %q: %w", task.PluginName, tarError)
 	}
 
-	if len(t.TaskMeta.Outputs) == 0 {
+	startCommand := exec.CommandContext(ctx, dockerPath, "start", "-a", containerID)
+	startCommand.Stdout = scope.Stdout()
+	startCommand.Stderr = scope.Stderr()
+	if err := startCommand.Run(); err != nil {
+		return fmt.Errorf("plugin %q task %q failed: %w", task.PluginName, task.TaskMetadata.Name, err)
+	}
+
+	if len(task.TaskMetadata.Outputs) == 0 {
 		return nil
 	}
 
-	// Copy outputs from container /out/. to host staging directory
-	stagingDir, err := os.MkdirTemp("", "ap-plugin-stage-*")
+	stagingDirectory, err := os.MkdirTemp("", "ap-plugin-stage-*")
 	if err != nil {
-		return fmt.Errorf("failed to create staging directory: %w", err)
+		return fmt.Errorf("creating staging directory: %w", err)
 	}
 	defer func() {
-		if rmErr := os.RemoveAll(stagingDir); rmErr != nil && !os.IsNotExist(rmErr) {
-			scope.Log().V(2).Info("failed to remove staging directory", "dir", stagingDir, "error", rmErr)
+		if removeErr := os.RemoveAll(stagingDirectory); removeErr != nil && !os.IsNotExist(removeErr) {
+			scope.Log().V(2).Info("failed to remove staging directory", "dir", stagingDirectory, "error", removeErr)
 		}
 	}()
 
-	cpOutCmd := exec.CommandContext(ctx, engine, "cp", containerID+":/out/.", stagingDir)
-	if cpOut, err := cpOutCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("copying output from container %s: %w (%s)", containerID, err, strings.TrimSpace(string(cpOut)))
+	copyOutCommand := exec.CommandContext(ctx, dockerPath, "cp", containerID+":/out/.", stagingDirectory)
+	if copyOutOutput, err := copyOutCommand.CombinedOutput(); err != nil {
+		return fmt.Errorf("copying output from container %s: %w (%s)", containerID, err, strings.TrimSpace(string(copyOutOutput)))
 	}
 
-	isVerify := t.Verify || IsVerify(ctx)
-	if isVerify {
-		return verifyStagedOutputs(t.Dir, stagingDir, t.TaskMeta.Outputs, scope.Stderr())
-	}
-
-	return placeStagedOutputs(t.Dir, stagingDir, t.TaskMeta.Outputs, scope.SourceTree())
+	return placeStagedOutputs(task.Dir, stagingDirectory, task.TaskMetadata.Outputs, scope.SourceTree())
 }
 
 func isCoLocated(outputs []string) bool {
 	return len(outputs) == 1 && outputs[0] == "."
 }
 
-// writeTarStream creates a tar stream containing files from tree under "src/", and ensures "out/" exists.
-func writeTarStream(tree *sourcetree.SourceTree, baseDir string, w io.Writer) (retErr error) {
-	tw := tar.NewWriter(w)
+func writeTarStream(tree *sourcetree.SourceTree, repositoryRoot string, outputWriter io.Writer) (returnError error) {
+	tarWriter := tar.NewWriter(outputWriter)
 	defer func() {
-		if err := tw.Close(); err != nil && retErr == nil {
-			retErr = err
+		if closeErr := tarWriter.Close(); closeErr != nil && returnError == nil {
+			returnError = closeErr
 		}
 	}()
 
-	// Ensure out/ exists inside container
-	outHeader := &tar.Header{
+	outDirectoryHeader := &tar.Header{
 		Name:     "out/",
 		Mode:     0755,
 		Typeflag: tar.TypeDir,
 	}
-	if err := tw.WriteHeader(outHeader); err != nil {
+	if err := tarWriter.WriteHeader(outDirectoryHeader); err != nil {
 		return err
 	}
 
-	if tree == nil {
-		return nil
-	}
-
-	for _, f := range tree.Files() {
-		rel, err := filepath.Rel(baseDir, f.Path)
+	for _, file := range tree.Files() {
+		relativeFilePath, err := filepath.Rel(repositoryRoot, file.Path)
 		if err != nil {
 			return err
 		}
-		info, err := os.Lstat(f.Path)
+		fileInfo, err := os.Lstat(file.Path)
 		if err != nil {
 			return err
 		}
 
-		link := ""
-		if info.Mode()&os.ModeSymlink != 0 {
-			link, err = os.Readlink(f.Path)
+		linkTarget := ""
+		if fileInfo.Mode()&os.ModeSymlink != 0 {
+			linkTarget, err = os.Readlink(file.Path)
 			if err != nil {
 				return err
 			}
 		}
 
-		header, err := tar.FileInfoHeader(info, link)
+		header, err := tar.FileInfoHeader(fileInfo, linkTarget)
 		if err != nil {
 			return err
 		}
-		header.Name = filepath.ToSlash(filepath.Join("src", rel))
-		if info.IsDir() {
+		header.Name = filepath.ToSlash(filepath.Join("src", relativeFilePath))
+		if fileInfo.IsDir() {
 			header.Name += "/"
 		}
 
-		if err := tw.WriteHeader(header); err != nil {
+		if err := tarWriter.WriteHeader(header); err != nil {
 			return err
 		}
 
-		if info.Mode().IsRegular() {
-			fileData, err := os.Open(f.Path)
+		if fileInfo.Mode().IsRegular() {
+			fileData, err := os.Open(file.Path)
 			if err != nil {
 				return err
 			}
-			_, copyErr := io.Copy(tw, fileData)
-			closeErr := fileData.Close()
-			if copyErr != nil {
-				return copyErr
+			_, copyError := io.Copy(tarWriter, fileData)
+			closeError := fileData.Close()
+			if copyError != nil {
+				return copyError
 			}
-			if closeErr != nil {
-				return closeErr
+			if closeError != nil {
+				return closeError
 			}
 		}
 	}
@@ -425,27 +353,26 @@ func writeTarStream(tree *sourcetree.SourceTree, baseDir string, w io.Writer) (r
 	return nil
 }
 
-// placeStagedOutputs synchronizes staged outputs into targetDir using UntrustedRoot.
-func placeStagedOutputs(targetDir, stagingDir string, outputs []string, tree *sourcetree.SourceTree) (retErr error) {
-	untrustedRoot, err := fileutils.OpenUntrustedRoot(targetDir)
+func placeStagedOutputs(targetDirectory, stagingDirectory string, outputs []string, tree *sourcetree.SourceTree) (returnError error) {
+	untrustedRoot, err := fileutils.OpenUntrustedRoot(targetDirectory)
 	if err != nil {
-		return fmt.Errorf("failed to open root %s: %w", targetDir, err)
+		return fmt.Errorf("opening root %s: %w", targetDirectory, err)
 	}
 	defer func() {
-		if closeErr := untrustedRoot.Close(); closeErr != nil && retErr == nil {
-			retErr = closeErr
+		if closeErr := untrustedRoot.Close(); closeErr != nil && returnError == nil {
+			returnError = closeErr
 		}
 	}()
 
 	if isCoLocated(outputs) {
-		err := filepath.Walk(stagingDir, func(path string, info os.FileInfo, err error) error {
+		walkErr := filepath.Walk(stagingDirectory, func(path string, fileInfo os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
-			if info.IsDir() {
+			if fileInfo.IsDir() {
 				return nil
 			}
-			rel, err := filepath.Rel(stagingDir, path)
+			relativePath, err := filepath.Rel(stagingDirectory, path)
 			if err != nil {
 				return err
 			}
@@ -453,31 +380,36 @@ func placeStagedOutputs(targetDir, stagingDir string, outputs []string, tree *so
 			if err != nil {
 				return err
 			}
-			return untrustedRoot.WriteFile(rel, content, info.Mode().Perm())
+			return untrustedRoot.WriteFile(relativePath, content, fileInfo.Mode().Perm())
 		})
-		if err != nil {
-			return fmt.Errorf("failed to place co-located plugin output: %w", err)
+		if walkErr != nil {
+			return fmt.Errorf("placing co-located plugin output: %w", walkErr)
 		}
 	} else {
-		for _, entry := range outputs {
-			stagedPath := filepath.Join(stagingDir, entry)
-			info, err := os.Stat(stagedPath)
+		for _, outputEntry := range outputs {
+			cleanEntry := filepath.Clean(outputEntry)
+			if cleanEntry == ".." || strings.HasPrefix(cleanEntry, ".."+string(filepath.Separator)) || filepath.IsAbs(outputEntry) {
+				return fmt.Errorf("output path %q escapes directory %s", outputEntry, targetDirectory)
+			}
+
+			stagedPath := filepath.Join(stagingDirectory, outputEntry)
+			fileInfo, err := os.Stat(stagedPath)
 			if err != nil {
 				if os.IsNotExist(err) {
 					continue
 				}
-				return fmt.Errorf("failed to stat staged output %s: %w", entry, err)
+				return fmt.Errorf("stating staged output %s: %w", outputEntry, err)
 			}
 
-			if info.IsDir() {
-				err := filepath.Walk(stagedPath, func(path string, fi os.FileInfo, err error) error {
+			if fileInfo.IsDir() {
+				walkErr := filepath.Walk(stagedPath, func(path string, childInfo os.FileInfo, err error) error {
 					if err != nil {
 						return err
 					}
-					if fi.IsDir() {
+					if childInfo.IsDir() {
 						return nil
 					}
-					rel, err := filepath.Rel(stagingDir, path)
+					relativePath, err := filepath.Rel(stagingDirectory, path)
 					if err != nil {
 						return err
 					}
@@ -485,178 +417,25 @@ func placeStagedOutputs(targetDir, stagingDir string, outputs []string, tree *so
 					if err != nil {
 						return err
 					}
-					return untrustedRoot.WriteFile(rel, content, fi.Mode().Perm())
+					return untrustedRoot.WriteFile(relativePath, content, childInfo.Mode().Perm())
 				})
-				if err != nil {
-					return fmt.Errorf("failed to place plugin output %s: %w", entry, err)
+				if walkErr != nil {
+					return fmt.Errorf("placing plugin output %s: %w", outputEntry, walkErr)
 				}
 			} else {
 				content, err := os.ReadFile(stagedPath)
 				if err != nil {
 					return err
 				}
-				if err := untrustedRoot.WriteFile(entry, content, info.Mode().Perm()); err != nil {
-					return fmt.Errorf("failed to place plugin output %s: %w", entry, err)
+				if err := untrustedRoot.WriteFile(outputEntry, content, fileInfo.Mode().Perm()); err != nil {
+					return fmt.Errorf("placing plugin output %s: %w", outputEntry, err)
 				}
 			}
 		}
 	}
 
-	if tree != nil {
-		if invErr := tree.InvalidateAll(); invErr != nil {
-			return fmt.Errorf("invalidating source tree: %w", invErr)
-		}
-	}
-	return nil
-}
-
-// verifyStagedOutputs compares staged outputs against the repository without modifying files.
-func verifyStagedOutputs(targetDir, stagingDir string, outputs []string, errOut io.Writer) error {
-	var diffs []string
-
-	if isCoLocated(outputs) {
-		err := filepath.Walk(stagingDir, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-			if info.IsDir() {
-				return nil
-			}
-			rel, err := filepath.Rel(stagingDir, path)
-			if err != nil {
-				return err
-			}
-			stagedContent, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-
-			repoPath := filepath.Join(targetDir, rel)
-			repoContent, err := os.ReadFile(repoPath)
-			if err != nil {
-				if os.IsNotExist(err) {
-					diffs = append(diffs, fmt.Sprintf("file %s is missing from repository", rel))
-					return nil
-				}
-				return err
-			}
-
-			if !bytes.Equal(stagedContent, repoContent) {
-				diffs = append(diffs, fmt.Sprintf("file %s differs from repository state", rel))
-			}
-			return nil
-		})
-		if err != nil {
-			return err
-		}
-	} else {
-		for _, entry := range outputs {
-			stagedPath := filepath.Join(stagingDir, entry)
-			repoPath := filepath.Join(targetDir, entry)
-
-			stagedInfo, err := os.Stat(stagedPath)
-			if err != nil {
-				if os.IsNotExist(err) {
-					diffs = append(diffs, fmt.Sprintf("expected output %s was not produced", entry))
-					continue
-				}
-				return err
-			}
-
-			if stagedInfo.IsDir() {
-				stagedFiles := make(map[string][]byte)
-				err := filepath.Walk(stagedPath, func(path string, info os.FileInfo, err error) error {
-					if err != nil || info.IsDir() {
-						return err
-					}
-					rel, rErr := filepath.Rel(stagedPath, path)
-					if rErr != nil {
-						return rErr
-					}
-					content, rErr := os.ReadFile(path)
-					if rErr != nil {
-						return rErr
-					}
-					stagedFiles[rel] = content
-					return nil
-				})
-				if err != nil {
-					return err
-				}
-
-				repoFiles := make(map[string][]byte)
-				if repoInfo, rErr := os.Stat(repoPath); rErr == nil && repoInfo.IsDir() {
-					wErr := filepath.Walk(repoPath, func(path string, info os.FileInfo, err error) error {
-						if err != nil || info.IsDir() {
-							return err
-						}
-						rel, rErr := filepath.Rel(repoPath, path)
-						if rErr != nil {
-							return rErr
-						}
-						content, rErr := os.ReadFile(path)
-						if rErr != nil {
-							return rErr
-						}
-						repoFiles[rel] = content
-						return nil
-					})
-					if wErr != nil {
-						return wErr
-					}
-				} else {
-					diffs = append(diffs, fmt.Sprintf("directory %s is missing from repository", entry))
-					continue
-				}
-
-				for rel, sBytes := range stagedFiles {
-					rBytes, ok := repoFiles[rel]
-					if !ok {
-						diffs = append(diffs, fmt.Sprintf("file %s is missing from repository in %s", rel, entry))
-					} else if !bytes.Equal(sBytes, rBytes) {
-						diffs = append(diffs, fmt.Sprintf("file %s in %s differs from repository state", rel, entry))
-					}
-				}
-				for rel := range repoFiles {
-					if _, ok := stagedFiles[rel]; !ok {
-						diffs = append(diffs, fmt.Sprintf("unexpected file %s present in repository %s", rel, entry))
-					}
-				}
-			} else {
-				stagedContent, err := os.ReadFile(stagedPath)
-				if err != nil {
-					return err
-				}
-				repoContent, err := os.ReadFile(repoPath)
-				if err != nil {
-					if os.IsNotExist(err) {
-						diffs = append(diffs, fmt.Sprintf("file %s is missing from repository", entry))
-						continue
-					}
-					return err
-				}
-				if !bytes.Equal(stagedContent, repoContent) {
-					diffs = append(diffs, fmt.Sprintf("file %s differs from repository state", entry))
-				}
-			}
-		}
-	}
-
-	if len(diffs) > 0 {
-		sort.Strings(diffs)
-		var sb strings.Builder
-		sb.WriteString("verify failed for plugin outputs:\n")
-		for _, d := range diffs {
-			sb.WriteString("  - ")
-			sb.WriteString(d)
-			sb.WriteString("\n")
-		}
-		if errOut != nil {
-			if _, pErr := fmt.Fprint(errOut, sb.String()); pErr != nil {
-				return errors.Join(errors.New(strings.TrimSpace(sb.String())), pErr)
-			}
-		}
-		return errors.New(strings.TrimSpace(sb.String()))
+	if invalidateErr := tree.InvalidateAll(); invalidateErr != nil {
+		return fmt.Errorf("invalidating source tree: %w", invalidateErr)
 	}
 	return nil
 }

@@ -109,8 +109,9 @@ func WithCacheDir(dir string) Option {
 type SourceTree struct {
 	mu sync.RWMutex
 
-	root     string // root directory of this view
-	repoRoot string // anchor root of the entire repository
+	root     string      // root directory of this view
+	repoRoot string      // anchor root of the entire repository
+	rootTree *SourceTree // root view of the repository
 
 	files       []*File
 	filesByPath map[string]*File
@@ -380,6 +381,14 @@ func (r *SourceTree) Root() string {
 // RepoRoot returns the repository root path.
 func (r *SourceTree) RepoRoot() string {
 	return r.repoRoot
+}
+
+// RepoTree returns the root view of the repository.
+func (r *SourceTree) RepoTree() *SourceTree {
+	if r.rootTree != nil {
+		return r.rootTree
+	}
+	return r
 }
 
 // Files returns all files matching the given filters.
@@ -922,7 +931,13 @@ func (r *SourceTree) Under(dir string) *SourceTree {
 		}
 	}
 
-	return newSourceTree(cleanDir, r.repoRoot, subFiles, subDirs, subModules, r.ignoreList, r.hashIndex, r.hashPath)
+	sub := newSourceTree(cleanDir, r.repoRoot, subFiles, subDirs, subModules, r.ignoreList, r.hashIndex, r.hashPath)
+	if r.rootTree != nil {
+		sub.rootTree = r.rootTree
+	} else {
+		sub.rootTree = r
+	}
+	return sub
 }
 
 // Save persists pending record entries (such as hashes.bin) atomically.

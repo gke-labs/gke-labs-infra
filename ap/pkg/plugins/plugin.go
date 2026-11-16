@@ -178,12 +178,12 @@ func ActivatedTasks(tree *sourcetree.SourceTree, repositoryRoot, targetDirectory
 			for _, task := range manifest.Tasks {
 				groupName := task.Verb + "-tasks"
 				tasksByDirectory[directory][groupName] = append(tasksByDirectory[directory][groupName], &ContainerTask{
-					PluginName:  pluginName,
-					TaskMeta:    task,
-					Declaration: declaration,
-					Manifest:    manifest,
-					Dir:         directory,
-					RepoRoot:    repositoryRoot,
+					PluginName:   pluginName,
+					TaskMetadata: task,
+					Declaration:  declaration,
+					Manifest:     manifest,
+					Dir:          directory,
+					RepoRoot:     repositoryRoot,
 				})
 			}
 		}
