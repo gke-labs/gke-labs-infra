@@ -25,6 +25,14 @@ type Sourced interface {
 	SourcePath() string
 }
 
+// Outputs is an interface for tasks that declare the files or directories they generate as absolute paths.
+// Implemented by tasks whose outputs are managed or verified through staging (such as ContainerTask).
+// Read by generator verification (FindGeneratedFiles) to avoid perturbing outputs owned by such tasks.
+type Outputs interface {
+	Task
+	Outputs() []string
+}
+
 // Parent is an interface for composite tasks that can produce a copy with new children.
 type Parent interface {
 	Task

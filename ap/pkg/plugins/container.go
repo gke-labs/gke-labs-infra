@@ -236,12 +236,12 @@ type ContainerTask struct {
 	Dir               string
 	RelativeDirectory string
 	RepoRoot          string
-	Verify            bool
 }
 
 var (
 	_ tasks.Task    = (*ContainerTask)(nil)
 	_ tasks.Sourced = (*ContainerTask)(nil)
+	_ tasks.Outputs = (*ContainerTask)(nil)
 )
 
 // GetName returns the hyphenated task name `<plugin>-<task>`, suffixed by the activating directory.
@@ -263,9 +263,16 @@ func (task *ContainerTask) SourcePath() string {
 	return task.Dir
 }
 
-// Outputs returns the task's configured output paths.
+// Outputs returns the paths this task generates as absolute paths.
+// Implements tasks.Outputs.
 func (task *ContainerTask) Outputs() []string {
-	return task.TaskMetadata.Outputs
+	var absolutePaths []string
+	for _, output := range task.TaskMetadata.Outputs {
+		if output != "." && output != "" {
+			absolutePaths = append(absolutePaths, filepath.Clean(filepath.Join(task.Dir, output)))
+		}
+	}
+	return absolutePaths
 }
 
 // Run executes the task in a container sandbox.
@@ -358,7 +365,7 @@ func (task *ContainerTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 		return fmt.Errorf("copying output from container %s: %w (%s)", containerID, err, strings.TrimSpace(string(copyOutOutput)))
 	}
 
-	if task.Verify {
+	if scope.Verify() {
 		return verifyStagedOutputs(ctx, task.Dir, stagingDirectory, task.TaskMetadata.Outputs, task, scope.Stderr())
 	}
 

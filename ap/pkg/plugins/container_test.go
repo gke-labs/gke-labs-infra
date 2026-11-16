@@ -632,7 +632,8 @@ func runVerifyTask(t *testing.T, outputs []string, repositoryFiles, mockFiles ma
 	var stderr bytes.Buffer
 	scope := tasks.NewTaskContext(repoRoot, docsDir, tree.Under(docsDir)).
 		WithTool("docker", filepath.Join(fakeBinDir, "docker")).
-		WithOutput(io.Discard, &stderr)
+		WithOutput(io.Discard, &stderr).
+		WithVerify(true)
 	declaration := config.PluginDeclaration{Image: "example.com/mock@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}
 	manifest := &plugins.PluginManifest{
 		Name:  "mockplugin",
@@ -645,7 +646,6 @@ func runVerifyTask(t *testing.T, outputs []string, repositoryFiles, mockFiles ma
 		Manifest:     manifest,
 		Dir:          docsDir,
 		RepoRoot:     repoRoot,
-		Verify:       true,
 	}
 
 	err = task.Run(t.Context(), scope)
@@ -732,7 +732,8 @@ func TestContainerVerifyMode(t *testing.T) {
 		var stderr bytes.Buffer
 		scope := tasks.NewTaskContext(repoRoot, docsDir, tree.Under(docsDir)).
 			WithTool("docker", filepath.Join(fakeBinDir, "docker")).
-			WithOutput(io.Discard, &stderr)
+			WithOutput(io.Discard, &stderr).
+			WithVerify(true)
 
 		declaration := config.PluginDeclaration{Image: "example.com/mock@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}
 		manifest := &plugins.PluginManifest{
@@ -746,7 +747,6 @@ func TestContainerVerifyMode(t *testing.T) {
 			Manifest:     manifest,
 			Dir:          docsDir,
 			RepoRoot:     repoRoot,
-			Verify:       true,
 		}
 
 		err = task.Run(t.Context(), scope)

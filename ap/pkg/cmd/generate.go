@@ -116,13 +116,6 @@ func RunGenerate(ctx context.Context, opt GenerateOptions) error {
 	}
 
 	if opt.Verify {
-		for _, scope := range scopes {
-			for _, task := range scope.GenerateTasks {
-				if containerTask, ok := task.(*plugins.ContainerTask); ok {
-					containerTask.Verify = true
-				}
-			}
-		}
 		return generate.RunVerify(ctx, opt.RepoRoot, scopes, allTasks, opt.DryRun)
 	}
 

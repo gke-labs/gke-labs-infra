@@ -80,14 +80,8 @@ func FindGeneratedFiles(repoRoot string, scopes []*tasks.TaskContext) ([]*source
 
 		var pluginOutputDirs []string
 		for _, task := range scope.GenerateTasks {
-			if sourced, ok := task.(tasks.Sourced); ok {
-				if outputter, ok := task.(interface{ Outputs() []string }); ok {
-					for _, output := range outputter.Outputs() {
-						if output != "." && output != "" {
-							pluginOutputDirs = append(pluginOutputDirs, filepath.Clean(filepath.Join(sourced.SourcePath(), output)))
-						}
-					}
-				}
+			if taskWithOutputs, ok := task.(tasks.Outputs); ok {
+				pluginOutputDirs = append(pluginOutputDirs, taskWithOutputs.Outputs()...)
 			}
 		}
 
@@ -283,7 +277,7 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext
 			}
 			fmt.Printf("  - %s\n", filepath.ToSlash(rel))
 		}
-		return tasks.Run(ctx, tasks.NewTaskContext(repoRoot, repoRoot, r), allTasks, tasks.RunOptions{DryRun: true})
+		return tasks.Run(ctx, tasks.NewTaskContext(repoRoot, repoRoot, r).WithVerify(true), allTasks, tasks.RunOptions{DryRun: true})
 	}
 
 	// Perturb each generated file that exists on disk, recording pre-run hash and mtime
@@ -370,7 +364,7 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext
 	}()
 
 	// Run generation tasks
-	runErr := tasks.Run(ctx, tasks.NewTaskContext(repoRoot, repoRoot, r), allTasks, tasks.RunOptions{DryRun: false})
+	runErr := tasks.Run(ctx, tasks.NewTaskContext(repoRoot, repoRoot, r).WithVerify(true), allTasks, tasks.RunOptions{DryRun: false})
 	if runErr != nil {
 		findings = append(findings, fmt.Sprintf("generation tasks failed: %v", runErr))
 	}
