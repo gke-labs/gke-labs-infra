@@ -67,12 +67,16 @@ func ParseImageRef(s string) (*ImageRef, error) {
 }
 
 // ImageNaming holds the naming conventions for images in a build or deploy run.
+// When created with NewImageNaming, it coordinates build and deploy tasks by sharing
+// ImageRef pointers so that deploy substitutes the built digest or tag from build.
 type ImageNaming struct {
 	Prefix    string
 	Tag       string
 	InCluster bool
 	KindMode  bool
-	refs      collections.ConcurrentMap[string, *ImageRef]
+	// refs stores the canonical *ImageRef per image name so build tasks can
+	// record the built digest or tag for deploy tasks to read.
+	refs collections.ConcurrentMap[string, *ImageRef]
 }
 
 // NewImageNaming creates an ImageNaming value with an initialized references map.
@@ -99,7 +103,12 @@ func (n ImageNaming) WithRefs() ImageNaming {
 	return n
 }
 
-// Ref returns an ImageRef for the given image name.
+// Ref returns the one *ImageRef for an image name within a run, so that the
+// digest or tag recorded by the build is what deploy substitutes.
+//
+// An ImageNaming built without NewImageNaming (e.g. in unit tests or
+// standalone tasks that do not coordinate build and deploy) does not share
+// instances and returns a fresh *ImageRef on each call.
 func (n ImageNaming) Ref(name string) *ImageRef {
 	tag := n.Tag
 	if tag == "" {
