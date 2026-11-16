@@ -17,12 +17,10 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
 )
@@ -66,23 +64,6 @@ func RunBuild(ctx context.Context, opt BuildOptions) error {
 	buildkitHost, err := images.ResolveBuildkitHost(opt.BuildkitHost)
 	if err != nil {
 		return err
-	}
-	if opt.BuildkitHost != "" {
-		prevHost, hasPrev := os.LookupEnv("BUILDKIT_HOST")
-		if err := os.Setenv("BUILDKIT_HOST", buildkitHost); err != nil {
-			return fmt.Errorf("setting BUILDKIT_HOST: %w", err)
-		}
-		defer func() {
-			if hasPrev {
-				if err := os.Setenv("BUILDKIT_HOST", prevHost); err != nil {
-					scoped.Log(ctx).V(4).Info("failed to restore BUILDKIT_HOST", "error", err)
-				}
-			} else {
-				if err := os.Unsetenv("BUILDKIT_HOST"); err != nil {
-					scoped.Log(ctx).V(4).Info("failed to unset BUILDKIT_HOST", "error", err)
-				}
-			}
-		}()
 	}
 
 	r, err := opt.GetSourceTree()
@@ -136,7 +117,7 @@ func RunBuild(ctx context.Context, opt BuildOptions) error {
 		group.Tasks = append(group.Tasks, imageTasks)
 	}
 
-	scopes, err := DiscoverScopes(ctx, r, opt.RepoRoot, opt.RepoRoot)
+	scopes, err := DiscoverScopes(ctx, r, opt.RepoRoot, opt.RepoRoot, buildkitHost)
 	if err != nil {
 		return err
 	}

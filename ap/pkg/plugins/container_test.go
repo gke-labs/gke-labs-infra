@@ -64,20 +64,18 @@ case "$1" in
       exit 42
     fi
     echo "$*" > "$STATE_DIR/build-args"
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        --iidfile)
-          echo "sha256:fake-built-image-1234" > "$2"
-          shift 2
-          ;;
-        *)
-          shift
-          ;;
-      esac
-    done
     ;;
   load)
     echo "$*" > "$STATE_DIR/load-args"
+    ;;
+  image)
+    if [ "$2" = "inspect" ]; then
+      if [ -f "$STATE_DIR/buildctl-args" ]; then
+        echo "sha256:fake-buildctl-image-5678"
+      else
+        echo "sha256:fake-built-image-1234"
+      fi
+    fi
     ;;
   rm)
     touch "$STATE_DIR/container-removed"
@@ -488,11 +486,11 @@ plugins:
 		if !strings.Contains(buildArgs, "-f images/mock/Dockerfile") {
 			t.Errorf("expected -f images/mock/Dockerfile in args, got: %s", buildArgs)
 		}
+		if !strings.Contains(buildArgs, "-t ap-plugin/mockplugin:latest") {
+			t.Errorf("expected -t ap-plugin/mockplugin:latest in args, got: %s", buildArgs)
+		}
 		if !strings.Contains(buildArgs, "--load") {
 			t.Errorf("expected --load in args, got: %s", buildArgs)
-		}
-		if !strings.Contains(buildArgs, "--iidfile") {
-			t.Errorf("expected --iidfile in args, got: %s", buildArgs)
 		}
 		if !strings.HasSuffix(strings.TrimSpace(buildArgs), ".") {
 			t.Errorf("expected build context . at end of args, got: %s", buildArgs)
@@ -534,7 +532,7 @@ plugins:
 		if !strings.Contains(buildctlArgs, "--opt filename=images/mock/Dockerfile") {
 			t.Errorf("expected filename=images/mock/Dockerfile in args, got: %s", buildctlArgs)
 		}
-		if !strings.Contains(buildctlArgs, "--output type=docker,name=images.local/mockplugin:latest,dest=") {
+		if !strings.Contains(buildctlArgs, "--output type=docker,name=ap-plugin/mockplugin:latest,dest=") {
 			t.Errorf("expected type=docker output in args, got: %s", buildctlArgs)
 		}
 

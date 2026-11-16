@@ -107,6 +107,11 @@ case "$1" in
       esac
     done
     ;;
+  image)
+    if [ "$2" = "inspect" ]; then
+      echo "sha256:fake-dockerfile-image-1234"
+    fi
+    ;;
   run)
     cat <<'EOF'
 {

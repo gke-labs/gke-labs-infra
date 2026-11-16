@@ -897,6 +897,9 @@ func TestDockerBuildTask_ConcurrentRef(t *testing.T) {
 	entered.Add(2)
 
 	execCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		if len(args) > 1 && args[0] == "image" && args[1] == "inspect" {
+			return exec.CommandContext(ctx, "echo", "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
+		}
 		for i, arg := range args {
 			if arg == "--metadata-file" && i+1 < len(args) {
 				metaFile := args[i+1]

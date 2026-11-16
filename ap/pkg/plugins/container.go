@@ -37,11 +37,17 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
-func buildPluginImage(ctx context.Context, scope *tasks.TaskContext, pluginName, dockerfilePath string) (string, error) {
+func buildPluginImage(ctx context.Context, scope *tasks.TaskContext, pluginName, dockerfilePath, buildkitHost string) (string, error) {
 	task := &images.DockerBuildTask{
-		ImageName:  pluginName,
-		Dockerfile: dockerfilePath,
-		Root:       scope.RepoRoot(),
+		ImageName:    pluginName,
+		Dockerfile:   dockerfilePath,
+		Root:         scope.RepoRoot(),
+		BuildkitHost: buildkitHost,
+		Quiet:        true,
+		Naming: images.ImageNaming{
+			Prefix: "ap-plugin",
+			Tag:    "latest",
+		},
 	}
 
 	var outputBuffer bytes.Buffer
@@ -145,14 +151,25 @@ func (plugin *ContainerPlugin) DiscoverTasks(ctx context.Context, directory stri
 	return discoveredTasks, nil
 }
 
-// LoadContainerPlugins loads all configured container plugins from .ap/plugins.yaml.
-func LoadContainerPlugins(ctx context.Context, scope *tasks.TaskContext, cacheDirectory string) ([]Plugin, error) {
+// LoadContainerPlugins loads all enabled container plugins configured in .ap/plugins.yaml.
+func LoadContainerPlugins(ctx context.Context, scope *tasks.TaskContext, cacheDirectory string, buildkitHosts ...string) ([]Plugin, error) {
 	pluginsConfig, err := config.LoadPluginsConfig(scope.RepoRoot())
 	if err != nil {
 		return nil, err
 	}
 	if len(pluginsConfig.Plugins) == 0 {
 		return nil, nil
+	}
+
+	var buildkitHost string
+	if len(buildkitHosts) > 0 && buildkitHosts[0] != "" {
+		buildkitHost = buildkitHosts[0]
+	} else {
+		var err error
+		buildkitHost, err = images.ResolveBuildkitHost("")
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	var pluginNames []string
@@ -170,7 +187,7 @@ func LoadContainerPlugins(ctx context.Context, scope *tasks.TaskContext, cacheDi
 		imageRef := declaration.Image
 		if declaration.Dockerfile != "" {
 			var err error
-			imageRef, err = buildPluginImage(ctx, scope, name, declaration.Dockerfile)
+			imageRef, err = buildPluginImage(ctx, scope, name, declaration.Dockerfile, buildkitHost)
 			if err != nil {
 				return nil, err
 			}
