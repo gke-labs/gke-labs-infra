@@ -53,7 +53,7 @@ func setupTestClient(t *testing.T, plugin Plugin) api.PluginServiceClient {
 
 	serverDone := make(chan error, 1)
 	go func() {
-		serverDone <- serve(serverListener, plugin)
+		serverDone <- Serve(serverListener, plugin)
 	}()
 
 	grpcClientConnection, err := grpc.NewClient("passthrough:///stdio",

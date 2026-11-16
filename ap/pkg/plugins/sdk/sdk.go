@@ -94,10 +94,11 @@ type Plugin struct {
 // ServeStdio serves the plugin over stdin and stdout using the gRPC stdio transport.
 func ServeStdio(plugin Plugin) error {
 	listener := stdio.NewListener(os.Stdin, os.Stdout)
-	return serve(listener, plugin)
+	return Serve(listener, plugin)
 }
 
-func serve(listener net.Listener, plugin Plugin) error {
+// Serve serves the plugin over the given net.Listener using the gRPC transport until closed.
+func Serve(listener net.Listener, plugin Plugin) error {
 	grpcServer := grpc.NewServer()
 	api.RegisterPluginServiceServer(grpcServer, newServer(plugin))
 	if err := grpcServer.Serve(listener); err != nil && !errors.Is(err, net.ErrClosed) {

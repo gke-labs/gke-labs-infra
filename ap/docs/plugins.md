@@ -221,13 +221,13 @@ func main() {
 
 The migration to gRPC over stdio is structured into incremental PRs of approximately 200 lines each:
 
-1. **#816 Design Update** (This PR): Architecture and contract specification in `ap/docs/plugins.md`.
-2. **Plugin Service Proto & Stubs**: Define `ap/pkg/plugins/api/plugin.proto` and generate Go protobuf/gRPC stubs (~150 lines).
-3. **Stdio Duplex Transport**: Implement `net.Conn` stdio adapter and single-connection listener (`dial-stdio`) (~200 lines).
-4. **Container Runner Migration**: Update `ContainerPlugin.Describe` and `ContainerTask.Run` to speak gRPC over stdio, streaming input files and receiving output chunks via `fileutils.UntrustedRoot` (~250 lines).
-5. **Plugin Go SDK & Test Harness**: Provide `ServeStdio` helper and update plugin test mocks to gRPC stdio (~200 lines).
-6. **Container Verify Mode**: Integrate staging diff comparison for `generate`-verb tasks with the gRPC streaming runner (~200 lines).
-7. **Astro Plugin (`ation`)**: Import Astro builder image using the gRPC stdio runner (~200 lines).
+1. **#816 Design Update**: Architecture and contract specification in `ap/docs/plugins.md`.
+2. **Plugin Service Proto & Stubs**: Define `ap/pkg/plugins/api/plugin.proto` and generate Go protobuf/gRPC stubs.
+3. **Stdio Duplex Transport**: Implement `net.Conn` stdio adapter and single-connection listener (`dial-stdio`).
+4. **Container Runner Migration**: Update `ContainerPlugin.Describe` and `ContainerTask.Run` to speak gRPC over stdio, streaming input files and receiving output chunks via `fileutils.UntrustedRoot`.
+5. **Plugin Go SDK & Test Harness**: Provide `ServeStdio` helper and update plugin test mocks to gRPC stdio.
+6. **Container Verify Mode**: Integrate staging diff comparison for `generate`-verb tasks with the gRPC streaming runner.
+7. **Astro Plugin (`ation`)**: Import Astro builder image using the gRPC stdio runner.
 
 - **Recommendation**: Incrementally land proto, transport, and runner in ~200-line PRs, replacing `docker cp` entirely.
 - **Alternative Not Taken**: Maintaining dual CLI and gRPC runners during transition. Dual runners double testing complexity for zero active users.

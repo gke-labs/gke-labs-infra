@@ -16,6 +16,7 @@ package cmd
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -113,25 +114,46 @@ case "$1" in
     fi
     ;;
   run)
-    cat <<'EOF'
-{
-  "apiVersion": "ap.plugin/v1alpha1",
-  "name": "demo",
-  "activation": ["docs/demo.config"],
-  "network": false,
-  "tasks": [
-    {
-      "name": "build",
-      "verb": "build",
-      "description": "Build demo",
-      "outputs": ["dist"]
-    }
-  ]
-}
-EOF
+    exec "$DEMO_PLUGIN_BIN"
     ;;
 esac
 `
+
+	pluginBinary := filepath.Join(cacheDirectory, "demo-plugin")
+	demoMainContent := `package main
+
+import (
+	"os"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/plugins/sdk"
+)
+
+func main() {
+	if err := sdk.ServeStdio(sdk.Plugin{
+		Name:       "demo",
+		Activation: []string{"docs/demo.config"},
+		Tasks: []sdk.Task{
+			{
+				Name:        "build",
+				Verb:        "build",
+				Description: "Build demo",
+				Outputs:     []string{"dist"},
+			},
+		},
+	}); err != nil {
+		os.Exit(1)
+	}
+}
+`
+	demoSourceDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(demoSourceDirectory, "main.go"), []byte(demoMainContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	buildPluginCommand := exec.Command("go", "build", "-o", pluginBinary, filepath.Join(demoSourceDirectory, "main.go"))
+	if buildOutput, err := buildPluginCommand.CombinedOutput(); err != nil {
+		t.Fatalf("building demo plugin helper: %v (%s)", err, buildOutput)
+	}
+	t.Setenv("DEMO_PLUGIN_BIN", pluginBinary)
 
 	dockerBinDirectory := filepath.Join(cacheDirectory, "tools", "docker", "29.9.2", "bin")
 	if err := os.MkdirAll(dockerBinDirectory, 0755); err != nil {

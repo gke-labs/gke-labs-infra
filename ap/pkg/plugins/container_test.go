@@ -15,49 +15,687 @@
 package plugins_test
 
 import (
-	"archive/tar"
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/plugins"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/plugins/api"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/plugins/sdk"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/plugins/stdio"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
+	"google.golang.org/grpc"
 )
 
-func setupFakeDocker(t *testing.T) (fakeBinDir string, stateDir string) {
+type closerFunc func() error
+
+func (closer closerFunc) Close() error {
+	return closer()
+}
+
+func setupTestPluginStarter(t *testing.T, plugin sdk.Plugin) plugins.StartPluginFunc {
 	t.Helper()
-	stateDir = t.TempDir()
-	fakeBinDir = t.TempDir()
+	return func(ctx context.Context, scope *tasks.TaskContext, imageRef string, allowNetwork bool, stderr io.Writer) (api.PluginServiceClient, io.Closer, error) {
+		serverReader, clientWriter := io.Pipe()
+		clientReader, serverWriter := io.Pipe()
+
+		serverListener := stdio.NewListener(serverReader, serverWriter)
+		clientConnection := stdio.NewConn(clientReader, clientWriter)
+
+		serverDone := make(chan error, 1)
+		go func() {
+			serverDone <- sdk.Serve(serverListener, plugin)
+		}()
+
+		client, closer, err := plugins.DialStdioConn(ctx, clientConnection)
+		if err != nil {
+			_ = serverListener.Close()
+			return nil, nil, err
+		}
+
+		wrappedCloser := closerFunc(func() error {
+			return errors.Join(closer.Close(), serverListener.Close(), <-serverDone)
+		})
+		return client, wrappedCloser, nil
+	}
+}
+
+func TestRunTask_InputAndOutput(t *testing.T) {
+	repoRoot := t.TempDir()
+	docsDir := filepath.Join(repoRoot, "docs")
+	if err := os.MkdirAll(docsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	rootFile := filepath.Join(repoRoot, "root.txt")
+	if err := os.WriteFile(rootFile, []byte("root file content\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	inputFile := filepath.Join(docsDir, "input.txt")
+	if err := os.WriteFile(inputFile, []byte("hello input\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tree, err := sourcetree.Open(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var stdoutBuffer, stderrBuffer bytes.Buffer
+	scope := tasks.NewTaskContext(repoRoot, docsDir, tree.Under(docsDir)).WithOutput(&stdoutBuffer, &stderrBuffer)
+
+	testPlugin := sdk.Plugin{
+		Name:       "example",
+		Activation: []string{"input.txt"},
+		Tasks: []sdk.Task{
+			{
+				Name:        "append",
+				Verb:        "build",
+				Description: "Appends text to input file and verifies whole repository view",
+				Outputs:     []string{"output.txt"},
+				Run: func(ctx context.Context, taskContext sdk.TaskContext) error {
+					rootData, readErr := os.ReadFile(filepath.Join(taskContext.RootDir, "root.txt"))
+					if readErr != nil {
+						return fmt.Errorf("reading root.txt from repository view: %w", readErr)
+					}
+					if string(rootData) != "root file content\n" {
+						return fmt.Errorf("unexpected root.txt content: %q", string(rootData))
+					}
+
+					data, readErr := os.ReadFile(filepath.Join(taskContext.Dir, "input.txt"))
+					if readErr != nil {
+						return fmt.Errorf("reading input.txt: %w", readErr)
+					}
+					if _, printErr := fmt.Fprintln(taskContext.Stdout, "processed input.txt"); printErr != nil {
+						return printErr
+					}
+					output := append(data, []byte("processed line\n")...)
+					return os.WriteFile(filepath.Join(taskContext.OutputDir, "output.txt"), output, 0644)
+				},
+			},
+		},
+	}
+
+	starter := setupTestPluginStarter(t, testPlugin)
+
+	declaration := config.PluginDeclaration{Image: "example.com/mock@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}
+	manifest := &plugins.PluginManifest{
+		Name:  "example",
+		Tasks: []plugins.TaskMetadata{{Name: "append", Verb: "build", Outputs: []string{"output.txt"}}},
+	}
+
+	task := &plugins.ContainerTask{
+		PluginName:        "example",
+		TaskMetadata:      manifest.Tasks[0],
+		Declaration:       declaration,
+		ImageRef:          declaration.Image,
+		Manifest:          manifest,
+		Dir:               docsDir,
+		RelativeDirectory: "docs",
+		RepoRoot:          repoRoot,
+		Starter:           starter,
+	}
+
+	if err := task.Run(t.Context(), scope); err != nil {
+		t.Fatalf("task.Run failed: %v", err)
+	}
+
+	outputFilePath := filepath.Join(docsDir, "output.txt")
+	gotContent, err := os.ReadFile(outputFilePath)
+	if err != nil {
+		t.Fatalf("reading output file: %v", err)
+	}
+	wantContent := "hello input\nprocessed line\n"
+	if string(gotContent) != wantContent {
+		t.Errorf("output file content = %q, want %q", string(gotContent), wantContent)
+	}
+
+	if !strings.Contains(stdoutBuffer.String(), "processed input.txt") {
+		t.Errorf("expected stdout to contain 'processed input.txt', got: %s", stdoutBuffer.String())
+	}
+}
+
+func TestRunTask_PathEscapesRejected(t *testing.T) {
+	repoRoot := t.TempDir()
+	docsDir := filepath.Join(repoRoot, "docs")
+	if err := os.MkdirAll(docsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	tree, err := sourcetree.Open(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	scope := tasks.NewTaskContext(repoRoot, docsDir, tree.Under(docsDir))
+	declaration := config.PluginDeclaration{Image: "example.com/mock@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}
+
+	t.Run("rejects output path with dot-dot escape", func(t *testing.T) {
+		starter := func(ctx context.Context, taskScope *tasks.TaskContext, imageRef string, allowNetwork bool, stderr io.Writer) (api.PluginServiceClient, io.Closer, error) {
+			serverReader, clientWriter := io.Pipe()
+			clientReader, serverWriter := io.Pipe()
+			serverListener := stdio.NewListener(serverReader, serverWriter)
+			clientConnection := stdio.NewConn(clientReader, clientWriter)
+
+			go func() {
+				grpcServer := grpc.NewServer()
+				api.RegisterPluginServiceServer(grpcServer, &escapingPluginServer{outputPath: "../evil.txt"})
+				_ = grpcServer.Serve(serverListener)
+			}()
+
+			client, closer, err := plugins.DialStdioConn(ctx, clientConnection)
+			if err != nil {
+				return nil, nil, err
+			}
+			return client, closerFunc(func() error {
+				return errors.Join(closer.Close(), serverListener.Close())
+			}), nil
+		}
+
+		manifest := &plugins.PluginManifest{
+			Name:  "mockplugin",
+			Tasks: []plugins.TaskMetadata{{Name: "build", Verb: "build", Outputs: []string{"../evil.txt"}}},
+		}
+		task := &plugins.ContainerTask{
+			PluginName:        "mockplugin",
+			TaskMetadata:      manifest.Tasks[0],
+			Declaration:       declaration,
+			ImageRef:          declaration.Image,
+			Manifest:          manifest,
+			Dir:               docsDir,
+			RelativeDirectory: "docs",
+			RepoRoot:          repoRoot,
+			Starter:           starter,
+		}
+
+		err := task.Run(t.Context(), scope)
+		if err == nil {
+			t.Fatal("expected task.Run to fail on dot-dot escape, got nil")
+		}
+		if !strings.Contains(err.Error(), "mockplugin") || !strings.Contains(err.Error(), "build") || !strings.Contains(err.Error(), docsDir) {
+			t.Errorf("expected error to name plugin, task and dir, got: %v", err)
+		}
+	})
+
+	t.Run("rejects output path under .git", func(t *testing.T) {
+		starter := func(ctx context.Context, taskScope *tasks.TaskContext, imageRef string, allowNetwork bool, stderr io.Writer) (api.PluginServiceClient, io.Closer, error) {
+			serverReader, clientWriter := io.Pipe()
+			clientReader, serverWriter := io.Pipe()
+			serverListener := stdio.NewListener(serverReader, serverWriter)
+			clientConnection := stdio.NewConn(clientReader, clientWriter)
+
+			go func() {
+				grpcServer := grpc.NewServer()
+				api.RegisterPluginServiceServer(grpcServer, &escapingPluginServer{outputPath: ".git/config"})
+				_ = grpcServer.Serve(serverListener)
+			}()
+
+			client, closer, err := plugins.DialStdioConn(ctx, clientConnection)
+			if err != nil {
+				return nil, nil, err
+			}
+			return client, closerFunc(func() error {
+				return errors.Join(closer.Close(), serverListener.Close())
+			}), nil
+		}
+
+		manifest := &plugins.PluginManifest{
+			Name:  "mockplugin",
+			Tasks: []plugins.TaskMetadata{{Name: "build", Verb: "build", Outputs: []string{".git/config"}}},
+		}
+		task := &plugins.ContainerTask{
+			PluginName:        "mockplugin",
+			TaskMetadata:      manifest.Tasks[0],
+			Declaration:       declaration,
+			ImageRef:          declaration.Image,
+			Manifest:          manifest,
+			Dir:               docsDir,
+			RelativeDirectory: "docs",
+			RepoRoot:          repoRoot,
+			Starter:           starter,
+		}
+
+		err := task.Run(t.Context(), scope)
+		if err == nil {
+			t.Fatal("expected task.Run to fail on .git path, got nil")
+		}
+		if !strings.Contains(err.Error(), "mockplugin") || !strings.Contains(err.Error(), "build") || !strings.Contains(err.Error(), docsDir) {
+			t.Errorf("expected error to name plugin, task and dir, got: %v", err)
+		}
+	})
+
+	t.Run("rejects writing through symlink in destination directory", func(t *testing.T) {
+		outsideDir := t.TempDir()
+		outsideTarget := filepath.Join(outsideDir, "target.txt")
+		if err := os.WriteFile(outsideTarget, []byte("secret"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		symlinkPath := filepath.Join(docsDir, "symlink_file.txt")
+		_ = os.Remove(symlinkPath)
+		if err := os.Symlink(outsideTarget, symlinkPath); err != nil {
+			t.Fatal(err)
+		}
+
+		testPlugin := sdk.Plugin{
+			Name: "mockplugin",
+			Tasks: []sdk.Task{
+				{
+					Name:        "build",
+					Verb:        "build",
+					Description: "Writes to symlink",
+					Outputs:     []string{"symlink_file.txt"},
+					Run: func(ctx context.Context, taskContext sdk.TaskContext) error {
+						return os.WriteFile(filepath.Join(taskContext.OutputDir, "symlink_file.txt"), []byte("tampered"), 0644)
+					},
+				},
+			},
+		}
+
+		starter := setupTestPluginStarter(t, testPlugin)
+		manifest := &plugins.PluginManifest{
+			Name:  "mockplugin",
+			Tasks: []plugins.TaskMetadata{{Name: "build", Verb: "build", Outputs: []string{"symlink_file.txt"}}},
+		}
+		task := &plugins.ContainerTask{
+			PluginName:        "mockplugin",
+			TaskMetadata:      manifest.Tasks[0],
+			Declaration:       declaration,
+			ImageRef:          declaration.Image,
+			Manifest:          manifest,
+			Dir:               docsDir,
+			RelativeDirectory: "docs",
+			RepoRoot:          repoRoot,
+			Starter:           starter,
+		}
+
+		err := task.Run(t.Context(), scope)
+		if err == nil {
+			t.Fatal("expected task.Run to fail writing through symlink, got nil")
+		}
+
+		outsideData, readErr := os.ReadFile(outsideTarget)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if string(outsideData) != "secret" {
+			t.Errorf("target file was modified through symlink: got %q, want 'secret'", string(outsideData))
+		}
+	})
+}
+
+type escapingPluginServer struct {
+	api.UnimplementedPluginServiceServer
+	outputPath string
+}
+
+func (server *escapingPluginServer) Describe(_ context.Context, _ *api.DescribeRequest) (*api.DescribeResponse, error) {
+	return &api.DescribeResponse{Name: "mock"}, nil
+}
+
+func (server *escapingPluginServer) RunTask(stream api.PluginService_RunTaskServer) error {
+	for {
+		_, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return err
+		}
+	}
+
+	_ = stream.Send(&api.RunTaskResponse{
+		Payload: &api.RunTaskResponse_OutputFile{
+			OutputFile: &api.FileChunk{
+				Path:        server.outputPath,
+				Mode:        0644,
+				Content:     []byte("escape content"),
+				IsLastChunk: true,
+			},
+		},
+	})
+
+	return stream.Send(&api.RunTaskResponse{
+		Payload: &api.RunTaskResponse_Result{
+			Result: &api.TaskResult{ExitCode: 0},
+		},
+	})
+}
+
+func TestRunTask_FailedTaskResult(t *testing.T) {
+	repoRoot := t.TempDir()
+	tree, err := sourcetree.Open(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	scope := tasks.NewTaskContext(repoRoot, repoRoot, tree)
+
+	testPlugin := sdk.Plugin{
+		Name: "failplugin",
+		Tasks: []sdk.Task{
+			{
+				Name: "failtask",
+				Verb: "test",
+				Run: func(ctx context.Context, taskContext sdk.TaskContext) error {
+					return errors.New("simulated task error")
+				},
+			},
+		},
+	}
+
+	starter := setupTestPluginStarter(t, testPlugin)
+
+	declaration := config.PluginDeclaration{Image: "example.com/mock@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}
+	manifest := &plugins.PluginManifest{
+		Name:  "failplugin",
+		Tasks: []plugins.TaskMetadata{{Name: "failtask", Verb: "test"}},
+	}
+
+	task := &plugins.ContainerTask{
+		PluginName:        "failplugin",
+		TaskMetadata:      manifest.Tasks[0],
+		Declaration:       declaration,
+		ImageRef:          declaration.Image,
+		Manifest:          manifest,
+		Dir:               repoRoot,
+		RelativeDirectory: ".",
+		RepoRoot:          repoRoot,
+		Starter:           starter,
+	}
+
+	err = task.Run(t.Context(), scope)
+	if err == nil {
+		t.Fatal("expected task.Run to fail, got nil")
+	}
+
+	errorString := err.Error()
+	if !strings.Contains(errorString, "failplugin") || !strings.Contains(errorString, "failtask") || !strings.Contains(errorString, repoRoot) {
+		t.Errorf("expected error to name plugin, task, and dir, got: %s", errorString)
+	}
+	if !strings.Contains(errorString, "simulated task error") {
+		t.Errorf("expected error to contain simulated error message, got: %s", errorString)
+	}
+}
+
+func TestRunTask_EarlyExitWithoutResult(t *testing.T) {
+	repoRoot := t.TempDir()
+	tree, err := sourcetree.Open(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	scope := tasks.NewTaskContext(repoRoot, repoRoot, tree)
+
+	starter := func(ctx context.Context, taskScope *tasks.TaskContext, imageRef string, allowNetwork bool, stderr io.Writer) (api.PluginServiceClient, io.Closer, error) {
+		serverReader, clientWriter := io.Pipe()
+		clientReader, serverWriter := io.Pipe()
+		serverListener := stdio.NewListener(serverReader, serverWriter)
+		clientConnection := stdio.NewConn(clientReader, clientWriter)
+
+		go func() {
+			grpcServer := grpc.NewServer()
+			api.RegisterPluginServiceServer(grpcServer, &earlyExitPluginServer{})
+			_ = grpcServer.Serve(serverListener)
+		}()
+
+		client, closer, err := plugins.DialStdioConn(ctx, clientConnection)
+		if err != nil {
+			return nil, nil, err
+		}
+		return client, closerFunc(func() error {
+			return errors.Join(closer.Close(), serverListener.Close())
+		}), nil
+	}
+
+	declaration := config.PluginDeclaration{Image: "example.com/mock@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}
+	manifest := &plugins.PluginManifest{
+		Name:  "crashplugin",
+		Tasks: []plugins.TaskMetadata{{Name: "crashtask", Verb: "test"}},
+	}
+
+	task := &plugins.ContainerTask{
+		PluginName:        "crashplugin",
+		TaskMetadata:      manifest.Tasks[0],
+		Declaration:       declaration,
+		ImageRef:          declaration.Image,
+		Manifest:          manifest,
+		Dir:               repoRoot,
+		RelativeDirectory: ".",
+		RepoRoot:          repoRoot,
+		Starter:           starter,
+	}
+
+	err = task.Run(t.Context(), scope)
+	if err == nil {
+		t.Fatal("expected task.Run to fail on early exit, got nil")
+	}
+	errorString := err.Error()
+	if !strings.Contains(errorString, "crashplugin") || !strings.Contains(errorString, "crashtask") || !strings.Contains(errorString, repoRoot) {
+		t.Errorf("expected error to name plugin, task, and dir, got: %s", errorString)
+	}
+	if !strings.Contains(errorString, "exited early without returning a result") {
+		t.Errorf("expected error to mention early exit, got: %s", errorString)
+	}
+}
+
+type earlyExitPluginServer struct {
+	api.UnimplementedPluginServiceServer
+}
+
+func (server *earlyExitPluginServer) Describe(_ context.Context, _ *api.DescribeRequest) (*api.DescribeResponse, error) {
+	return &api.DescribeResponse{Name: "crashplugin"}, nil
+}
+
+func (server *earlyExitPluginServer) RunTask(stream api.PluginService_RunTaskServer) error {
+	for {
+		_, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func TestVerifyMode_ReportsDifferenceWithoutTouchingCheckout(t *testing.T) {
+	repoRoot := t.TempDir()
+
+	initialContent := "// Code generated by example plugin. DO NOT EDIT.\nOriginal pristine content\n"
+	genFile := filepath.Join(repoRoot, "generated.go")
+	if err := os.WriteFile(genFile, []byte(initialContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tree, err := sourcetree.Open(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var stderrBuffer bytes.Buffer
+	scope := tasks.NewTaskContext(repoRoot, repoRoot, tree).WithVerify(true).WithOutput(io.Discard, &stderrBuffer)
+
+	testPlugin := sdk.Plugin{
+		Name: "genplugin",
+		Tasks: []sdk.Task{
+			{
+				Name:        "generate",
+				Verb:        "generate",
+				Description: "Generates output",
+				Outputs:     []string{"generated.go"},
+				Run: func(ctx context.Context, taskContext sdk.TaskContext) error {
+					diffContent := "// Code generated by example plugin. DO NOT EDIT.\nDifferent modified content\n"
+					return os.WriteFile(filepath.Join(taskContext.OutputDir, "generated.go"), []byte(diffContent), 0644)
+				},
+			},
+		},
+	}
+
+	starter := setupTestPluginStarter(t, testPlugin)
+
+	declaration := config.PluginDeclaration{Image: "example.com/mock@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}
+	manifest := &plugins.PluginManifest{
+		Name:  "genplugin",
+		Tasks: []plugins.TaskMetadata{{Name: "generate", Verb: "generate", Outputs: []string{"generated.go"}}},
+	}
+
+	task := &plugins.ContainerTask{
+		PluginName:        "genplugin",
+		TaskMetadata:      manifest.Tasks[0],
+		Declaration:       declaration,
+		ImageRef:          declaration.Image,
+		Manifest:          manifest,
+		Dir:               repoRoot,
+		RelativeDirectory: ".",
+		RepoRoot:          repoRoot,
+		Starter:           starter,
+	}
+
+	runErr := task.Run(t.Context(), scope)
+	if runErr == nil {
+		t.Fatal("expected task.Run to fail in verify mode when generated file differs, got nil")
+	}
+
+	if !strings.Contains(runErr.Error(), "outputs differ from checkout") {
+		t.Errorf("expected error to mention diff, got: %v", runErr)
+	}
+
+	gotData, readErr := os.ReadFile(genFile)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(gotData) != initialContent {
+		t.Errorf("checkout was touched after failed verify:\nGot:  %q\nWant: %q", string(gotData), initialContent)
+	}
+}
+
+func TestSymlinkRuleInRepositoryView(t *testing.T) {
+	repoRoot := t.TempDir()
+
+	realFile := filepath.Join(repoRoot, "real.txt")
+	if err := os.WriteFile(realFile, []byte("real content\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	validLink := filepath.Join(repoRoot, "link_to_real.txt")
+	if err := os.Symlink("real.txt", validLink); err != nil {
+		t.Fatal(err)
+	}
+
+	tree, err := sourcetree.Open(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	scope := tasks.NewTaskContext(repoRoot, repoRoot, tree)
+
+	var receivedFiles []string
+	testPlugin := sdk.Plugin{
+		Name: "linkplugin",
+		Tasks: []sdk.Task{
+			{
+				Name: "check-link",
+				Verb: "test",
+				Run: func(ctx context.Context, taskContext sdk.TaskContext) error {
+					data, readErr := os.ReadFile(filepath.Join(taskContext.Dir, "link_to_real.txt"))
+					if readErr != nil {
+						return readErr
+					}
+					if string(data) != "real content\n" {
+						return fmt.Errorf("unexpected content: %q", string(data))
+					}
+					receivedFiles = append(receivedFiles, "link_to_real.txt")
+					return nil
+				},
+			},
+		},
+	}
+
+	starter := setupTestPluginStarter(t, testPlugin)
+
+	declaration := config.PluginDeclaration{Image: "example.com/mock@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}
+	manifest := &plugins.PluginManifest{
+		Name:  "linkplugin",
+		Tasks: []plugins.TaskMetadata{{Name: "check-link", Verb: "test"}},
+	}
+
+	task := &plugins.ContainerTask{
+		PluginName:        "linkplugin",
+		TaskMetadata:      manifest.Tasks[0],
+		Declaration:       declaration,
+		ImageRef:          declaration.Image,
+		Manifest:          manifest,
+		Dir:               repoRoot,
+		RelativeDirectory: ".",
+		RepoRoot:          repoRoot,
+		Starter:           starter,
+	}
+
+	if err := task.Run(t.Context(), scope); err != nil {
+		t.Fatalf("task.Run failed: %v", err)
+	}
+	if len(receivedFiles) != 1 {
+		t.Fatalf("expected 1 received file through symlink, got %d", len(receivedFiles))
+	}
+}
+
+func TestNetworkAuthorization(t *testing.T) {
+	repoRoot := t.TempDir()
+	tree, err := sourcetree.Open(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	scope := tasks.NewTaskContext(repoRoot, repoRoot, tree)
+	declaration := config.PluginDeclaration{
+		Image:   "example.com/mock@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+		Network: false,
+	}
+	manifest := &plugins.PluginManifest{
+		Name:    "mockplugin",
+		Network: true,
+		Tasks:   []plugins.TaskMetadata{{Name: "fetch", Verb: "test"}},
+	}
+
+	task := &plugins.ContainerTask{
+		PluginName:   "mockplugin",
+		TaskMetadata: manifest.Tasks[0],
+		Declaration:  declaration,
+		ImageRef:     declaration.Image,
+		Manifest:     manifest,
+		Dir:          repoRoot,
+		RepoRoot:     repoRoot,
+	}
+
+	err = task.Run(t.Context(), scope)
+	if err == nil {
+		t.Fatal("expected error when network requested without consent in .ap/plugins.yaml")
+	}
+	if !strings.Contains(err.Error(), "requires network access, but network is not authorized") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func setupFakeDocker(t *testing.T) (string, string) {
+	t.Helper()
+	stateDir := t.TempDir()
+	fakeBinDir := t.TempDir()
 
 	script := fmt.Sprintf(`#!/bin/sh
 STATE_DIR=%q
 
 case "$1" in
-  create)
-    echo "fake-container-1234"
-    ;;
-  cp)
-    if [ "$2" = "-" ]; then
-      cat > "$STATE_DIR/received.tar"
-    elif [ -d "$STATE_DIR/mock-out" ]; then
-      DEST="$3"
-      mkdir -p "$DEST"
-      cp -R "$STATE_DIR/mock-out/." "$DEST/"
-    fi
-    ;;
-  start)
-    if [ -f "$STATE_DIR/fail-start" ]; then
-      echo "simulated start failure" >&2
-      exit 42
-    fi
-    ;;
   build)
     if [ -f "$STATE_DIR/fail-build" ]; then
       echo "simulated build failure" >&2
@@ -75,22 +713,6 @@ case "$1" in
       else
         echo "sha256:fake-built-image-1234"
       fi
-    fi
-    ;;
-  rm)
-    touch "$STATE_DIR/container-removed"
-    ;;
-  run)
-    if [ "$4" = "describe" ] || [ "$5" = "describe" ] || [ "$6" = "describe" ]; then
-      cat <<'EOF'
-{
-  "apiVersion": "ap.plugin/v1alpha1",
-  "name": "mockplugin",
-  "activation": ["mock.config"],
-  "network": false,
-  "tasks": [{"name": "build", "verb": "build", "outputs": ["dist"]}]
-}
-EOF
     fi
     ;;
 esac
@@ -140,294 +762,6 @@ done
 	return fakeBinDir, stateDir
 }
 
-func TestTarStream_WholeRepositoryAndIgnores(t *testing.T) {
-	repoRoot := t.TempDir()
-
-	files := map[string]string{
-		".git/config":      "[core]",
-		"root.txt":         "root content",
-		"vendor/dep.txt":   "vendor dependency",
-		"docs/mock.config": "",
-		"docs/guide.md":    "guide content",
-	}
-
-	for relPath, content := range files {
-		fullPath := filepath.Join(repoRoot, relPath)
-		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	tree, err := sourcetree.Open(repoRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	fakeBinDir, stateDir := setupFakeDocker(t)
-	fakeDockerPath := filepath.Join(fakeBinDir, "docker")
-
-	docsDir := filepath.Join(repoRoot, "docs")
-	scope := tasks.NewTaskContext(repoRoot, docsDir, tree.Under(docsDir)).WithTool("docker", fakeDockerPath)
-
-	declaration := config.PluginDeclaration{Image: "example.com/mock@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}
-	manifest := &plugins.PluginManifest{
-		Name:  "mockplugin",
-		Tasks: []plugins.TaskMetadata{{Name: "build", Verb: "build"}},
-	}
-
-	task := &plugins.ContainerTask{
-		PluginName:   "mockplugin",
-		TaskMetadata: manifest.Tasks[0],
-		Declaration:  declaration,
-		ImageRef:     declaration.Image,
-		Manifest:     manifest,
-		Dir:          docsDir,
-		RepoRoot:     repoRoot,
-	}
-
-	if err := task.Run(t.Context(), scope); err != nil {
-		t.Fatalf("task.Run failed: %v", err)
-	}
-
-	tarData, err := os.ReadFile(filepath.Join(stateDir, "received.tar"))
-	if err != nil {
-		t.Fatalf("reading received tar: %v", err)
-	}
-
-	tarReader := tar.NewReader(bytes.NewReader(tarData))
-	var entryNames []string
-	for {
-		header, readErr := tarReader.Next()
-		if readErr == io.EOF {
-			break
-		}
-		if readErr != nil {
-			t.Fatalf("reading tar header: %v", readErr)
-		}
-		entryNames = append(entryNames, header.Name)
-	}
-
-	if !slices.Contains(entryNames, "out/") {
-		t.Errorf("expected tar to contain out/, got: %v", entryNames)
-	}
-	if !slices.Contains(entryNames, "src/root.txt") {
-		t.Errorf("expected tar to contain whole repo file src/root.txt, got: %v", entryNames)
-	}
-	if !slices.Contains(entryNames, "src/docs/guide.md") {
-		t.Errorf("expected tar to contain src/docs/guide.md, got: %v", entryNames)
-	}
-	if slices.Contains(entryNames, "src/vendor/dep.txt") {
-		t.Errorf("expected vendor/dep.txt to be omitted from tar stream")
-	}
-	for _, entry := range entryNames {
-		if strings.HasPrefix(entry, "src/.git/") || entry == "src/.git" {
-			t.Errorf("expected .git to be omitted from tar stream, got entry: %s", entry)
-		}
-	}
-}
-
-func TestOutputPlacement_UntrustedRoot(t *testing.T) {
-	repoRoot := t.TempDir()
-	docsDir := filepath.Join(repoRoot, "docs")
-	if err := os.MkdirAll(docsDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	tree, err := sourcetree.Open(repoRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	fakeBinDir, stateDir := setupFakeDocker(t)
-	fakeDockerPath := filepath.Join(fakeBinDir, "docker")
-	scope := tasks.NewTaskContext(repoRoot, docsDir, tree.Under(docsDir)).WithTool("docker", fakeDockerPath)
-
-	declaration := config.PluginDeclaration{Image: "example.com/mock@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}
-
-	t.Run("places outputs under activated directory", func(t *testing.T) {
-		mockOut := filepath.Join(stateDir, "mock-out")
-		if err := os.MkdirAll(filepath.Join(mockOut, "dist"), 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(mockOut, "dist", "site.html"), []byte("site output"), 0644); err != nil {
-			t.Fatal(err)
-		}
-
-		manifest := &plugins.PluginManifest{
-			Name:  "mockplugin",
-			Tasks: []plugins.TaskMetadata{{Name: "build", Verb: "build", Outputs: []string{"dist"}}},
-		}
-		task := &plugins.ContainerTask{
-			PluginName:   "mockplugin",
-			TaskMetadata: manifest.Tasks[0],
-			Declaration:  declaration,
-			ImageRef:     declaration.Image,
-			Manifest:     manifest,
-			Dir:          docsDir,
-			RepoRoot:     repoRoot,
-		}
-
-		if err := task.Run(t.Context(), scope); err != nil {
-			t.Fatalf("task.Run failed: %v", err)
-		}
-
-		data, err := os.ReadFile(filepath.Join(docsDir, "dist", "site.html"))
-		if err != nil {
-			t.Fatalf("expected output file to exist: %v", err)
-		}
-		if string(data) != "site output" {
-			t.Errorf("got %q, want %q", string(data), "site output")
-		}
-	})
-
-	t.Run("rejects path escape or git tampering", func(t *testing.T) {
-		mockOut := filepath.Join(stateDir, "mock-out")
-		if err := os.MkdirAll(mockOut, 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(mockOut, "evil.txt"), []byte("evil"), 0644); err != nil {
-			t.Fatal(err)
-		}
-
-		manifest := &plugins.PluginManifest{
-			Name:  "mockplugin",
-			Tasks: []plugins.TaskMetadata{{Name: "build", Verb: "build", Outputs: []string{"../evil.txt"}}},
-		}
-		task := &plugins.ContainerTask{
-			PluginName:   "mockplugin",
-			TaskMetadata: manifest.Tasks[0],
-			Declaration:  declaration,
-			ImageRef:     declaration.Image,
-			Manifest:     manifest,
-			Dir:          docsDir,
-			RepoRoot:     repoRoot,
-		}
-
-		if err := task.Run(t.Context(), scope); err == nil {
-			t.Fatal("expected task.Run to fail on escaping output path, got nil")
-		}
-	})
-
-	t.Run("rejects symlink pointing outside staging", func(t *testing.T) {
-		outsideFile := filepath.Join(t.TempDir(), "leak.txt")
-		if err := os.WriteFile(outsideFile, []byte("secret"), 0644); err != nil {
-			t.Fatal(err)
-		}
-
-		mockOut := filepath.Join(stateDir, "mock-out")
-		_ = os.RemoveAll(mockOut)
-		if err := os.MkdirAll(filepath.Join(mockOut, "dist"), 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Symlink(outsideFile, filepath.Join(mockOut, "dist", "leak.txt")); err != nil {
-			t.Fatal(err)
-		}
-
-		manifest := &plugins.PluginManifest{
-			Name:  "mockplugin",
-			Tasks: []plugins.TaskMetadata{{Name: "build", Verb: "build", Outputs: []string{"dist"}}},
-		}
-		task := &plugins.ContainerTask{
-			PluginName:   "mockplugin",
-			TaskMetadata: manifest.Tasks[0],
-			Declaration:  declaration,
-			ImageRef:     declaration.Image,
-			Manifest:     manifest,
-			Dir:          docsDir,
-			RepoRoot:     repoRoot,
-		}
-
-		if err := task.Run(t.Context(), scope); err == nil {
-			t.Fatal("expected task.Run to fail on symlink in staging, got nil")
-		}
-
-		leakedPath := filepath.Join(docsDir, "dist", "leak.txt")
-		if _, err := os.Stat(leakedPath); !os.IsNotExist(err) {
-			t.Errorf("expected leaked file %s not to exist in checkout", leakedPath)
-		}
-	})
-}
-
-func TestNetworkAuthorization(t *testing.T) {
-	repoRoot := t.TempDir()
-	tree, err := sourcetree.Open(repoRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	scope := tasks.NewTaskContext(repoRoot, repoRoot, tree)
-	declaration := config.PluginDeclaration{
-		Image:   "example.com/mock@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-		Network: false,
-	}
-	manifest := &plugins.PluginManifest{
-		Name:    "mockplugin",
-		Network: true,
-		Tasks:   []plugins.TaskMetadata{{Name: "fetch", Verb: "test"}},
-	}
-
-	task := &plugins.ContainerTask{
-		PluginName:   "mockplugin",
-		TaskMetadata: manifest.Tasks[0],
-		Declaration:  declaration,
-		ImageRef:     declaration.Image,
-		Manifest:     manifest,
-		Dir:          repoRoot,
-		RepoRoot:     repoRoot,
-	}
-
-	err = task.Run(t.Context(), scope)
-	if err == nil {
-		t.Fatal("expected error when network requested without consent in .ap/plugins.yaml")
-	}
-	if !strings.Contains(err.Error(), "requires network access, but network is not authorized") {
-		t.Errorf("unexpected error message: %v", err)
-	}
-}
-
-func TestContainerRemovalOnFailure(t *testing.T) {
-	repoRoot := t.TempDir()
-	tree, err := sourcetree.Open(repoRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	fakeBinDir, stateDir := setupFakeDocker(t)
-	fakeDockerPath := filepath.Join(fakeBinDir, "docker")
-	if err := os.WriteFile(filepath.Join(stateDir, "fail-start"), []byte("fail"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	scope := tasks.NewTaskContext(repoRoot, repoRoot, tree).WithTool("docker", fakeDockerPath)
-	declaration := config.PluginDeclaration{Image: "example.com/mock@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}
-	manifest := &plugins.PluginManifest{
-		Name:  "mockplugin",
-		Tasks: []plugins.TaskMetadata{{Name: "build", Verb: "build"}},
-	}
-
-	task := &plugins.ContainerTask{
-		PluginName:   "mockplugin",
-		TaskMetadata: manifest.Tasks[0],
-		Declaration:  declaration,
-		ImageRef:     declaration.Image,
-		Manifest:     manifest,
-		Dir:          repoRoot,
-		RepoRoot:     repoRoot,
-	}
-
-	err = task.Run(t.Context(), scope)
-	if err == nil {
-		t.Fatal("expected task.Run to fail, got nil")
-	}
-
-	if _, statErr := os.Stat(filepath.Join(stateDir, "container-removed")); statErr != nil {
-		t.Errorf("expected container to be removed on failure, stat error: %v", statErr)
-	}
-}
-
 func TestDockerfilePlugin(t *testing.T) {
 	repoRoot := t.TempDir()
 	cacheDirectory := t.TempDir()
@@ -455,8 +789,18 @@ plugins:
 	fakeBuildxPath := filepath.Join(fakeBinDir, "docker-buildx")
 	scope := tasks.NewTaskContext(repoRoot, repoRoot, tree).WithTool("docker", fakeDockerPath).WithTool("docker-buildx", fakeBuildxPath)
 
+	mockPlugin := sdk.Plugin{
+		Name:       "mockplugin",
+		Activation: []string{"mock.config"},
+		Network:    false,
+		Tasks: []sdk.Task{
+			{Name: "build", Verb: "build", Outputs: []string{"dist"}},
+		},
+	}
+	starter := setupTestPluginStarter(t, mockPlugin)
+
 	t.Run("build invoked with expected arguments and image ID becomes cache key", func(t *testing.T) {
-		loadedPlugins, err := plugins.LoadContainerPlugins(t.Context(), scope, cacheDirectory, "")
+		loadedPlugins, err := plugins.LoadContainerPlugins(t.Context(), scope, cacheDirectory, "", starter)
 		if err != nil {
 			t.Fatalf("LoadContainerPlugins failed: %v", err)
 		}
@@ -504,7 +848,7 @@ plugins:
 
 	t.Run("with buildkit host set build goes to buildctl and result is loaded", func(t *testing.T) {
 		buildkitCacheDirectory := t.TempDir()
-		loadedPlugins, err := plugins.LoadContainerPlugins(t.Context(), scope, buildkitCacheDirectory, "tcp://127.0.0.1:2375")
+		loadedPlugins, err := plugins.LoadContainerPlugins(t.Context(), scope, buildkitCacheDirectory, "tcp://127.0.0.1:2375", starter)
 		if err != nil {
 			t.Fatalf("LoadContainerPlugins failed: %v", err)
 		}
@@ -555,7 +899,7 @@ plugins:
 			t.Fatal(err)
 		}
 		emptyCacheDirectory := t.TempDir()
-		_, err := plugins.LoadContainerPlugins(t.Context(), scope, emptyCacheDirectory, "")
+		_, err := plugins.LoadContainerPlugins(t.Context(), scope, emptyCacheDirectory, "", starter)
 		if err == nil {
 			t.Fatal("expected LoadContainerPlugins to fail when build fails")
 		}
@@ -581,15 +925,15 @@ func TestContainerTask_GetName(t *testing.T) {
 		{relativeDirectory: "blog", want: "astro-build blog"},
 	}
 	names := make(map[string]bool)
-	for _, tc := range tests {
+	for _, testCase := range tests {
 		task := &plugins.ContainerTask{
 			PluginName:        "astro",
 			TaskMetadata:      plugins.TaskMetadata{Name: "build"},
-			RelativeDirectory: tc.relativeDirectory,
+			RelativeDirectory: testCase.relativeDirectory,
 		}
 		got := task.GetName()
-		if got != tc.want {
-			t.Errorf("task.GetName() for relative directory %q = %q, want %q", tc.relativeDirectory, got, tc.want)
+		if got != testCase.want {
+			t.Errorf("task.GetName() for relative directory %q = %q, want %q", testCase.relativeDirectory, got, testCase.want)
 		}
 		names[got] = true
 	}
@@ -617,21 +961,34 @@ func runVerifyTask(t *testing.T, outputs []string, repositoryFiles, mockFiles ma
 		t.Fatal(err)
 	}
 
-	fakeBinDir, stateDir := setupFakeDocker(t)
-	mockOut := filepath.Join(stateDir, "mock-out")
-	for relativePath, content := range mockFiles {
-		fullPath := filepath.Join(mockOut, relativePath)
-		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
-			t.Fatal(err)
-		}
+	testPlugin := sdk.Plugin{
+		Name: "mockplugin",
+		Tasks: []sdk.Task{
+			{
+				Name:        "generate",
+				Verb:        "generate",
+				Description: "Generate task",
+				Outputs:     outputs,
+				Run: func(ctx context.Context, taskContext sdk.TaskContext) error {
+					for relativePath, content := range mockFiles {
+						outputPath := filepath.Join(taskContext.OutputDir, relativePath)
+						if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
+							return err
+						}
+						if err := os.WriteFile(outputPath, []byte(content), 0644); err != nil {
+							return err
+						}
+					}
+					return nil
+				},
+			},
+		},
 	}
+
+	starter := setupTestPluginStarter(t, testPlugin)
 
 	var stderr bytes.Buffer
 	scope := tasks.NewTaskContext(repoRoot, docsDir, tree.Under(docsDir)).
-		WithTool("docker", filepath.Join(fakeBinDir, "docker")).
 		WithOutput(io.Discard, &stderr).
 		WithVerify(true)
 	declaration := config.PluginDeclaration{Image: "example.com/mock@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}
@@ -640,12 +997,15 @@ func runVerifyTask(t *testing.T, outputs []string, repositoryFiles, mockFiles ma
 		Tasks: []plugins.TaskMetadata{{Name: "generate", Verb: "generate", Outputs: outputs}},
 	}
 	task := &plugins.ContainerTask{
-		PluginName:   "mockplugin",
-		TaskMetadata: manifest.Tasks[0],
-		Declaration:  declaration,
-		Manifest:     manifest,
-		Dir:          docsDir,
-		RepoRoot:     repoRoot,
+		PluginName:        "mockplugin",
+		TaskMetadata:      manifest.Tasks[0],
+		Declaration:       declaration,
+		ImageRef:          declaration.Image,
+		Manifest:          manifest,
+		Dir:               docsDir,
+		RelativeDirectory: "docs",
+		RepoRoot:          repoRoot,
+		Starter:           starter,
 	}
 
 	err = task.Run(t.Context(), scope)
@@ -705,56 +1065,6 @@ func TestContainerVerifyMode(t *testing.T) {
 			map[string]string{"gen.txt": "staged content\n"})
 		if err != nil {
 			t.Fatalf("expected co-located mode to ignore unrelated file and pass, got: %v", err)
-		}
-	})
-
-	t.Run("symlink in staging is rejected in verify mode", func(t *testing.T) {
-		repoRoot := t.TempDir()
-		docsDir := filepath.Join(repoRoot, "docs")
-		tree, err := sourcetree.Open(repoRoot)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		fakeBinDir, stateDir := setupFakeDocker(t)
-		mockOut := filepath.Join(stateDir, "mock-out")
-		if err := os.MkdirAll(filepath.Join(mockOut, "dist"), 0755); err != nil {
-			t.Fatal(err)
-		}
-		targetFile := filepath.Join(mockOut, "dist", "real.txt")
-		if err := os.WriteFile(targetFile, []byte("content"), 0644); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Symlink(targetFile, filepath.Join(mockOut, "dist", "symlink.txt")); err != nil {
-			t.Fatal(err)
-		}
-
-		var stderr bytes.Buffer
-		scope := tasks.NewTaskContext(repoRoot, docsDir, tree.Under(docsDir)).
-			WithTool("docker", filepath.Join(fakeBinDir, "docker")).
-			WithOutput(io.Discard, &stderr).
-			WithVerify(true)
-
-		declaration := config.PluginDeclaration{Image: "example.com/mock@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}
-		manifest := &plugins.PluginManifest{
-			Name:  "mockplugin",
-			Tasks: []plugins.TaskMetadata{{Name: "generate", Verb: "generate", Outputs: []string{"dist"}}},
-		}
-		task := &plugins.ContainerTask{
-			PluginName:   "mockplugin",
-			TaskMetadata: manifest.Tasks[0],
-			Declaration:  declaration,
-			Manifest:     manifest,
-			Dir:          docsDir,
-			RepoRoot:     repoRoot,
-		}
-
-		err = task.Run(t.Context(), scope)
-		if err == nil {
-			t.Fatal("expected symlink in staging to fail, got nil")
-		}
-		if !strings.Contains(err.Error(), "is a symlink") {
-			t.Errorf("expected error mentioning symlink, got: %v", err)
 		}
 	})
 }

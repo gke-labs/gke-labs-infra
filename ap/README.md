@@ -325,6 +325,8 @@ that fails if any generated file lacks a standard generated code header.
 
 Configures plugins for extensible build tooling.
 
+Plugins communicate with `ap` using gRPC over container stdio (`ap.plugin/v1alpha1`). When a plugin container starts, `ap` discovers capabilities via the `Describe` RPC, streams repository view files as `FileChunk` messages over the bi-directional `RunTask` stream, receives streamed task logs and output chunks, and safely writes outputs via `fileutils.UntrustedRoot`.
+
 Example `.ap/plugins.yaml`:
 ```yaml
 plugins:
