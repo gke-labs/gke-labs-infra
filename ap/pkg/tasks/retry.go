@@ -189,13 +189,40 @@ func newBufferLogger(writer io.Writer, parent logr.Logger) logr.Logger {
 	})
 }
 
-func sanitizeLogTaskName(name string) string {
-	return strings.Map(func(r rune) rune {
+func sanitizePathComponent(name string) string {
+	sanitized := strings.Map(func(r rune) rune {
 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '-' || r == '_' {
 			return r
 		}
 		return '_'
 	}, name)
+	if sanitized == ".." || sanitized == "" {
+		return "_"
+	}
+	return sanitized
+}
+
+func deriveTaskLogPath(scope *TaskContext, task Task) string {
+	components := []string{scope.artifactsDir, "tasks"}
+	for _, parent := range scope.parents {
+		components = append(components, sanitizePathComponent(parent))
+	}
+	dir := filepath.Join(components...)
+	baseName := sanitizePathComponent(task.GetName())
+
+	scope.runState.mutex.Lock()
+	defer scope.runState.mutex.Unlock()
+
+	for i := 1; ; i++ {
+		candidate := filepath.Join(dir, baseName+".log")
+		if i > 1 {
+			candidate = filepath.Join(dir, fmt.Sprintf("%s-%d.log", baseName, i))
+		}
+		if !scope.runState.usedPaths[candidate] {
+			scope.runState.usedPaths[candidate] = true
+			return candidate
+		}
+	}
 }
 
 func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
@@ -232,13 +259,12 @@ func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
 	}
 
 	if artifactsDir := scope.ArtifactsDir(); artifactsDir != "" {
-		tasksDir := filepath.Join(artifactsDir, "tasks")
-		if mkdirErr := os.MkdirAll(tasksDir, 0755); mkdirErr != nil {
-			scope.Log().Info("failed to create artifacts tasks directory", "level", "warning", "dir", tasksDir, "error", mkdirErr)
+		logFile := deriveTaskLogPath(scope, task)
+		if mkdirErr := os.MkdirAll(filepath.Dir(logFile), 0755); mkdirErr != nil {
+			scope.Log().Info("failed to create artifacts tasks directory", "level", "warning", "dir", filepath.Dir(logFile), "error", mkdirErr)
 		} else {
-			safeName := sanitizeLogTaskName(task.GetName())
-			logFile := filepath.Join(tasksDir, safeName+".log")
-			if writeErr := os.WriteFile(logFile, output, 0644); writeErr != nil {
+			content := append([]byte(task.GetName()+"\n"), output...)
+			if writeErr := os.WriteFile(logFile, content, 0644); writeErr != nil {
 				scope.Log().Info("failed to write task artifact log", "level", "warning", "file", logFile, "error", writeErr)
 			}
 		}

@@ -874,7 +874,7 @@ func TestTaskOutputArtifacts(t *testing.T) {
 
 	_ = grp.Run(t.Context(), scope)
 
-	tasksDir := filepath.Join(artifactsDir, "tasks")
+	tasksDir := filepath.Join(artifactsDir, "tasks", "artifact-test-group")
 	passLogPath := filepath.Join(tasksDir, "task-pass-leaf.log")
 	passContent, err := os.ReadFile(passLogPath)
 	if err != nil {
@@ -933,6 +933,94 @@ func TestTaskOutputArtifacts_Unset(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(t.TempDir(), "tasks")); !os.IsNotExist(err) {
 		t.Errorf("expected tasks directory not to exist when ARTIFACTS is empty")
+	}
+}
+
+func TestTaskOutputArtifacts_UniquePathsAndHumanName(t *testing.T) {
+	artifactsDir := t.TempDir()
+	repoRoot := t.TempDir()
+
+	tree, err := sourcetree.Open(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var outBuf syncBuffer
+	scope := NewTaskContext(repoRoot, repoRoot, tree).WithOutput(&outBuf, &outBuf).WithArtifactsDir(artifactsDir)
+
+	parentA := &Group{
+		Name: "parent-a",
+		Tasks: []Task{&FuncTask{
+			Name: "go-vet",
+			RunFn: func(ctx context.Context, s *TaskContext) error {
+				fmt.Fprintln(s.Stdout(), "output a")
+				return nil
+			},
+		}},
+	}
+	parentB := &Group{
+		Name: "parent-b",
+		Tasks: []Task{&FuncTask{
+			Name: "go-vet",
+			RunFn: func(ctx context.Context, s *TaskContext) error {
+				fmt.Fprintln(s.Stdout(), "output b")
+				return nil
+			},
+		}},
+	}
+
+	sibling1 := &FuncTask{
+		Name: "build-step",
+		RunFn: func(ctx context.Context, s *TaskContext) error {
+			fmt.Fprintln(s.Stdout(), "step 1")
+			return nil
+		},
+	}
+	sibling2 := &FuncTask{
+		Name: "build-step",
+		RunFn: func(ctx context.Context, s *TaskContext) error {
+			fmt.Fprintln(s.Stdout(), "step 2")
+			return nil
+		},
+	}
+	parentSiblings := &Group{
+		Name:  "pkg",
+		Tasks: []Task{sibling1, sibling2},
+	}
+
+	grp := &Group{
+		Tasks: []Task{parentA, parentB, parentSiblings},
+	}
+
+	if err := grp.Run(t.Context(), scope); err != nil {
+		t.Fatalf("grp.Run failed: %v", err)
+	}
+
+	// Two tasks with the same leaf name under two different parents produce two files.
+	aPath := filepath.Join(artifactsDir, "tasks", "parent-a", "go-vet.log")
+	bPath := filepath.Join(artifactsDir, "tasks", "parent-b", "go-vet.log")
+
+	aContent, err := os.ReadFile(aPath)
+	if err != nil {
+		t.Fatalf("expected parent-a log file %s: %v", aPath, err)
+	}
+	// The file starts with the human name.
+	if !strings.HasPrefix(string(aContent), "go-vet\n") {
+		t.Errorf("expected log to start with human name 'go-vet\n', got: %q", string(aContent))
+	}
+	if _, err := os.ReadFile(bPath); err != nil {
+		t.Fatalf("expected parent-b log file %s: %v", bPath, err)
+	}
+
+	// Two siblings with the same name produce two files.
+	step1Path := filepath.Join(artifactsDir, "tasks", "pkg", "build-step.log")
+	step2Path := filepath.Join(artifactsDir, "tasks", "pkg", "build-step-2.log")
+
+	if _, err := os.ReadFile(step1Path); err != nil {
+		t.Fatalf("expected step1 log file %s: %v", step1Path, err)
+	}
+	if _, err := os.ReadFile(step2Path); err != nil {
+		t.Fatalf("expected step2 log file %s: %v", step2Path, err)
 	}
 }
 

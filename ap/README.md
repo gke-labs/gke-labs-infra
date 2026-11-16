@@ -41,7 +41,7 @@ The generated workflow defines a concurrency group so that a new push to a pull 
 
 ### Presubmit Artifacts
 
-Presubmit scripts may write anything to `$ARTIFACTS` (set to `/tmp/artifacts` in generated GitHub Actions jobs), and it is uploaded as `artifacts-<job>` upon job completion (even on failure). If no files are written, the upload step completes without producing warnings or errors. When `$ARTIFACTS` is set, `ap` also writes each leaf task's buffered output to `$ARTIFACTS/tasks/<task-name>.log`.
+Presubmit scripts may write anything to `$ARTIFACTS` (set to `/tmp/artifacts` in generated GitHub Actions jobs), and it is uploaded as `artifacts-<job>` upon job completion (even on failure). If no files are written, the upload step completes without producing warnings or errors. When `$ARTIFACTS` is set, `ap` also writes each leaf task's buffered output under `$ARTIFACTS/tasks/` (with subdirectories reflecting the task tree, e.g. `$ARTIFACTS/tasks/lint-repo/go-lints/go-lint-autodeploy/go-vet.log`, and numeric suffixes on name collisions); task names are free-form human-readable strings, and the first line of each log file is the task's human-readable name.
 
 ### Output Atomicity and Verification
 
@@ -328,7 +328,7 @@ Every leaf task runs with buffered stdout/stderr. At default verbosity, `ap` pri
 
 The `ap e2e` command prints leaf task output at default verbosity, ensuring test results (such as `--- PASS` lines) remain visible in job logs.
 
-When `ARTIFACTS` is set (for example, in CI workflows where it points to `/tmp/artifacts`), every leaf task writes its buffered output to `$ARTIFACTS/tasks/<task-name>.log` regardless of whether the task passed or failed. This preserves complete task execution logs for post-run analysis and artifact downloads.
+When `ARTIFACTS` is set (for example, in CI workflows where it points to `/tmp/artifacts`), every leaf task writes its buffered output under `$ARTIFACTS/tasks/` (with subdirectories reflecting the task tree, e.g. `$ARTIFACTS/tasks/lint-repo/go-lints/go-lint-autodeploy/go-vet.log`, and numeric suffixes resolving collisions) regardless of whether the task passed or failed. Task names are free-form human-readable strings, and the first line of each log file records the task's human name. This preserves complete task execution logs for post-run analysis and artifact downloads.
 
 ### Task Logging
 

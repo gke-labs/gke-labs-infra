@@ -16,6 +16,7 @@ package cmd
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -110,7 +111,7 @@ func TestRunE2e_Artifacts(t *testing.T) {
 		t.Fatalf("RunE2e failed: %v", err)
 	}
 
-	logFile := filepath.Join(artifactsDir, "tasks", "test-e2e.log")
+	logFile := filepath.Join(artifactsDir, "tasks", fmt.Sprintf("e2e-%s", filepath.Base(tempDir)), "test-e2e.log")
 	logContent, err := os.ReadFile(logFile)
 	if err != nil {
 		t.Fatalf("failed to read artifact log %s: %v", logFile, err)
