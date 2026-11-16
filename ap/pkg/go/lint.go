@@ -89,6 +89,32 @@ func (t *GovulncheckTask) GetChildren() []tasks.Task {
 	return nil
 }
 
+// GoTidyTask represents a task to verify go.mod and go.sum are tidy using go mod tidy -diff.
+type GoTidyTask struct {
+	Dir string
+}
+
+func (t *GoTidyTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
+	scope.Log().V(1).Info("running go mod tidy -diff", "dir", t.Dir)
+	cmd := exec.CommandContext(ctx, "go", "mod", "tidy", "-diff")
+	cmd.Dir = t.Dir
+	cmd.Env = append(os.Environ(), "GOWORK=off")
+	cmd.Stdout = scope.Stdout()
+	cmd.Stderr = scope.Stderr()
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("go.mod/go.sum in %s are not tidy; run \"ap format\"", t.Dir)
+	}
+	return nil
+}
+
+func (t *GoTidyTask) GetName() string {
+	return "go-mod-tidy"
+}
+
+func (t *GoTidyTask) GetChildren() []tasks.Task {
+	return nil
+}
+
 // AnalyzersTask represents a task to run enabled code style analyzers in-process.
 type AnalyzersTask struct {
 	Dir           string
@@ -422,6 +448,9 @@ func LintTasks(r *sourcetree.SourceTree, root string) (tasks.Task, error) {
 		}
 		if cfg.IsGovulncheckEnabled() {
 			modGroup.Tasks = append(modGroup.Tasks, &GovulncheckTask{Dir: dir})
+		}
+		if cfg.IsTidyEnabled() {
+			modGroup.Tasks = append(modGroup.Tasks, &GoTidyTask{Dir: dir})
 		}
 
 		analyzersTask := &AnalyzersTask{

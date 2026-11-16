@@ -15,6 +15,7 @@
 package golang
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -1257,5 +1258,74 @@ govulncheck:
 	}
 	if hasGovulncheck(subGroup) {
 		t.Errorf("expected sub module to have govulncheck disabled via subtree override")
+	}
+}
+
+func TestGoTidyTask_UntidyFailsWithDiff(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte("module example.com/test\n\ngo 1.27\n\nrequire example.com/unused v1.0.0\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	task := &GoTidyTask{Dir: tmpDir}
+	r, err := sourcetree.Open(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	scope := tasks.NewTaskContext(tmpDir, tmpDir, r).WithOutput(&buf, &buf)
+
+	err = task.Run(t.Context(), scope)
+	if err == nil {
+		t.Fatalf("expected GoTidyTask to fail on untidy module")
+	}
+	wantMsg := fmt.Sprintf(`go.mod/go.sum in %s are not tidy; run "ap format"`, tmpDir)
+	if !strings.Contains(err.Error(), wantMsg) {
+		t.Errorf("expected error %q, got: %v", wantMsg, err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "diff current/go.mod tidy/go.mod") {
+		t.Errorf("expected output to contain tidy diff header, got:\n%s", output)
+	}
+	if !strings.Contains(output, "-require example.com/unused v1.0.0") {
+		t.Errorf("expected output to contain diff removing unused requirement, got:\n%s", output)
+	}
+}
+
+func TestLintTasks_TidyDisabled(t *testing.T) {
+	dir := t.TempDir()
+	apDir := filepath.Join(dir, ".ap")
+	if err := os.MkdirAll(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte("tidy:\n  enabled: false\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module testmod\n\ngo 1.27\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := sourcetree.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tasksGroup, err := LintTasks(r, dir)
+	if err != nil {
+		t.Fatalf("LintTasks failed: %v", err)
+	}
+	modGroup := tasksGroup.(*tasks.Group).Tasks[0].(*tasks.Group)
+	for _, subTask := range modGroup.Tasks {
+		if _, ok := subTask.(*GoTidyTask); ok {
+			t.Errorf("expected GoTidyTask to be omitted when tidy.enabled: false")
+		}
 	}
 }

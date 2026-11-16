@@ -159,7 +159,7 @@ lint:
   3. The `toolchain` setting in `.ap/go.yaml` if configured.
   4. The newest stable release in `ap/pkg/tool/go/versions.yaml`.
 - `skip`: An optional list of glob patterns to ignore during repository scanning and linting (e.g. `vendor/**`).
-- `tidy.enabled`: Boolean flag (default: `true`). When enabled, `ap generate` and `ap format` run `go mod tidy` alongside `gofmt` for each Go module in scope.
+- `tidy.enabled`: Boolean flag (default: `true`). When enabled, `ap generate` and `ap format` run `go mod tidy` alongside `gofmt` for each Go module in scope, and `ap lint` verifies that modules are tidy using `go mod tidy -diff`.
 - `lint.goos`: An optional list of target `GOOS` platforms to check (e.g. `[linux, darwin]`), which overrides automatic detection; omit it for auto (automatically detects non-host GOOS targets referenced by in-scope Go files via filename suffixes and `//go:build` constraints).
 - `lint.skipGenerated`: Cross-cutting boolean flag. When `false` (the default), generated code is linted unless a linter specifies its own default or per-linter override.
 - `lint.skipTests`: Cross-cutting boolean flag. When `false` (the default), test code (`*_test.go`) is linted unless a linter specifies its own default or per-linter override.
@@ -341,7 +341,7 @@ Commands:
 - `ls`: List discovered tasks under the selected subtree
 - `test`: Run tests
 - `e2e`: Run e2e tests
-- `lint`: Run linting tasks: go vet, govulncheck, and the ap analyzers (`unused` [error], `testcontext` [warn], `replaceEmptyInterfaceWithAny` [warn], `testonlyimports` [error], `droppederrors` [error], `closewriter` [error], `deferinloop` [error])
+- `lint`: Run linting tasks: go vet, govulncheck, go mod tidy -diff, and the ap analyzers (`unused` [error], `testcontext` [warn], `replaceEmptyInterfaceWithAny` [warn], `testonlyimports` [error], `droppederrors` [error], `closewriter` [error], `deferinloop` [error])
 - `build`: Build artifacts. Positional targets can be subtree directories (building all images and build tasks beneath them) or specific image directories (`<parent>/images/<name>` containing a `Dockerfile`, building exactly that image with the repository root as the build context). Multiple targets build the union of specified images and subtrees.
 - `deploy`: Deploy artifacts
 - `generate`: Run generation tasks (runs legacy `dev/tasks/generate-*` scripts, `go generate ./...` in modules that contain `//go:generate` directives, and built-in presubmit/workflow generators; supports `--verify` to prove generators restore perturbed outputs, `--audit-generated` to find generated files lacking headers, and `--strict`)
