@@ -344,6 +344,20 @@ plugins:
 
 Plugins declare their activation patterns as repository-relative paths (e.g. `**/astro.config.*`, `docs/astro.config.*`; a bare name matches only at the top level).
 
+#### Astro Plugin
+
+The Astro plugin builds static documentation sites (including Astro with Starlight) in an isolated container without requiring Node.js on the host. It activates automatically in each directory containing an Astro config matching `**/astro.config.*` and runs during `ap build`, outputting the built site to `dist/` under that directory.
+
+Example `.ap/plugins.yaml`:
+```yaml
+plugins:
+  astro:
+    dockerfile: ap/images/ap-astro/Dockerfile
+    network: false
+```
+
+**Supplying and Pinning Dependencies**: The builder image defines its Node.js environment and pins npm dependencies using `package.json` and `package-lock.json` alongside `ap/images/ap-astro/Dockerfile`. When built via `dockerfile:`, `ap` runs `npm ci` during image build using the repository root as context, ensuring that dependencies are hermetically locked to the repository commit. To supply custom integrations or pin updated dependency versions, modify the `package.json` and `package-lock.json` files alongside the Dockerfile. The container executes with `--network none`, ensuring that builds are strictly offline and hermetic.
+
 ## Usage
 
 Run `go run ap/main.go` or build the binary.
