@@ -190,16 +190,16 @@ func newBufferLogger(writer io.Writer, parent logr.Logger) logr.Logger {
 }
 
 func sanitizePathComponent(name string) string {
-	s := strings.Map(func(r rune) rune {
+	sanitized := strings.Map(func(r rune) rune {
 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '-' || r == '_' {
 			return r
 		}
 		return '_'
 	}, name)
-	if s == ".." || s == "" {
+	if sanitized == ".." || sanitized == "" {
 		return "_"
 	}
-	return s
+	return sanitized
 }
 
 func deriveTaskLogPath(scope *TaskContext, task Task) string {
