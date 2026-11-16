@@ -19,6 +19,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/format"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/generate"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/plugins"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
 )
@@ -110,6 +111,7 @@ func RunGenerate(ctx context.Context, opt GenerateOptions) error {
 	}
 
 	if opt.Verify {
+		ctx = plugins.WithVerify(ctx, true)
 		return generate.RunVerify(ctx, opt.RepoRoot, scopes, allTasks, opt.DryRun)
 	}
 

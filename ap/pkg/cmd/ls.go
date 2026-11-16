@@ -104,28 +104,33 @@ func RunLs(ctx context.Context, opt LsOptions) error {
 		if err == nil && buildTasks != nil {
 			all = append(all, buildTasks)
 		}
-		if len(scope.BuildTasks) > 0 {
-			all = append(all, &tasks.Group{Name: "build-scripts", Tasks: scope.BuildTasks})
+		nonContainerBuild := filterNonContainerTasks(scope.BuildTasks)
+		if len(nonContainerBuild) > 0 {
+			all = append(all, &tasks.Group{Name: "build-scripts", Tasks: nonContainerBuild})
 		}
 
 		// Test tasks
-		if len(scope.TestTasks) > 0 {
-			all = append(all, &tasks.Group{Name: "test-tasks", Tasks: scope.TestTasks})
+		nonContainerTest := filterNonContainerTasks(scope.TestTasks)
+		if len(nonContainerTest) > 0 {
+			all = append(all, &tasks.Group{Name: "test-tasks", Tasks: nonContainerTest})
 		}
 
 		// E2E tasks
-		if len(scope.E2ETasks) > 0 {
-			all = append(all, &tasks.Group{Name: "e2e-tasks", Tasks: scope.E2ETasks})
+		nonContainerE2E := filterNonContainerTasks(scope.E2ETasks)
+		if len(nonContainerE2E) > 0 {
+			all = append(all, &tasks.Group{Name: "e2e-tasks", Tasks: nonContainerE2E})
 		}
 
 		// Lint tasks
-		if len(scope.LintTasks) > 0 {
-			all = append(all, &tasks.Group{Name: "lint-tasks", Tasks: scope.LintTasks})
+		nonContainerLint := filterNonContainerTasks(scope.LintTasks)
+		if len(nonContainerLint) > 0 {
+			all = append(all, &tasks.Group{Name: "lint-tasks", Tasks: nonContainerLint})
 		}
 
 		// Format tasks
-		if len(scope.FormatTasks) > 0 {
-			all = append(all, &tasks.Group{Name: "format-tasks", Tasks: scope.FormatTasks})
+		nonContainerFormat := filterNonContainerTasks(scope.FormatTasks)
+		if len(nonContainerFormat) > 0 {
+			all = append(all, &tasks.Group{Name: "format-tasks", Tasks: nonContainerFormat})
 		}
 
 		if pluginTasks := activatedPluginTasks[dir]; len(pluginTasks) > 0 {
@@ -164,4 +169,14 @@ func printTask(t tasks.Task, indent int) {
 	for _, child := range t.GetChildren() {
 		printTask(child, indent+1)
 	}
+}
+
+func filterNonContainerTasks(taskList []tasks.Task) []tasks.Task {
+	var result []tasks.Task
+	for _, t := range taskList {
+		if _, ok := t.(*plugins.ContainerTask); !ok {
+			result = append(result, t)
+		}
+	}
+	return result
 }
