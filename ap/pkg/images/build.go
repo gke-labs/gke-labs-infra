@@ -32,6 +32,7 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
@@ -142,7 +143,7 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.TaskContext) err
 				"by running 'docker buildx create --use', or configure a single platform in '.ap/images.yaml'", platforms)
 		}
 	} else if !t.Push && len(platforms) > 1 {
-		scope.Log().Info("building locally without pushing, falling back to native platform", "platforms", platforms)
+		scoped.Log(ctx).Info("building locally without pushing, falling back to native platform", "platforms", platforms)
 		platforms = nil
 	}
 
@@ -200,7 +201,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 	metaFile := filepath.Join(os.TempDir(), fmt.Sprintf("buildctl-meta-%d.json", time.Now().UnixNano()))
 	defer func() {
 		if err := os.Remove(metaFile); err != nil && !os.IsNotExist(err) {
-			scope.Log().V(4).Info("failed to remove metadata file", "path", metaFile, "error", err)
+			scoped.Log(ctx).V(4).Info("failed to remove metadata file", "path", metaFile, "error", err)
 		}
 	}()
 
@@ -265,9 +266,9 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 	contextSize := parseContextSizeFromPlain(&progressBuf)
 	duration := time.Since(start)
 	if contextSize != "" {
-		scope.Log().Info(fmt.Sprintf("built %s with %s in %s; sent %s", t.ImageName, t.BuildkitHost, formatDuration(duration), contextSize))
+		scoped.Log(ctx).Info(fmt.Sprintf("built %s with %s in %s; sent %s", t.ImageName, t.BuildkitHost, formatDuration(duration), contextSize))
 	} else {
-		scope.Log().Info(fmt.Sprintf("built %s with %s in %s", t.ImageName, t.BuildkitHost, formatDuration(duration)))
+		scoped.Log(ctx).Info(fmt.Sprintf("built %s with %s in %s", t.ImageName, t.BuildkitHost, formatDuration(duration)))
 	}
 
 	return nil
@@ -279,7 +280,7 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContex
 	metaFile := filepath.Join(os.TempDir(), fmt.Sprintf("buildx-meta-%d.json", time.Now().UnixNano()))
 	defer func() {
 		if err := os.Remove(metaFile); err != nil && !os.IsNotExist(err) {
-			scope.Log().V(4).Info("failed to remove metadata file", "path", metaFile, "error", err)
+			scoped.Log(ctx).V(4).Info("failed to remove metadata file", "path", metaFile, "error", err)
 		}
 	}()
 
@@ -345,7 +346,7 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContex
 	}
 
 	duration := time.Since(start)
-	scope.Log().Info(fmt.Sprintf("built %s with docker in %s", t.ImageName, formatDuration(duration)))
+	scoped.Log(ctx).Info(fmt.Sprintf("built %s with docker in %s", t.ImageName, formatDuration(duration)))
 
 	return nil
 }

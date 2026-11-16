@@ -55,7 +55,7 @@ func (t *PortForwardTask) buildArgs(localPort int) []string {
 
 func (t *PortForwardTask) Run(ctx context.Context, scope *tasks.TaskContext) (retErr error) {
 	if IsInCluster() {
-		scope.Log().Info("running in-cluster, skipping port-forward", "namespace", t.Namespace, "service", t.Service)
+		scoped.Log(ctx).Info("running in-cluster, skipping port-forward", "namespace", t.Namespace, "service", t.Service)
 		return t.Child.Run(ctx, scope)
 	}
 
@@ -97,7 +97,7 @@ func (t *PortForwardTask) Run(ctx context.Context, scope *tasks.TaskContext) (re
 		return fmt.Errorf("kubectl binary is required")
 	}
 
-	scope.Log().Info("starting port-forward", "namespace", t.Namespace, "service", t.Service, "localPort", localPort, "remotePort", t.RemotePort)
+	scoped.Log(ctx).Info("starting port-forward", "namespace", t.Namespace, "service", t.Service, "localPort", localPort, "remotePort", t.RemotePort)
 
 	pfCmd := exec.CommandContext(ctx, kubectlBin, t.buildArgs(localPort)...)
 
@@ -117,7 +117,7 @@ func (t *PortForwardTask) Run(ctx context.Context, scope *tasks.TaskContext) (re
 			}
 		}
 		if hasProxy {
-			scope.Log().Info("stopping docker registry proxy container")
+			scoped.Log(ctx).Info("stopping docker registry proxy container")
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			if err := exec.CommandContext(cleanupCtx, "docker", "rm", "-f", "ap-registry-proxy").Run(); err != nil {
@@ -147,13 +147,13 @@ func (t *PortForwardTask) Run(ctx context.Context, scope *tasks.TaskContext) (re
 	}
 
 	if !ready {
-		scope.Log().Error(nil, "port-forward did not become ready", "namespace", t.Namespace, "service", t.Service)
+		scoped.Log(ctx).Error(nil, "port-forward did not become ready", "namespace", t.Namespace, "service", t.Service)
 		logPortForwardOutput(ctx, &stdout, &stderr)
 		return fmt.Errorf("port-forward did not become ready")
 	}
 
 	if useProxy {
-		scope.Log().Info("starting docker registry proxy container", "vmPort", t.LocalPort, "hostPort", localPort)
+		scoped.Log(ctx).Info("starting docker registry proxy container", "vmPort", t.LocalPort, "hostPort", localPort)
 		proxyCmd := exec.CommandContext(ctx, "docker", "run", "-d",
 			"--name", "ap-registry-proxy",
 			"-p", fmt.Sprintf("127.0.0.1:%d:%d", t.LocalPort, t.LocalPort),
@@ -166,10 +166,10 @@ func (t *PortForwardTask) Run(ctx context.Context, scope *tasks.TaskContext) (re
 			return fmt.Errorf("failed to start docker registry proxy: %w (output: %s)", err, out)
 		}
 		hasProxy = true
-		scope.Log().Info("docker registry proxy container started successfully")
+		scoped.Log(ctx).Info("docker registry proxy container started successfully")
 	}
 
-	scope.Log().Info("port-forward ready, running child task", "child", t.Child.GetName())
+	scoped.Log(ctx).Info("port-forward ready, running child task", "child", t.Child.GetName())
 	return t.Child.Run(ctx, scope)
 }
 

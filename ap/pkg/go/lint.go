@@ -31,6 +31,7 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"golang.org/x/tools/go/analysis"
@@ -44,7 +45,7 @@ type GoVetTask struct {
 }
 
 func (t *GoVetTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
-	scope.Log().Info("running go vet", "dir", t.Dir)
+	scoped.Log(ctx).Info("running go vet", "dir", t.Dir)
 	vetCmd := exec.CommandContext(ctx, "go", "vet", "./...")
 	vetCmd.Dir = t.Dir
 	vetCmd.Stdout = scope.Stdout()
@@ -69,7 +70,7 @@ type GovulncheckTask struct {
 }
 
 func (t *GovulncheckTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
-	scope.Log().Info("running govulncheck", "dir", t.Dir)
+	scoped.Log(ctx).Info("running govulncheck", "dir", t.Dir)
 	vulnCmd := exec.CommandContext(ctx, "go", "run", "golang.org/x/vuln/cmd/govulncheck@latest", "./...")
 	vulnCmd.Dir = t.Dir
 	vulnCmd.Stdout = scope.Stdout()
@@ -94,7 +95,7 @@ type GoTidyTask struct {
 }
 
 func (t *GoTidyTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
-	scope.Log().V(1).Info("running go mod tidy -diff", "dir", t.Dir)
+	scoped.Log(ctx).V(1).Info("running go mod tidy -diff", "dir", t.Dir)
 	cmd := exec.CommandContext(ctx, "go", "mod", "tidy", "-diff")
 	cmd.Dir = t.Dir
 	cmd.Env = append(os.Environ(), "GOWORK=off")
@@ -162,7 +163,7 @@ func (t *AnalyzersTask) Types(name string) []string {
 }
 
 func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
-	scope.Log().Info("running analyzers", "dir", t.Dir)
+	scoped.Log(ctx).Info("running analyzers", "dir", t.Dir)
 
 	if len(t.Analyzers) == 0 {
 		return nil
@@ -214,7 +215,7 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.TaskContext) error
 		for _, pkg := range pkgs {
 			for _, err := range pkg.Errors {
 				if _, writeErr := fmt.Fprintln(scope.Stderr(), err); writeErr != nil {
-					scope.Log().V(2).Info("failed to write package error", "error", writeErr)
+					scoped.Log(ctx).V(2).Info("failed to write package error", "error", writeErr)
 				}
 				pkgErrors++
 			}

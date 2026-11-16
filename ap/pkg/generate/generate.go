@@ -55,7 +55,7 @@ type LegacyScriptTask struct {
 }
 
 func (t *LegacyScriptTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
-	scope.Log().Info("running legacy generate script", "name", t.Name)
+	scoped.Log(ctx).Info("running legacy generate script", "name", t.Name)
 	cmd := exec.CommandContext(ctx, t.Path)
 	cmd.Dir = t.Dir
 	env, err := scope.ScriptEnv()
@@ -94,7 +94,7 @@ type GoGenerateTask struct {
 }
 
 func (t *GoGenerateTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
-	scope.Log().Info("running go generate", "dir", t.Dir)
+	scoped.Log(ctx).Info("running go generate", "dir", t.Dir)
 	cmd := exec.CommandContext(ctx, "go", "generate", "./...")
 	cmd.Dir = t.Dir
 	cmd.Stdout = scope.Stdout()
@@ -130,7 +130,7 @@ type BuiltinGeneratorTask struct {
 }
 
 func (t *BuiltinGeneratorTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
-	scope.Log().Info("running built-in generator", "name", t.Name)
+	scoped.Log(ctx).Info("running built-in generator", "name", t.Name)
 	return t.RunFunc(ctx, scope.SourceTree(), scope.RepoRoot())
 }
 
