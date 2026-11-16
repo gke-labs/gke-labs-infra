@@ -216,6 +216,13 @@ func TestRunTask_Success(t *testing.T) {
 					if string(rootData) != "root-file" {
 						return fmt.Errorf("unexpected root.txt content: %q", string(rootData))
 					}
+					rootInfo, err := os.Stat(filepath.Join(task.RootDir, "root.txt"))
+					if err != nil {
+						return fmt.Errorf("stat root.txt: %w", err)
+					}
+					if rootInfo.Mode().Perm() != 0755 {
+						return fmt.Errorf("expected root.txt mode 0755, got 0%o", rootInfo.Mode().Perm())
+					}
 
 					if _, err := fmt.Fprint(task.Stdout, "building output\n"); err != nil {
 						return err
@@ -237,7 +244,7 @@ func TestRunTask_Success(t *testing.T) {
 	client := setupTestClient(t, plugin)
 	start := &api.TaskStart{Task: "build", Dir: "activated"}
 	helloFile := &api.FileChunk{Path: "activated/hello.txt", Mode: 0644, Content: []byte("world"), IsLastChunk: true}
-	rootFile := &api.FileChunk{Path: "root.txt", Mode: 0644, Content: []byte("root-file"), IsLastChunk: true}
+	rootFile := &api.FileChunk{Path: "root.txt", Mode: 0755, Content: []byte("root-file"), IsLastChunk: true}
 
 	output, err := executeTask(t, client, start, helloFile, rootFile)
 	if err != nil {
@@ -319,7 +326,7 @@ func TestRunTask_PathEscapeRejected(t *testing.T) {
 	}
 
 	client := setupTestClient(t, plugin)
-	escapeFile := &api.FileChunk{Path: "../outside.txt", Content: []byte("escape"), IsLastChunk: true}
+	escapeFile := &api.FileChunk{Path: "../outside.txt", Mode: 0644, Content: []byte("escape"), IsLastChunk: true}
 	_, err := executeTask(t, client, &api.TaskStart{Task: "task"}, escapeFile)
 	if err == nil {
 		t.Fatalf("expected error for escaping path, got nil")
@@ -379,6 +386,7 @@ func TestExamplePlugin(t *testing.T) {
 
 	inputFile := &api.FileChunk{
 		Path:        "docs/input.txt",
+		Mode:        0644,
 		Content:     []byte("hello world\n"),
 		IsLastChunk: true,
 	}
@@ -432,8 +440,8 @@ func TestRunTask_MultiChunkFiles(t *testing.T) {
 	}
 
 	client := setupTestClient(t, plugin)
-	chunk1 := &api.FileChunk{Path: "sub/multi-chunk.bin", Content: []byte("chunk1-"), IsLastChunk: false}
-	chunk2 := &api.FileChunk{Path: "sub/multi-chunk.bin", Content: []byte("chunk2"), IsLastChunk: true}
+	chunk1 := &api.FileChunk{Path: "sub/multi-chunk.bin", Mode: 0644, Content: []byte("chunk1-"), IsLastChunk: false}
+	chunk2 := &api.FileChunk{Path: "sub/multi-chunk.bin", Mode: 0644, Content: []byte("chunk2"), IsLastChunk: true}
 
 	output, err := executeTask(t, client, &api.TaskStart{Task: "chunk-task", Dir: "sub"}, chunk1, chunk2)
 	if err != nil {
