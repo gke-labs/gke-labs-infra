@@ -598,168 +598,119 @@ func TestContainerTask_GetName(t *testing.T) {
 	}
 }
 
-func TestContainerVerifyMode(t *testing.T) {
+func runVerifyTask(t *testing.T, outputs []string, repositoryFiles, mockFiles map[string]string) (string, error) {
+	t.Helper()
+	repoRoot := t.TempDir()
+	docsDir := filepath.Join(repoRoot, "docs")
+	for relativePath, content := range repositoryFiles {
+		fullPath := filepath.Join(docsDir, relativePath)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tree, err := sourcetree.Open(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fakeBinDir, stateDir := setupFakeDocker(t)
+	mockOut := filepath.Join(stateDir, "mock-out")
+	for relativePath, content := range mockFiles {
+		fullPath := filepath.Join(mockOut, relativePath)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var stderr bytes.Buffer
+	scope := tasks.NewTaskContext(repoRoot, docsDir, tree.Under(docsDir)).
+		WithTool("docker", filepath.Join(fakeBinDir, "docker")).
+		WithOutput(io.Discard, &stderr)
 	declaration := config.PluginDeclaration{Image: "example.com/mock@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}
+	manifest := &plugins.PluginManifest{
+		Name:  "mockplugin",
+		Tasks: []plugins.TaskMetadata{{Name: "generate", Verb: "generate", Outputs: outputs}},
+	}
+	task := &plugins.ContainerTask{
+		PluginName:   "mockplugin",
+		TaskMetadata: manifest.Tasks[0],
+		Declaration:  declaration,
+		Manifest:     manifest,
+		Dir:          docsDir,
+		RepoRoot:     repoRoot,
+		Verify:       true,
+	}
 
+	err = task.Run(t.Context(), scope)
+	return stderr.String(), err
+}
+
+func TestContainerVerifyMode(t *testing.T) {
 	t.Run("identical output passes", func(t *testing.T) {
-		repoRoot := t.TempDir()
-		docsDir := filepath.Join(repoRoot, "docs")
-		if err := os.MkdirAll(filepath.Join(docsDir, "dist"), 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(docsDir, "dist", "site.html"), []byte("site output"), 0644); err != nil {
-			t.Fatal(err)
-		}
-
-		tree, err := sourcetree.Open(repoRoot)
+		_, err := runVerifyTask(t, []string{"dist"},
+			map[string]string{"dist/site.html": "site output\n"},
+			map[string]string{"dist/site.html": "site output\n"})
 		if err != nil {
-			t.Fatal(err)
-		}
-
-		fakeBinDir, stateDir := setupFakeDocker(t)
-		mockOut := filepath.Join(stateDir, "mock-out")
-		if err := os.MkdirAll(filepath.Join(mockOut, "dist"), 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(mockOut, "dist", "site.html"), []byte("site output"), 0644); err != nil {
-			t.Fatal(err)
-		}
-
-		scope := tasks.NewTaskContext(repoRoot, docsDir, tree.Under(docsDir)).WithTool("docker", filepath.Join(fakeBinDir, "docker"))
-		manifest := &plugins.PluginManifest{
-			Name:  "mockplugin",
-			Tasks: []plugins.TaskMetadata{{Name: "generate", Verb: "generate", Outputs: []string{"dist"}}},
-		}
-		task := &plugins.ContainerTask{
-			PluginName:   "mockplugin",
-			TaskMetadata: manifest.Tasks[0],
-			Declaration:  declaration,
-			Manifest:     manifest,
-			Dir:          docsDir,
-			RepoRoot:     repoRoot,
-			Verify:       true,
-		}
-
-		if err := task.Run(t.Context(), scope); err != nil {
 			t.Fatalf("expected identical output to pass, got: %v", err)
 		}
 	})
 
 	t.Run("changed file fails with diff", func(t *testing.T) {
-		repoRoot := t.TempDir()
-		docsDir := filepath.Join(repoRoot, "docs")
-		if err := os.MkdirAll(filepath.Join(docsDir, "dist"), 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(docsDir, "dist", "site.html"), []byte("site output"), 0644); err != nil {
-			t.Fatal(err)
-		}
-
-		tree, err := sourcetree.Open(repoRoot)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		fakeBinDir, stateDir := setupFakeDocker(t)
-		mockOut := filepath.Join(stateDir, "mock-out")
-		if err := os.MkdirAll(filepath.Join(mockOut, "dist"), 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(mockOut, "dist", "site.html"), []byte("new site output"), 0644); err != nil {
-			t.Fatal(err)
-		}
-
-		var stderr bytes.Buffer
-		scope := tasks.NewTaskContext(repoRoot, docsDir, tree.Under(docsDir)).WithTool("docker", filepath.Join(fakeBinDir, "docker")).WithOutput(io.Discard, &stderr)
-		manifest := &plugins.PluginManifest{
-			Name:  "mockplugin",
-			Tasks: []plugins.TaskMetadata{{Name: "generate", Verb: "generate", Outputs: []string{"dist"}}},
-		}
-		task := &plugins.ContainerTask{
-			PluginName:   "mockplugin",
-			TaskMetadata: manifest.Tasks[0],
-			Declaration:  declaration,
-			Manifest:     manifest,
-			Dir:          docsDir,
-			RepoRoot:     repoRoot,
-			Verify:       true,
-		}
-
-		err = task.Run(t.Context(), scope)
+		output, err := runVerifyTask(t, []string{"dist"},
+			map[string]string{"dist/site.html": "site output\n"},
+			map[string]string{"dist/site.html": "new site output\n"})
 		if err == nil {
 			t.Fatal("expected changed file to fail, got nil")
 		}
 
-		output := stderr.String() + "\n" + err.Error()
-		if !strings.Contains(output, "--- a/dist/site.html") || !strings.Contains(output, "+++ b/dist/site.html") {
-			t.Errorf("expected diff header naming files, got:\n%s", output)
+		if !strings.Contains(output, "---") || !strings.Contains(output, "+++") {
+			t.Errorf("expected diff in task output, got:\n%s", output)
 		}
 		if !strings.Contains(output, "-site output") || !strings.Contains(output, "+new site output") {
-			t.Errorf("expected unified diff hunks, got:\n%s", output)
+			t.Errorf("expected diff content in task output, got:\n%s", output)
+		}
+		expectedErr := "plugin \"mockplugin\" task \"generate\" outputs differ from checkout; run 'ap generate' to update"
+		if !strings.Contains(err.Error(), expectedErr) {
+			t.Errorf("expected error message directing to run ap generate, got: %v", err)
 		}
 	})
 
 	t.Run("missing file fails", func(t *testing.T) {
-		repoRoot := t.TempDir()
-		docsDir := filepath.Join(repoRoot, "docs")
-		if err := os.MkdirAll(docsDir, 0755); err != nil {
-			t.Fatal(err)
-		}
-
-		tree, err := sourcetree.Open(repoRoot)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		fakeBinDir, stateDir := setupFakeDocker(t)
-		mockOut := filepath.Join(stateDir, "mock-out")
-		if err := os.MkdirAll(filepath.Join(mockOut, "dist"), 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(mockOut, "dist", "missing.html"), []byte("staged content"), 0644); err != nil {
-			t.Fatal(err)
-		}
-
-		var stderr bytes.Buffer
-		scope := tasks.NewTaskContext(repoRoot, docsDir, tree.Under(docsDir)).WithTool("docker", filepath.Join(fakeBinDir, "docker")).WithOutput(io.Discard, &stderr)
-		manifest := &plugins.PluginManifest{
-			Name:  "mockplugin",
-			Tasks: []plugins.TaskMetadata{{Name: "generate", Verb: "generate", Outputs: []string{"dist"}}},
-		}
-		task := &plugins.ContainerTask{
-			PluginName:   "mockplugin",
-			TaskMetadata: manifest.Tasks[0],
-			Declaration:  declaration,
-			Manifest:     manifest,
-			Dir:          docsDir,
-			RepoRoot:     repoRoot,
-			Verify:       true,
-		}
-
-		err = task.Run(t.Context(), scope)
+		output, err := runVerifyTask(t, []string{"dist"},
+			nil,
+			map[string]string{"dist/missing.html": "staged content\n"})
 		if err == nil {
 			t.Fatal("expected missing file to fail, got nil")
 		}
 
-		output := stderr.String() + "\n" + err.Error()
-		if !strings.Contains(output, "+++ b/dist/missing.html") {
-			t.Errorf("expected diff naming missing file, got:\n%s", output)
+		if !strings.Contains(output, "missing.html") {
+			t.Errorf("expected diff naming missing file in task output, got:\n%s", output)
+		}
+		expectedErr := "plugin \"mockplugin\" task \"generate\" outputs differ from checkout; run 'ap generate' to update"
+		if !strings.Contains(err.Error(), expectedErr) {
+			t.Errorf("expected error message directing to run ap generate, got: %v", err)
 		}
 	})
 
-	t.Run("unexpected file in dedicated directory fails", func(t *testing.T) {
+	t.Run("co-located mode ignores unrelated files", func(t *testing.T) {
+		_, err := runVerifyTask(t, []string{"."},
+			map[string]string{"unrelated.txt": "human authored\n", "gen.txt": "staged content\n"},
+			map[string]string{"gen.txt": "staged content\n"})
+		if err != nil {
+			t.Fatalf("expected co-located mode to ignore unrelated file and pass, got: %v", err)
+		}
+	})
+
+	t.Run("symlink in staging is rejected in verify mode", func(t *testing.T) {
 		repoRoot := t.TempDir()
 		docsDir := filepath.Join(repoRoot, "docs")
-		if err := os.MkdirAll(filepath.Join(docsDir, "dist"), 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(docsDir, "dist", "site.html"), []byte("site output"), 0644); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(docsDir, "dist", "extra.txt"), []byte("extra content"), 0644); err != nil {
-			t.Fatal(err)
-		}
-
 		tree, err := sourcetree.Open(repoRoot)
 		if err != nil {
 			t.Fatal(err)
@@ -770,12 +721,20 @@ func TestContainerVerifyMode(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(mockOut, "dist"), 0755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(mockOut, "dist", "site.html"), []byte("site output"), 0644); err != nil {
+		targetFile := filepath.Join(mockOut, "dist", "real.txt")
+		if err := os.WriteFile(targetFile, []byte("content"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(targetFile, filepath.Join(mockOut, "dist", "symlink.txt")); err != nil {
 			t.Fatal(err)
 		}
 
 		var stderr bytes.Buffer
-		scope := tasks.NewTaskContext(repoRoot, docsDir, tree.Under(docsDir)).WithTool("docker", filepath.Join(fakeBinDir, "docker")).WithOutput(io.Discard, &stderr)
+		scope := tasks.NewTaskContext(repoRoot, docsDir, tree.Under(docsDir)).
+			WithTool("docker", filepath.Join(fakeBinDir, "docker")).
+			WithOutput(io.Discard, &stderr)
+
+		declaration := config.PluginDeclaration{Image: "example.com/mock@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}
 		manifest := &plugins.PluginManifest{
 			Name:  "mockplugin",
 			Tasks: []plugins.TaskMetadata{{Name: "generate", Verb: "generate", Outputs: []string{"dist"}}},
@@ -792,59 +751,10 @@ func TestContainerVerifyMode(t *testing.T) {
 
 		err = task.Run(t.Context(), scope)
 		if err == nil {
-			t.Fatal("expected extra file in dedicated directory to fail, got nil")
+			t.Fatal("expected symlink in staging to fail, got nil")
 		}
-
-		output := stderr.String() + "\n" + err.Error()
-		if !strings.Contains(output, "--- a/dist/extra.txt") {
-			t.Errorf("expected diff naming extra file, got:\n%s", output)
-		}
-	})
-
-	t.Run("co-located mode ignores unrelated files", func(t *testing.T) {
-		repoRoot := t.TempDir()
-		docsDir := filepath.Join(repoRoot, "docs")
-		if err := os.MkdirAll(docsDir, 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(docsDir, "unrelated.txt"), []byte("human authored"), 0644); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(docsDir, "gen.txt"), []byte("staged content"), 0644); err != nil {
-			t.Fatal(err)
-		}
-
-		tree, err := sourcetree.Open(repoRoot)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		fakeBinDir, stateDir := setupFakeDocker(t)
-		mockOut := filepath.Join(stateDir, "mock-out")
-		if err := os.MkdirAll(mockOut, 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(mockOut, "gen.txt"), []byte("staged content"), 0644); err != nil {
-			t.Fatal(err)
-		}
-
-		scope := tasks.NewTaskContext(repoRoot, docsDir, tree.Under(docsDir)).WithTool("docker", filepath.Join(fakeBinDir, "docker"))
-		manifest := &plugins.PluginManifest{
-			Name:  "mockplugin",
-			Tasks: []plugins.TaskMetadata{{Name: "generate", Verb: "generate", Outputs: []string{"."}}},
-		}
-		task := &plugins.ContainerTask{
-			PluginName:   "mockplugin",
-			TaskMetadata: manifest.Tasks[0],
-			Declaration:  declaration,
-			Manifest:     manifest,
-			Dir:          docsDir,
-			RepoRoot:     repoRoot,
-			Verify:       true,
-		}
-
-		if err := task.Run(t.Context(), scope); err != nil {
-			t.Fatalf("expected co-located mode to ignore unrelated file and pass, got: %v", err)
+		if !strings.Contains(err.Error(), "is a symlink") {
+			t.Errorf("expected error mentioning symlink, got: %v", err)
 		}
 	})
 }

@@ -65,11 +65,11 @@ func (r *UntrustedRoot) WriteFile(relativePath string, content []byte, permissio
 	return nil
 }
 
-// CopyStagedOutputs copies files matching outputs from stagingDirectory into the root.
-// It opens an os.Root on stagingDirectory and reads files only through that root.
+// WalkStagedOutputs walks outputs inside stagingDirectory using an os.Root on stagingDirectory.
+// For each regular file found, it calls walkFn with the clean relative path, file info, and staging root.
 // Symlinks, devices, sockets, and paths escaping the root or containing .git
 // are rejected with an error naming the path.
-func (r *UntrustedRoot) CopyStagedOutputs(stagingDirectory string, outputs []string) (returnError error) {
+func WalkStagedOutputs(stagingDirectory string, outputs []string, walkFn func(path string, info os.FileInfo, stagingRoot *os.Root) error) (returnError error) {
 	stagingRoot, err := os.OpenRoot(stagingDirectory)
 	if err != nil {
 		return fmt.Errorf("opening staging root %s: %w", stagingDirectory, err)
@@ -125,27 +125,33 @@ func (r *UntrustedRoot) CopyStagedOutputs(stagingDirectory string, outputs []str
 				if !info.Mode().IsRegular() {
 					return fmt.Errorf("%s: is not a regular file or directory", path)
 				}
-				content, err := stagingRoot.ReadFile(path)
-				if err != nil {
-					return fmt.Errorf("%s: %w", path, err)
-				}
-				return r.WriteFile(path, content, info.Mode().Perm())
+				return walkFn(path, info, stagingRoot)
 			})
 			if walkErr != nil {
 				return walkErr
 			}
 		} else {
-			content, err := stagingRoot.ReadFile(cleanEntry)
-			if err != nil {
-				return fmt.Errorf("%s: %w", cleanEntry, err)
-			}
-			if err := r.WriteFile(cleanEntry, content, entryInfo.Mode().Perm()); err != nil {
+			if err := walkFn(cleanEntry, entryInfo, stagingRoot); err != nil {
 				return err
 			}
 		}
 	}
 
 	return nil
+}
+
+// CopyStagedOutputs copies files matching outputs from stagingDirectory into the root.
+// It opens an os.Root on stagingDirectory and reads files only through that root.
+// Symlinks, devices, sockets, and paths escaping the root or containing .git
+// are rejected with an error naming the path.
+func (r *UntrustedRoot) CopyStagedOutputs(stagingDirectory string, outputs []string) error {
+	return WalkStagedOutputs(stagingDirectory, outputs, func(path string, info os.FileInfo, stagingRoot *os.Root) error {
+		content, err := stagingRoot.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+		return r.WriteFile(path, content, info.Mode().Perm())
+	})
 }
 
 // hasGitComponent reports whether any path component is ".git".

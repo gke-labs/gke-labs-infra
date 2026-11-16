@@ -117,9 +117,9 @@ func RunGenerate(ctx context.Context, opt GenerateOptions) error {
 
 	if opt.Verify {
 		for _, scope := range scopes {
-			for _, t := range scope.GenerateTasks {
-				if v, ok := t.(interface{ SetVerify(bool) }); ok {
-					v.SetVerify(true)
+			for _, task := range scope.GenerateTasks {
+				if containerTask, ok := task.(*plugins.ContainerTask); ok {
+					containerTask.Verify = true
 				}
 			}
 		}

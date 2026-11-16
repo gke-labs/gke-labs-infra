@@ -79,12 +79,12 @@ func FindGeneratedFiles(repoRoot string, scopes []*tasks.TaskContext) ([]*source
 		scopeIgnoreList := sourcetree.NewIgnoreList(scopeIgnorePatterns)
 
 		var pluginOutputDirs []string
-		for _, t := range scope.GenerateTasks {
-			if sourced, ok := t.(tasks.Sourced); ok {
-				if outputter, ok := t.(interface{ Outputs() []string }); ok {
-					for _, out := range outputter.Outputs() {
-						if out != "." && out != "" {
-							pluginOutputDirs = append(pluginOutputDirs, filepath.Clean(filepath.Join(sourced.SourcePath(), out)))
+		for _, task := range scope.GenerateTasks {
+			if sourced, ok := task.(tasks.Sourced); ok {
+				if outputter, ok := task.(interface{ Outputs() []string }); ok {
+					for _, output := range outputter.Outputs() {
+						if output != "." && output != "" {
+							pluginOutputDirs = append(pluginOutputDirs, filepath.Clean(filepath.Join(sourced.SourcePath(), output)))
 						}
 					}
 				}
@@ -122,8 +122,8 @@ func FindGeneratedFiles(repoRoot string, scopes []*tasks.TaskContext) ([]*source
 				ignored = true
 			}
 			if !ignored {
-				for _, outDir := range pluginOutputDirs {
-					if f.Path == outDir || strings.HasPrefix(f.Path, outDir+string(filepath.Separator)) {
+				for _, outputDirectory := range pluginOutputDirs {
+					if f.Path == outputDirectory || strings.HasPrefix(f.Path, outputDirectory+string(filepath.Separator)) {
 						ignored = true
 						break
 					}
@@ -232,15 +232,6 @@ func Undo(data []byte, marker string, isBinary bool, wasEmpty bool) ([]byte, boo
 // running generation tasks, and asserting that all perturbed files are restored byte-identically.
 func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext, allTasks []tasks.Task, dryRun bool) error {
 	log := scoped.Log(ctx)
-
-	for _, scope := range scopes {
-		for _, t := range scope.GenerateTasks {
-			if v, ok := t.(interface{ SetVerify(bool) }); ok {
-				v.SetVerify(true)
-			}
-		}
-	}
-	setVerifyOnTasks(allTasks)
 
 	var r *sourcetree.SourceTree
 	if len(scopes) > 0 {
@@ -455,15 +446,4 @@ func getGitStatus(ctx context.Context, repoRoot string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
-}
-
-func setVerifyOnTasks(taskList []tasks.Task) {
-	for _, t := range taskList {
-		if v, ok := t.(interface{ SetVerify(bool) }); ok {
-			v.SetVerify(true)
-		}
-		if g, ok := t.(*tasks.Group); ok {
-			setVerifyOnTasks(g.Tasks)
-		}
-	}
 }
