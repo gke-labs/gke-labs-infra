@@ -192,6 +192,9 @@ func GenerateTasks(repoRoot string, scopes []*tasks.TaskContext) (tasks.Task, er
 			}
 		}
 
+		// 3. Run plugin generator tasks
+		group.Tasks = append(group.Tasks, scope.GenerateTasks...)
+
 		if len(group.Tasks) > 0 {
 			allTasks = append(allTasks, group)
 		}

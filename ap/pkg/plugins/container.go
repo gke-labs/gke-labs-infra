@@ -22,9 +22,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -236,6 +238,12 @@ type ContainerTask struct {
 	Dir               string
 	RelativeDirectory string
 	RepoRoot          string
+	Verify            bool
+}
+
+// SetVerify enables or disables verify mode on the container task.
+func (task *ContainerTask) SetVerify(verify bool) {
+	task.Verify = verify
 }
 
 var (
@@ -260,6 +268,11 @@ func (task *ContainerTask) GetChildren() []tasks.Task {
 // SourcePath returns the activated directory path for task filtering.
 func (task *ContainerTask) SourcePath() string {
 	return task.Dir
+}
+
+// Outputs returns the task's configured output paths.
+func (task *ContainerTask) Outputs() []string {
+	return task.TaskMetadata.Outputs
 }
 
 // Run executes the task in a container sandbox.
@@ -352,6 +365,10 @@ func (task *ContainerTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 		return fmt.Errorf("copying output from container %s: %w (%s)", containerID, err, strings.TrimSpace(string(copyOutOutput)))
 	}
 
+	if task.Verify {
+		return verifyStagedOutputs(task.Dir, stagingDirectory, task.TaskMetadata.Outputs, scope.Stderr())
+	}
+
 	return placeStagedOutputs(task.Dir, stagingDirectory, task.TaskMetadata.Outputs, scope.SourceTree())
 }
 
@@ -441,4 +458,301 @@ func placeStagedOutputs(targetDirectory, stagingDirectory string, outputs []stri
 		return fmt.Errorf("invalidating source tree: %w", invalidateErr)
 	}
 	return nil
+}
+
+func isCoLocated(outputs []string) bool {
+	return len(outputs) == 1 && (outputs[0] == "." || filepath.Clean(outputs[0]) == ".")
+}
+
+func verifyStagedOutputs(targetDirectory, stagingDirectory string, outputs []string, errOut io.Writer) (returnError error) {
+	stagingRoot, err := os.OpenRoot(stagingDirectory)
+	if err != nil {
+		return fmt.Errorf("opening staging root %s: %w", stagingDirectory, err)
+	}
+	defer func() {
+		if closeErr := stagingRoot.Close(); closeErr != nil && returnError == nil {
+			returnError = closeErr
+		}
+	}()
+
+	targetRoot, err := os.OpenRoot(targetDirectory)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("opening target root %s: %w", targetDirectory, err)
+	}
+	if targetRoot != nil {
+		defer func() {
+			if closeErr := targetRoot.Close(); closeErr != nil && returnError == nil {
+				returnError = closeErr
+			}
+		}()
+	}
+
+	var diffs []string
+
+	if isCoLocated(outputs) {
+		walkErr := fs.WalkDir(stagingRoot.FS(), ".", func(path string, d fs.DirEntry, walkError error) error {
+			if walkError != nil {
+				return walkError
+			}
+			if path == "." {
+				return nil
+			}
+			info, err := stagingRoot.Lstat(path)
+			if err != nil {
+				return fmt.Errorf("%s: %w", path, err)
+			}
+			if info.Mode()&os.ModeSymlink != 0 {
+				return fmt.Errorf("%s: is a symlink", path)
+			}
+			if info.IsDir() {
+				return nil
+			}
+			if !info.Mode().IsRegular() {
+				return fmt.Errorf("%s: is not a regular file", path)
+			}
+			stagedContent, err := stagingRoot.ReadFile(path)
+			if err != nil {
+				return fmt.Errorf("%s: %w", path, err)
+			}
+
+			var repoContent []byte
+			var repoExists bool
+			if targetRoot != nil {
+				content, err := targetRoot.ReadFile(path)
+				if err == nil {
+					repoContent = content
+					repoExists = true
+				} else if !os.IsNotExist(err) {
+					return fmt.Errorf("%s: %w", path, err)
+				}
+			}
+
+			cleanSlash := filepath.ToSlash(path)
+			if !repoExists {
+				diffs = append(diffs, unifiedDiff("/dev/null", "b/"+cleanSlash, nil, splitLines(string(stagedContent))))
+			} else if !bytes.Equal(stagedContent, repoContent) {
+				diffs = append(diffs, unifiedDiff("a/"+cleanSlash, "b/"+cleanSlash, splitLines(string(repoContent)), splitLines(string(stagedContent))))
+			}
+			return nil
+		})
+		if walkErr != nil {
+			return walkErr
+		}
+	} else {
+		for _, outputEntry := range outputs {
+			cleanEntry := filepath.Clean(outputEntry)
+			if cleanEntry == ".." || strings.HasPrefix(cleanEntry, ".."+string(filepath.Separator)) || filepath.IsAbs(outputEntry) {
+				return fmt.Errorf("%s: escapes staging root", outputEntry)
+			}
+			if hasGitComponent(cleanEntry) {
+				return fmt.Errorf("%s: is under .git", outputEntry)
+			}
+
+			entryInfo, err := stagingRoot.Lstat(cleanEntry)
+			if err != nil {
+				if os.IsNotExist(err) {
+					diffs = append(diffs, fmt.Sprintf("expected output %s was not produced", cleanEntry))
+					continue
+				}
+				return fmt.Errorf("%s: %w", cleanEntry, err)
+			}
+			if entryInfo.Mode()&os.ModeSymlink != 0 {
+				return fmt.Errorf("%s: is a symlink", cleanEntry)
+			}
+			if !entryInfo.Mode().IsRegular() && !entryInfo.IsDir() {
+				return fmt.Errorf("%s: is not a regular file or directory", cleanEntry)
+			}
+
+			if entryInfo.IsDir() {
+				stagedFiles := make(map[string][]byte)
+				walkErr := fs.WalkDir(stagingRoot.FS(), cleanEntry, func(path string, d fs.DirEntry, walkError error) error {
+					if walkError != nil {
+						return walkError
+					}
+					if path == "." {
+						return nil
+					}
+					info, err := stagingRoot.Lstat(path)
+					if err != nil {
+						return fmt.Errorf("%s: %w", path, err)
+					}
+					if info.Mode()&os.ModeSymlink != 0 {
+						return fmt.Errorf("%s: is a symlink", path)
+					}
+					if info.IsDir() {
+						return nil
+					}
+					if !info.Mode().IsRegular() {
+						return fmt.Errorf("%s: is not a regular file", path)
+					}
+					content, err := stagingRoot.ReadFile(path)
+					if err != nil {
+						return fmt.Errorf("%s: %w", path, err)
+					}
+					stagedFiles[filepath.ToSlash(path)] = content
+					return nil
+				})
+				if walkErr != nil {
+					return walkErr
+				}
+
+				repoFiles := make(map[string][]byte)
+				if targetRoot != nil {
+					if tInfo, err := targetRoot.Lstat(cleanEntry); err == nil && tInfo.IsDir() {
+						repoWalkErr := fs.WalkDir(targetRoot.FS(), cleanEntry, func(path string, d fs.DirEntry, walkError error) error {
+							if walkError != nil {
+								return walkError
+							}
+							if d.IsDir() {
+								return nil
+							}
+							content, err := targetRoot.ReadFile(path)
+							if err != nil {
+								return fmt.Errorf("%s: %w", path, err)
+							}
+							repoFiles[filepath.ToSlash(path)] = content
+							return nil
+						})
+						if repoWalkErr != nil {
+							return repoWalkErr
+						}
+					}
+				}
+
+				allPathsMap := make(map[string]struct{})
+				for p := range stagedFiles {
+					allPathsMap[p] = struct{}{}
+				}
+				for p := range repoFiles {
+					allPathsMap[p] = struct{}{}
+				}
+				var allPaths []string
+				for p := range allPathsMap {
+					allPaths = append(allPaths, p)
+				}
+				sort.Strings(allPaths)
+
+				for _, p := range allPaths {
+					sBytes, inStaged := stagedFiles[p]
+					rBytes, inRepo := repoFiles[p]
+					if inStaged && !inRepo {
+						diffs = append(diffs, unifiedDiff("/dev/null", "b/"+p, nil, splitLines(string(sBytes))))
+					} else if !inStaged && inRepo {
+						diffs = append(diffs, unifiedDiff("a/"+p, "/dev/null", splitLines(string(rBytes)), nil))
+					} else if !bytes.Equal(sBytes, rBytes) {
+						diffs = append(diffs, unifiedDiff("a/"+p, "b/"+p, splitLines(string(rBytes)), splitLines(string(sBytes))))
+					}
+				}
+			} else {
+				stagedContent, err := stagingRoot.ReadFile(cleanEntry)
+				if err != nil {
+					return fmt.Errorf("%s: %w", cleanEntry, err)
+				}
+				var repoContent []byte
+				var repoExists bool
+				if targetRoot != nil {
+					content, err := targetRoot.ReadFile(cleanEntry)
+					if err == nil {
+						repoContent = content
+						repoExists = true
+					} else if !os.IsNotExist(err) {
+						return fmt.Errorf("%s: %w", cleanEntry, err)
+					}
+				}
+				cleanSlash := filepath.ToSlash(cleanEntry)
+				if !repoExists {
+					diffs = append(diffs, unifiedDiff("/dev/null", "b/"+cleanSlash, nil, splitLines(string(stagedContent))))
+				} else if !bytes.Equal(stagedContent, repoContent) {
+					diffs = append(diffs, unifiedDiff("a/"+cleanSlash, "b/"+cleanSlash, splitLines(string(repoContent)), splitLines(string(stagedContent))))
+				}
+			}
+		}
+	}
+
+	if len(diffs) > 0 {
+		diffText := strings.Join(diffs, "\n")
+		if errOut != nil {
+			if _, printErr := fmt.Fprintln(errOut, diffText); printErr != nil {
+				return fmt.Errorf("writing diff: %w", printErr)
+			}
+		}
+		return fmt.Errorf("plugin outputs differ from checkout:\n%s", diffText)
+	}
+
+	return nil
+}
+
+func hasGitComponent(path string) bool {
+	for _, component := range strings.Split(filepath.ToSlash(filepath.Clean(path)), "/") {
+		if strings.EqualFold(component, ".git") {
+			return true
+		}
+	}
+	return false
+}
+
+func splitLines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	lines := strings.Split(s, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
+
+func unifiedDiff(oldName, newName string, oldLines, newLines []string) string {
+	n, m := len(oldLines), len(newLines)
+
+	dp := make([][]int, n+1)
+	for i := range dp {
+		dp[i] = make([]int, m+1)
+	}
+	for i := 0; i < n; i++ {
+		for j := 0; j < m; j++ {
+			if oldLines[i] == newLines[j] {
+				dp[i+1][j+1] = dp[i][j] + 1
+			} else if dp[i+1][j] > dp[i][j+1] {
+				dp[i+1][j+1] = dp[i+1][j]
+			} else {
+				dp[i+1][j+1] = dp[i][j+1]
+			}
+		}
+	}
+
+	var diff []string
+	i, j := n, m
+	for i > 0 || j > 0 {
+		if i > 0 && j > 0 && oldLines[i-1] == newLines[j-1] {
+			diff = append(diff, " "+oldLines[i-1])
+			i--
+			j--
+		} else if j > 0 && (i == 0 || dp[i][j-1] >= dp[i-1][j]) {
+			diff = append(diff, "+"+newLines[j-1])
+			j--
+		} else if i > 0 && (j == 0 || dp[i][j-1] < dp[i-1][j]) {
+			diff = append(diff, "-"+oldLines[i-1])
+			i--
+		}
+	}
+	slices.Reverse(diff)
+
+	oldHunk := fmt.Sprintf("-1,%d", n)
+	if n == 0 {
+		oldHunk = "-0,0"
+	}
+	newHunk := fmt.Sprintf("+1,%d", m)
+	if m == 0 {
+		newHunk = "+0,0"
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("--- %s\n+++ %s\n@@ %s %s @@\n", oldName, newName, oldHunk, newHunk))
+	for _, l := range diff {
+		sb.WriteString(l)
+		sb.WriteString("\n")
+	}
+	return sb.String()
 }

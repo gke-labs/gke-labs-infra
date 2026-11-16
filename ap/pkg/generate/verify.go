@@ -78,6 +78,19 @@ func FindGeneratedFiles(repoRoot string, scopes []*tasks.TaskContext) ([]*source
 		}
 		scopeIgnoreList := sourcetree.NewIgnoreList(scopeIgnorePatterns)
 
+		var pluginOutputDirs []string
+		for _, t := range scope.GenerateTasks {
+			if sourced, ok := t.(tasks.Sourced); ok {
+				if outputter, ok := t.(interface{ Outputs() []string }); ok {
+					for _, out := range outputter.Outputs() {
+						if out != "." && out != "" {
+							pluginOutputDirs = append(pluginOutputDirs, filepath.Clean(filepath.Join(sourced.SourcePath(), out)))
+						}
+					}
+				}
+			}
+		}
+
 		for _, f := range r.Files() {
 			if seen[f.Path] {
 				continue
@@ -107,6 +120,14 @@ func FindGeneratedFiles(repoRoot string, scopes []*tasks.TaskContext) ([]*source
 			}
 			if !ignored && errScope == nil && scopeIgnoreList.ShouldIgnore(filepath.ToSlash(relToScope), false) {
 				ignored = true
+			}
+			if !ignored {
+				for _, outDir := range pluginOutputDirs {
+					if f.Path == outDir || strings.HasPrefix(f.Path, outDir+string(filepath.Separator)) {
+						ignored = true
+						break
+					}
+				}
 			}
 
 			if !ignored {
@@ -211,6 +232,15 @@ func Undo(data []byte, marker string, isBinary bool, wasEmpty bool) ([]byte, boo
 // running generation tasks, and asserting that all perturbed files are restored byte-identically.
 func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext, allTasks []tasks.Task, dryRun bool) error {
 	log := scoped.Log(ctx)
+
+	for _, scope := range scopes {
+		for _, t := range scope.GenerateTasks {
+			if v, ok := t.(interface{ SetVerify(bool) }); ok {
+				v.SetVerify(true)
+			}
+		}
+	}
+	setVerifyOnTasks(allTasks)
 
 	var r *sourcetree.SourceTree
 	if len(scopes) > 0 {
@@ -425,4 +455,15 @@ func getGitStatus(ctx context.Context, repoRoot string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+func setVerifyOnTasks(taskList []tasks.Task) {
+	for _, t := range taskList {
+		if v, ok := t.(interface{ SetVerify(bool) }); ok {
+			v.SetVerify(true)
+		}
+		if g, ok := t.(*tasks.Group); ok {
+			setVerifyOnTasks(g.Tasks)
+		}
+	}
 }
