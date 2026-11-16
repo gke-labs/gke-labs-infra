@@ -99,6 +99,10 @@ esac
 	if err := os.WriteFile(fakeDockerPath, []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
+	fakeBuildxPath := filepath.Join(fakeBinDir, "docker-buildx")
+	if err := os.WriteFile(fakeBuildxPath, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
 
 	t.Setenv("PATH", fakeBinDir+":"+os.Getenv("PATH"))
 	return fakeBinDir, stateDir
@@ -388,10 +392,10 @@ func TestContainerRemovalOnFailure(t *testing.T) {
 
 func TestDockerfilePlugin(t *testing.T) {
 	repoRoot := t.TempDir()
-	cacheDir := t.TempDir()
+	cacheDirectory := t.TempDir()
 
-	apDir := filepath.Join(repoRoot, ".ap")
-	if err := os.MkdirAll(apDir, 0755); err != nil {
+	apDirectory := filepath.Join(repoRoot, ".ap")
+	if err := os.MkdirAll(apDirectory, 0755); err != nil {
 		t.Fatal(err)
 	}
 	pluginsContent := `
@@ -399,7 +403,7 @@ plugins:
   mockplugin:
     dockerfile: images/mock/Dockerfile
 `
-	if err := os.WriteFile(filepath.Join(apDir, "plugins.yaml"), []byte(pluginsContent), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(apDirectory, "plugins.yaml"), []byte(pluginsContent), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -410,15 +414,27 @@ plugins:
 
 	fakeBinDir, stateDir := setupFakeDocker(t)
 	fakeDockerPath := filepath.Join(fakeBinDir, "docker")
-	scope := tasks.NewTaskContext(repoRoot, repoRoot, tree).WithTool("docker", fakeDockerPath)
+	fakeBuildxPath := filepath.Join(fakeBinDir, "docker-buildx")
+	scope := tasks.NewTaskContext(repoRoot, repoRoot, tree).WithTool("docker", fakeDockerPath).WithTool("docker-buildx", fakeBuildxPath)
 
 	t.Run("build invoked with expected arguments and image ID becomes cache key", func(t *testing.T) {
-		loadedPlugins, err := plugins.LoadContainerPlugins(t.Context(), scope, cacheDir)
+		loadedPlugins, err := plugins.LoadContainerPlugins(t.Context(), scope, cacheDirectory)
 		if err != nil {
 			t.Fatalf("LoadContainerPlugins failed: %v", err)
 		}
 		if len(loadedPlugins) != 1 {
 			t.Fatalf("expected 1 plugin, got %d", len(loadedPlugins))
+		}
+
+		containerPlugin, ok := loadedPlugins[0].(*plugins.ContainerPlugin)
+		if !ok {
+			t.Fatalf("expected *plugins.ContainerPlugin, got %T", loadedPlugins[0])
+		}
+		if containerPlugin.Declaration.Image != "" {
+			t.Errorf("expected Declaration.Image to remain unset, got %q", containerPlugin.Declaration.Image)
+		}
+		if containerPlugin.ImageRef != "sha256:fake-built-image-1234" {
+			t.Errorf("expected ImageRef %q, got %q", "sha256:fake-built-image-1234", containerPlugin.ImageRef)
 		}
 
 		buildArgsData, err := os.ReadFile(filepath.Join(stateDir, "build-args"))
@@ -432,6 +448,9 @@ plugins:
 		if !strings.Contains(buildArgs, "-f images/mock/Dockerfile") {
 			t.Errorf("expected -f images/mock/Dockerfile in args, got: %s", buildArgs)
 		}
+		if !strings.Contains(buildArgs, "--load") {
+			t.Errorf("expected --load in args, got: %s", buildArgs)
+		}
 		if !strings.Contains(buildArgs, "--iidfile") {
 			t.Errorf("expected --iidfile in args, got: %s", buildArgs)
 		}
@@ -439,7 +458,7 @@ plugins:
 			t.Errorf("expected build context . at end of args, got: %s", buildArgs)
 		}
 
-		cachedFile := filepath.Join(cacheDir, "plugins", "describe", "sha256-fake-built-image-1234.json")
+		cachedFile := filepath.Join(cacheDirectory, "plugins", "describe", "sha256-fake-built-image-1234.json")
 		if _, err := os.Stat(cachedFile); err != nil {
 			t.Errorf("expected cached manifest at %s: %v", cachedFile, err)
 		}
@@ -449,8 +468,8 @@ plugins:
 		if err := os.WriteFile(filepath.Join(stateDir, "fail-build"), []byte("fail"), 0644); err != nil {
 			t.Fatal(err)
 		}
-		emptyCacheDir := t.TempDir()
-		_, err := plugins.LoadContainerPlugins(t.Context(), scope, emptyCacheDir)
+		emptyCacheDirectory := t.TempDir()
+		_, err := plugins.LoadContainerPlugins(t.Context(), scope, emptyCacheDirectory)
 		if err == nil {
 			t.Fatal("expected LoadContainerPlugins to fail when build fails")
 		}
@@ -459,6 +478,9 @@ plugins:
 		}
 		if !strings.Contains(err.Error(), "images/mock/Dockerfile") {
 			t.Errorf("expected error to name Dockerfile images/mock/Dockerfile, got: %v", err)
+		}
+		if !strings.Contains(err.Error(), "simulated build failure") {
+			t.Errorf("expected build output in error, got: %v", err)
 		}
 	})
 }
