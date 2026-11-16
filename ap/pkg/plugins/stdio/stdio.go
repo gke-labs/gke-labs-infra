@@ -258,12 +258,17 @@ func (commandConnection *CommandConn) Close() error {
 	commandConnection.closed.Store(true)
 	commandConnection.closeOnce.Do(func() {
 		var closeErrors []error
+
+		// Close stdin first so the child learns the conversation is over.
 		if err := commandConnection.stdinPipe.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
 			closeErrors = append(closeErrors, err)
 		}
 
 		go commandConnection.startWait()
 
+		// Wait for the child to exit while keeping stdout open. A child that
+		// writes a last frame to a closed stdout is killed by SIGPIPE, which
+		// would cause Close to report an error for a child that behaved correctly.
 		select {
 		case <-commandConnection.waitDone:
 			closeErrors = append(closeErrors, commandConnection.waitError)
@@ -276,6 +281,11 @@ func (commandConnection *CommandConn) Close() error {
 				closeErrors = append(closeErrors, fmt.Errorf("child process did not exit within %v and was killed: %w", closeGracePeriod, commandConnection.waitError))
 			}
 		}
+
+		// Close stdout now that the child has exited. For pipes created via
+		// StdinPipe/StdoutPipe, command.Wait closes them itself once the child
+		// has exited, so by the time Close gets there they may already be closed;
+		// os.ErrClosed is ignored on both closes because that is expected and not an error.
 		if err := commandConnection.stdoutPipe.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
 			closeErrors = append(closeErrors, err)
 		}
