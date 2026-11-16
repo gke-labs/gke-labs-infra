@@ -552,16 +552,12 @@ platforms:
 		t.Fatalf("unexpected error running task: %v", err)
 	}
 
-	if len(calls) != 2 || calls[0].name != "buildctl" || calls[1].name != "docker" {
-		t.Errorf("expected buildctl and docker load commands, got %v", calls)
+	if len(calls) != 1 || calls[0].name != "buildctl" {
+		t.Errorf("expected buildctl command, got %v", calls)
 	} else {
 		argsStr := strings.Join(calls[0].args, " ")
 		if !strings.Contains(argsStr, "--opt platform=linux/amd64") {
 			t.Errorf("expected '--opt platform=linux/amd64' in buildctl args, got: %s", argsStr)
-		}
-		loadArgsStr := strings.Join(calls[1].args, " ")
-		if !strings.Contains(loadArgsStr, "load -i") {
-			t.Errorf("expected 'load -i' in docker args, got: %s", loadArgsStr)
 		}
 	}
 
@@ -897,9 +893,6 @@ func TestDockerBuildTask_ConcurrentRef(t *testing.T) {
 	entered.Add(2)
 
 	execCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		if len(args) > 1 && args[0] == "image" && args[1] == "inspect" {
-			return exec.CommandContext(ctx, "echo", "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
-		}
 		for i, arg := range args {
 			if arg == "--metadata-file" && i+1 < len(args) {
 				metaFile := args[i+1]

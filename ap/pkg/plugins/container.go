@@ -38,16 +38,18 @@ import (
 )
 
 func buildPluginImage(ctx context.Context, scope *tasks.TaskContext, pluginName, dockerfilePath, buildkitHost string) (string, error) {
+	naming := images.ImageNaming{
+		Prefix: "ap-plugin",
+		Tag:    "latest",
+	}
 	task := &images.DockerBuildTask{
 		ImageName:    pluginName,
 		Dockerfile:   dockerfilePath,
 		Root:         scope.RepoRoot(),
 		BuildkitHost: buildkitHost,
 		Quiet:        true,
-		Naming: images.ImageNaming{
-			Prefix: "ap-plugin",
-			Tag:    "latest",
-		},
+		Load:         true,
+		Naming:       naming,
 	}
 
 	var outputBuffer bytes.Buffer
@@ -60,10 +62,31 @@ func buildPluginImage(ctx context.Context, scope *tasks.TaskContext, pluginName,
 		return "", fmt.Errorf("building plugin %q with Dockerfile %s: %w", pluginName, dockerfilePath, err)
 	}
 
-	if task.BuiltImageID == "" {
-		return "", fmt.Errorf("empty image ID for plugin %q (Dockerfile %s)", pluginName, dockerfilePath)
+	dockerBin, err := scope.Tool(ctx, "docker")
+	if err != nil {
+		return "", fmt.Errorf("plugin %q requires a container runtime (docker): %w", pluginName, err)
 	}
-	return task.BuiltImageID, nil
+
+	fullImageName := images.ImageRef{Prefix: naming.Prefix, Name: pluginName, Tag: naming.Tag}.String()
+	imageID, err := inspectImageID(ctx, dockerBin, fullImageName)
+	if err != nil {
+		return "", fmt.Errorf("reading image ID for plugin %q (Dockerfile %s): %w", pluginName, dockerfilePath, err)
+	}
+	return imageID, nil
+}
+
+func inspectImageID(ctx context.Context, dockerBin, fullImageName string) (string, error) {
+	command := exec.CommandContext(ctx, dockerBin, "image", "inspect", "--format", "{{.Id}}", fullImageName)
+	command.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(dockerBin))
+	output, err := command.Output()
+	if err != nil {
+		return "", fmt.Errorf("inspecting image ID for %s: %w", fullImageName, err)
+	}
+	imageID := strings.TrimSpace(string(output))
+	if imageID == "" {
+		return "", fmt.Errorf("empty image ID for %s", fullImageName)
+	}
+	return imageID, nil
 }
 
 // DescribeContainer runs `<image> describe` in a container on cold runs and caches the manifest.
@@ -152,24 +175,13 @@ func (plugin *ContainerPlugin) DiscoverTasks(ctx context.Context, directory stri
 }
 
 // LoadContainerPlugins loads all enabled container plugins configured in .ap/plugins.yaml.
-func LoadContainerPlugins(ctx context.Context, scope *tasks.TaskContext, cacheDirectory string, buildkitHosts ...string) ([]Plugin, error) {
+func LoadContainerPlugins(ctx context.Context, scope *tasks.TaskContext, cacheDirectory, buildkitHost string) ([]Plugin, error) {
 	pluginsConfig, err := config.LoadPluginsConfig(scope.RepoRoot())
 	if err != nil {
 		return nil, err
 	}
 	if len(pluginsConfig.Plugins) == 0 {
 		return nil, nil
-	}
-
-	var buildkitHost string
-	if len(buildkitHosts) > 0 && buildkitHosts[0] != "" {
-		buildkitHost = buildkitHosts[0]
-	} else {
-		var err error
-		buildkitHost, err = images.ResolveBuildkitHost("")
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	var pluginNames []string

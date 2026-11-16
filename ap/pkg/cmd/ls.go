@@ -65,7 +65,12 @@ func RunLs(ctx context.Context, opt LsOptions) error {
 		return err
 	}
 
-	scopes, err := DiscoverScopes(ctx, r, opt.RepoRoot, opt.Dir)
+	buildkitHost, err := images.ResolveBuildkitHost("")
+	if err != nil {
+		return err
+	}
+
+	scopes, err := DiscoverScopes(ctx, r, opt.RepoRoot, opt.Dir, buildkitHost)
 	if err != nil {
 		return err
 	}

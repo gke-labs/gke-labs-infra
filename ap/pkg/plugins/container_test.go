@@ -456,7 +456,7 @@ plugins:
 	scope := tasks.NewTaskContext(repoRoot, repoRoot, tree).WithTool("docker", fakeDockerPath).WithTool("docker-buildx", fakeBuildxPath)
 
 	t.Run("build invoked with expected arguments and image ID becomes cache key", func(t *testing.T) {
-		loadedPlugins, err := plugins.LoadContainerPlugins(t.Context(), scope, cacheDirectory)
+		loadedPlugins, err := plugins.LoadContainerPlugins(t.Context(), scope, cacheDirectory, "")
 		if err != nil {
 			t.Fatalf("LoadContainerPlugins failed: %v", err)
 		}
@@ -503,9 +503,8 @@ plugins:
 	})
 
 	t.Run("with buildkit host set build goes to buildctl and result is loaded", func(t *testing.T) {
-		t.Setenv("BUILDKIT_HOST", "tcp://127.0.0.1:2375")
 		buildkitCacheDirectory := t.TempDir()
-		loadedPlugins, err := plugins.LoadContainerPlugins(t.Context(), scope, buildkitCacheDirectory)
+		loadedPlugins, err := plugins.LoadContainerPlugins(t.Context(), scope, buildkitCacheDirectory, "tcp://127.0.0.1:2375")
 		if err != nil {
 			t.Fatalf("LoadContainerPlugins failed: %v", err)
 		}
@@ -556,7 +555,7 @@ plugins:
 			t.Fatal(err)
 		}
 		emptyCacheDirectory := t.TempDir()
-		_, err := plugins.LoadContainerPlugins(t.Context(), scope, emptyCacheDirectory)
+		_, err := plugins.LoadContainerPlugins(t.Context(), scope, emptyCacheDirectory, "")
 		if err == nil {
 			t.Fatal("expected LoadContainerPlugins to fail when build fails")
 		}

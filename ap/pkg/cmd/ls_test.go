@@ -186,7 +186,7 @@ plugins:
 	if err != nil {
 		t.Fatalf("GetSourceTree failed: %v", err)
 	}
-	scopes, err := DiscoverScopes(t.Context(), sourceTree, repoRoot, repoRoot)
+	scopes, err := DiscoverScopes(t.Context(), sourceTree, repoRoot, repoRoot, "")
 	if err != nil {
 		t.Fatalf("DiscoverScopes failed: %v", err)
 	}

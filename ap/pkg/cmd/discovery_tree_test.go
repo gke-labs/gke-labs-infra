@@ -90,7 +90,7 @@ func TestSingleWalkPerInvocation(t *testing.T) {
 	}
 
 	// Step 2: Run DiscoverScopes with the shared repo
-	scopes, err := DiscoverScopes(t.Context(), r, rootOpt.RepoRoot, rootOpt.Dir)
+	scopes, err := DiscoverScopes(t.Context(), r, rootOpt.RepoRoot, rootOpt.Dir, "")
 	if err != nil {
 		t.Fatalf("DiscoverScopes failed: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestSkipUniformlyInvisibleToAllConsumers(t *testing.T) {
 	ignoredDir := filepath.Join(tempDir, "ignored")
 
 	// 1. DiscoverScopes must not see ignored/.ap
-	scopes, err := DiscoverScopes(t.Context(), r, tempDir, tempDir)
+	scopes, err := DiscoverScopes(t.Context(), r, tempDir, tempDir, "")
 	if err != nil {
 		t.Fatalf("DiscoverScopes failed: %v", err)
 	}
@@ -315,7 +315,7 @@ func TestDiscoverScopes_ScriptAndGoE2e(t *testing.T) {
 		t.Fatalf("GetSourceTree failed: %v", err)
 	}
 
-	scopes, err := DiscoverScopes(t.Context(), r, rootOpt.RepoRoot, rootOpt.Dir)
+	scopes, err := DiscoverScopes(t.Context(), r, rootOpt.RepoRoot, rootOpt.Dir, "")
 	if err != nil {
 		t.Fatalf("DiscoverScopes failed: %v", err)
 	}
@@ -385,7 +385,7 @@ func TestDiscoverScopes_SubdirectoryWithinModule(t *testing.T) {
 	}
 
 	subDirectory := filepath.Join(tempDir, "pkg")
-	scopes, err := DiscoverScopes(t.Context(), sourceTree, tempDir, subDirectory)
+	scopes, err := DiscoverScopes(t.Context(), sourceTree, tempDir, subDirectory, "")
 	if err != nil {
 		t.Fatalf("DiscoverScopes failed: %v", err)
 	}

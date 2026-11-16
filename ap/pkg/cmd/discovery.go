@@ -25,7 +25,6 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/format"
 	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/plugins"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
@@ -36,7 +35,7 @@ var builtInPlugins = []plugins.Plugin{
 }
 
 // DiscoverScopes discovers all tasks under the given directory subtree.
-func DiscoverScopes(ctx context.Context, r *sourcetree.SourceTree, repoRoot, dir string, buildkitHosts ...string) ([]*tasks.TaskContext, error) {
+func DiscoverScopes(ctx context.Context, r *sourcetree.SourceTree, repoRoot, dir, buildkitHost string) ([]*tasks.TaskContext, error) {
 	if dir == "" {
 		dir = repoRoot
 	}
@@ -122,17 +121,6 @@ func DiscoverScopes(ctx context.Context, r *sourcetree.SourceTree, repoRoot, dir
 	// Discover plugin tasks (e.g. Go tooling, container plugins)
 	availablePlugins := make([]plugins.Plugin, 0, len(builtInPlugins))
 	availablePlugins = append(availablePlugins, builtInPlugins...)
-
-	var buildkitHost string
-	if len(buildkitHosts) > 0 && buildkitHosts[0] != "" {
-		buildkitHost = buildkitHosts[0]
-	} else {
-		var err error
-		buildkitHost, err = images.ResolveBuildkitHost("")
-		if err != nil {
-			return nil, err
-		}
-	}
 
 	cacheDir, err := fileutils.CacheDir()
 	if err != nil {

@@ -76,7 +76,7 @@ type DockerBuildTask struct {
 	Naming       ImageNaming
 	Cluster      k8s.KubeCluster
 	Quiet        bool
-	BuiltImageID string
+	Load         bool
 }
 
 func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
@@ -120,10 +120,10 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.TaskContext) err
 
 	dockerBin := t.DockerBin
 	if dockerBin == "" {
-		var err error
-		dockerBin, err = scope.Tool(ctx, "docker")
-		if err != nil {
-			return fmt.Errorf("failed to ensure docker: %w", err)
+		if dockerPath, err := scope.Tool(ctx, "docker"); err == nil && dockerPath != "" {
+			dockerBin = dockerPath
+		} else {
+			dockerBin = "docker"
 		}
 	}
 
@@ -199,9 +199,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 
 	var output string
 	var archivePath string
-	if t.Push {
-		output = fmt.Sprintf("type=image,name=%s,push=true,registry.insecure=true", fullImageName)
-	} else {
+	if t.Load {
 		temporaryArchive, err := os.CreateTemp("", "ap-buildctl-image-*.tar")
 		if err != nil {
 			return fmt.Errorf("creating temporary archive for %s: %w", t.ImageName, err)
@@ -216,6 +214,11 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 			return fmt.Errorf("closing temporary archive for %s: %w", t.ImageName, err)
 		}
 		output = fmt.Sprintf("type=docker,name=%s,dest=%s", fullImageName, archivePath)
+	} else {
+		output = fmt.Sprintf("type=image,name=%s,push=%t", fullImageName, t.Push)
+		if t.Push {
+			output += ",registry.insecure=true"
+		}
 	}
 
 	metaFile := filepath.Join(os.TempDir(), fmt.Sprintf("buildctl-meta-%d.json", time.Now().UnixNano()))
@@ -277,13 +280,13 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 		return fmt.Errorf("buildctl build failed for %s: %w", t.ImageName, err)
 	}
 
-	if !t.Push {
+	if t.Load {
 		dockerBin := t.DockerBin
 		if dockerBin == "" {
-			var err error
-			dockerBin, err = scope.Tool(ctx, "docker")
-			if err != nil {
-				return fmt.Errorf("failed to ensure docker: %w", err)
+			if dockerPath, err := scope.Tool(ctx, "docker"); err == nil && dockerPath != "" {
+				dockerBin = dockerPath
+			} else {
+				dockerBin = "docker"
 			}
 		}
 		loadCommand := execCommandContext(ctx, dockerBin, "load", "-i", archivePath)
@@ -292,12 +295,6 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 		if err != nil {
 			return fmt.Errorf("loading built image %s: %w (%s)", fullImageName, err, strings.TrimSpace(string(loadOutput)))
 		}
-
-		builtImageID, err := inspectLocalImageID(ctx, dockerBin, fullImageName)
-		if err != nil {
-			return err
-		}
-		t.BuiltImageID = builtImageID
 	}
 
 	digest := extractDigestFromMetadataFile(metaFile)
@@ -363,14 +360,6 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContex
 		return fmt.Errorf("docker build failed for %s: %w", t.ImageName, err)
 	}
 
-	if !t.Push {
-		builtImageID, err := inspectLocalImageID(ctx, dockerBin, fullImageName)
-		if err != nil {
-			return err
-		}
-		t.BuiltImageID = builtImageID
-	}
-
 	digest := extractDigestFromMetadataFile(metaFile)
 	if digest == "" {
 		digest = inspectImageDigest(ctx, dockerBin, fullImageName)
@@ -404,20 +393,6 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContex
 	}
 
 	return nil
-}
-
-func inspectLocalImageID(ctx context.Context, dockerBin, fullImageName string) (string, error) {
-	cmd := execCommandContext(ctx, dockerBin, "image", "inspect", "--format", "{{.Id}}", fullImageName)
-	cmd.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(dockerBin))
-	inspectOutput, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("inspecting image ID for %s: %w", fullImageName, err)
-	}
-	imageID := strings.TrimSpace(string(inspectOutput))
-	if imageID == "" {
-		return "", fmt.Errorf("empty image ID for %s", fullImageName)
-	}
-	return imageID, nil
 }
 
 // parseContextSizeFromPlain parses a buildctl --progress=plain stream and returns
