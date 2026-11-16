@@ -82,7 +82,7 @@ func (t *PortForwardTask) Run(ctx context.Context, scope *tasks.TaskContext) (re
 			return fmt.Errorf("failed to remove stale docker proxy container: %w", err)
 		}
 
-		freePort, err := pickFreePort()
+		freePort, err := PickFreePort()
 		if err != nil {
 			return fmt.Errorf("finding free local port for port-forward: %w", err)
 		}
@@ -173,8 +173,8 @@ func (t *PortForwardTask) Run(ctx context.Context, scope *tasks.TaskContext) (re
 	return t.Child.Run(ctx, scope)
 }
 
-// pickFreePort returns a TCP port that is currently free on 127.0.0.1.
-func pickFreePort() (int, error) {
+// PickFreePort returns a TCP port that is currently free on 127.0.0.1.
+func PickFreePort() (int, error) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return 0, err

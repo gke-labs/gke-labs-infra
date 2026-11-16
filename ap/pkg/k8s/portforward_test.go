@@ -91,12 +91,12 @@ func TestIsInCluster(t *testing.T) {
 }
 
 func TestPickFreePort(t *testing.T) {
-	port, err := pickFreePort()
+	port, err := PickFreePort()
 	if err != nil {
-		t.Fatalf("pickFreePort() error = %v", err)
+		t.Fatalf("PickFreePort() error = %v", err)
 	}
 	if port <= 0 || port > 65535 {
-		t.Errorf("pickFreePort() returned invalid port = %d", port)
+		t.Errorf("PickFreePort() returned invalid port = %d", port)
 	}
 }
 
