@@ -331,10 +331,14 @@ plugins:
   astro:
     image: ghcr.io/gke-labs/astro-builder@sha256:4b22262d5395690dfa3...
     network: false
+  local-tool:
+    dockerfile: images/local-builder/Dockerfile
+    network: false
 ```
 
 - `plugins`: Map of plugin names to declarations.
-- `image`: Remote container image pinned immutably by digest (`<repo>@sha256:...`).
+- `image`: Remote container image pinned immutably by digest (`<repo>@sha256:...`). Either `image` or `dockerfile` must be specified, but not both.
+- `dockerfile`: Path relative to the repository root to a Dockerfile built automatically before discovery using the repository root as the build context. Either `image` or `dockerfile` must be specified, but not both.
 - `network`: Boolean flag (default `false`). When `true`, authorizes network access for the plugin if the plugin also declares that it requires network access.
 - `enabled`: Optional boolean flag. When `false`, disables the plugin (useful in subtree `.ap/plugins.yaml` overrides).
 

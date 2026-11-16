@@ -22,7 +22,6 @@ import (
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/plugins"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
@@ -71,15 +70,7 @@ func RunLs(ctx context.Context, opt LsOptions) error {
 		return err
 	}
 
-	cacheDirectory, err := fileutils.CacheDir()
-	if err != nil {
-		return err
-	}
-
-	activatedPluginTasks, err := plugins.ActivatedTasks(r, opt.RepoRoot, opt.Dir, cacheDirectory)
-	if err != nil {
-		return err
-	}
+	activatedPluginTasks := groupContainerTasks(scopes)
 
 	for _, scope := range scopes {
 		dir := scope.Dir()
@@ -177,6 +168,51 @@ func filterNonContainerTasks(taskList []tasks.Task) []tasks.Task {
 		if _, ok := t.(*plugins.ContainerTask); !ok {
 			result = append(result, t)
 		}
+	}
+	return result
+}
+
+func groupContainerTasks(scopes []*tasks.TaskContext) map[string][]tasks.Task {
+	tasksByDirectory := make(map[string]map[string][]tasks.Task)
+	for _, scope := range scopes {
+		taskLists := [][]tasks.Task{
+			scope.BuildTasks,
+			scope.TestTasks,
+			scope.LintTasks,
+			scope.FormatTasks,
+			scope.GenerateTasks,
+			scope.E2ETasks,
+		}
+		for _, taskList := range taskLists {
+			for _, task := range taskList {
+				containerTask, ok := task.(*plugins.ContainerTask)
+				if !ok {
+					continue
+				}
+				groupName := containerTask.TaskMetadata.Verb + "-tasks"
+				if tasksByDirectory[containerTask.Dir] == nil {
+					tasksByDirectory[containerTask.Dir] = make(map[string][]tasks.Task)
+				}
+				tasksByDirectory[containerTask.Dir][groupName] = append(tasksByDirectory[containerTask.Dir][groupName], containerTask)
+			}
+		}
+	}
+
+	result := make(map[string][]tasks.Task)
+	for directory, groupMap := range tasksByDirectory {
+		var groupNames []string
+		for groupName := range groupMap {
+			groupNames = append(groupNames, groupName)
+		}
+		sort.Strings(groupNames)
+
+		var groups []tasks.Task
+		for _, groupName := range groupNames {
+			taskList := groupMap[groupName]
+			sort.Slice(taskList, func(i, j int) bool { return taskList[i].GetName() < taskList[j].GetName() })
+			groups = append(groups, &tasks.Group{Name: groupName, Tasks: taskList})
+		}
+		result[directory] = groups
 	}
 	return result
 }

@@ -47,13 +47,13 @@ func (config *PluginsConfig) Validate() error {
 		if !declaration.IsEnabled() {
 			continue
 		}
-		if declaration.Dockerfile != "" {
-			return fmt.Errorf("plugin %q: dockerfile plugins are not supported yet", name)
+		if declaration.Image != "" && declaration.Dockerfile != "" {
+			return fmt.Errorf("plugin %q: cannot specify both image and dockerfile", name)
 		}
-		if declaration.Image == "" {
-			return fmt.Errorf("plugin %q must specify image", name)
+		if declaration.Image == "" && declaration.Dockerfile == "" {
+			return fmt.Errorf("plugin %q: must specify either image or dockerfile", name)
 		}
-		if !strings.Contains(declaration.Image, "@sha256:") {
+		if declaration.Image != "" && !strings.Contains(declaration.Image, "@sha256:") {
 			return fmt.Errorf("plugin %q image %q must be pinned by digest (@sha256:...)", name, declaration.Image)
 		}
 	}

@@ -71,3 +71,42 @@ plugins:
 		t.Errorf("expected error to require digest pinning, got %v", err)
 	}
 }
+
+func TestLoadPluginsConfig_Validation(t *testing.T) {
+	tests := []struct {
+		name        string
+		yaml        string
+		wantErrPart string
+	}{
+		{
+			name:        "both image and dockerfile",
+			yaml:        "plugins:\n  testplugin:\n    image: ghcr.io/mock@sha256:1234\n    dockerfile: Dockerfile\n",
+			wantErrPart: "cannot specify both image and dockerfile",
+		},
+		{
+			name:        "neither image nor dockerfile",
+			yaml:        "plugins:\n  testplugin:\n    network: false\n",
+			wantErrPart: "must specify either image or dockerfile",
+		},
+		{
+			name: "valid dockerfile",
+			yaml: "plugins:\n  testplugin:\n    dockerfile: Dockerfile\n",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tempDir := t.TempDir()
+			apDir := filepath.Join(tempDir, ".ap")
+			_ = os.Mkdir(apDir, 0755)
+			_ = os.WriteFile(filepath.Join(apDir, "plugins.yaml"), []byte(tc.yaml), 0644)
+			cfg, err := LoadPluginsConfig(tempDir)
+			if tc.wantErrPart != "" {
+				if err == nil || !strings.Contains(err.Error(), "testplugin") || !strings.Contains(err.Error(), tc.wantErrPart) {
+					t.Fatalf("expected error naming plugin and containing %q, got: %v", tc.wantErrPart, err)
+				}
+			} else if err != nil || cfg.Plugins["testplugin"].Dockerfile != "Dockerfile" {
+				t.Fatalf("unexpected error or config for valid dockerfile: %v", err)
+			}
+		})
+	}
+}
