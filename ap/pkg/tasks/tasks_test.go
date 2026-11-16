@@ -1029,7 +1029,7 @@ func TestTaskLog_PerTaskBuffer(t *testing.T) {
 	taskA := &FuncTask{
 		Name: "task-a",
 		RunFn: func(ctx context.Context, tc *TaskContext) error {
-			tc.Log().Info("hello from task A")
+			scoped.Log(ctx).Info("hello from task A")
 			if b, ok := tc.Stderr().(interface{ String() string }); ok {
 				taskABuf = b.String()
 			}
@@ -1039,7 +1039,7 @@ func TestTaskLog_PerTaskBuffer(t *testing.T) {
 	taskB := &FuncTask{
 		Name: "task-b",
 		RunFn: func(ctx context.Context, tc *TaskContext) error {
-			tc.Log().Info("hello from task B")
+			scoped.Log(ctx).Info("hello from task B")
 			// Also verify scoped.Log(ctx) writes to the same task buffer
 			scoped.Log(ctx).Info("context message from task B")
 			if b, ok := tc.Stderr().(interface{ String() string }); ok {

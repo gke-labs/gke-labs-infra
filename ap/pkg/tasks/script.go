@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 )
 
@@ -33,7 +34,7 @@ type TaskScript struct {
 }
 
 func (t *TaskScript) Run(ctx context.Context, scope *TaskContext) error {
-	scope.Log().Info("running task", "task", t.Name)
+	scoped.Log(ctx).Info("running task", "task", t.Name)
 	cmd := exec.CommandContext(ctx, t.Path)
 	cmd.Dir = t.Root
 	env, err := scope.ScriptEnv()

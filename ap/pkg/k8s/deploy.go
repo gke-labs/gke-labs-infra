@@ -28,6 +28,7 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/applyset"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/imageref"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"gopkg.in/yaml.v3"
@@ -430,7 +431,7 @@ func kustomizeBuild(ctx context.Context, scope *tasks.TaskContext, kustomization
 	if err != nil {
 		relativeTarget = kustomizationPath
 	}
-	scope.Log().Info("Building kustomization", "path", relativeTarget)
+	scoped.Log(ctx).Info("Building kustomization", "path", relativeTarget)
 
 	kustomizationDir := filepath.Dir(kustomizationPath)
 	cmd := exec.CommandContext(ctx, kustomizeBin, "build", kustomizationDir)
@@ -447,7 +448,7 @@ func kustomizeBuild(ctx context.Context, scope *tasks.TaskContext, kustomization
 	}
 	if stderr.Len() > 0 {
 		if _, err := scope.Stderr().Write(stderr.Bytes()); err != nil {
-			scope.Log().V(2).Info("failed to write kustomize stderr", "error", err)
+			scoped.Log(ctx).V(2).Info("failed to write kustomize stderr", "error", err)
 		}
 	}
 	return stdout.Bytes(), nil
@@ -488,7 +489,7 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 	if err != nil {
 		return err
 	}
-	scope.Log().Info("applying manifest", "path", relPath)
+	scoped.Log(ctx).Info("applying manifest", "path", relPath)
 
 	replaced, err := replacePlaceholderImages(string(content), naming)
 	if err != nil {
@@ -520,10 +521,10 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 			return fmt.Errorf("failed to retarget namespace in %s: %w", relPath, err)
 		}
 		for _, declared := range result.RetargetedNamespaces {
-			scope.Log().Info("retargeting namespace", "path", relPath, "from", declared, "to", t.Namespace)
+			scoped.Log(ctx).Info("retargeting namespace", "path", relPath, "from", declared, "to", t.Namespace)
 		}
 		if len(result.ClusterScoped) > 0 {
-			scope.Log().Info("cluster-scoped, not retargeted", "path", relPath, "resources", strings.Join(result.ClusterScoped, ", "))
+			scoped.Log(ctx).Info("cluster-scoped, not retargeted", "path", relPath, "resources", strings.Join(result.ClusterScoped, ", "))
 		}
 		replaced = result.Content
 	}
@@ -571,10 +572,10 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 	// If this was a CRD, wait for it to be established
 	crdNames, err := getCRDNames(content)
 	if err != nil {
-		scope.Log().Info("failed to check if manifest is a CRD", "level", "warning", "path", relPath, "error", err)
+		scoped.Log(ctx).Info("failed to check if manifest is a CRD", "level", "warning", "path", relPath, "error", err)
 	} else {
 		for _, name := range crdNames {
-			scope.Log().Info("waiting for CRD to be established", "crd", name)
+			scoped.Log(ctx).Info("waiting for CRD to be established", "crd", name)
 			var waitArgs []string
 			waitArgs = append(waitArgs, t.Cluster.KubectlArgs()...)
 			waitArgs = append(waitArgs, "wait", "--for=condition=Established", "customresourcedefinition/"+name, "--timeout=60s")

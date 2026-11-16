@@ -23,6 +23,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileheaders"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/gostyle"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
@@ -34,7 +35,7 @@ type CodestyleTask struct {
 }
 
 func (t *CodestyleTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
-	scope.Log().Info("running codestyle", "root", t.Root)
+	scoped.Log(ctx).Info("running codestyle", "root", t.Root)
 	r := scope.SourceTree()
 	if err := fileheaders.Run(ctx, r, t.Root, t.Files); err != nil {
 		return fmt.Errorf("fileheaders failed in %s: %w", t.Root, err)
@@ -60,7 +61,7 @@ type LegacyFormatScriptTask struct {
 }
 
 func (t *LegacyFormatScriptTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
-	scope.Log().Info("running legacy format script", "script", t.Name)
+	scoped.Log(ctx).Info("running legacy format script", "script", t.Name)
 	cmd := exec.CommandContext(ctx, t.Path)
 	cmd.Dir = scope.Dir()
 	env, err := scope.ScriptEnv()

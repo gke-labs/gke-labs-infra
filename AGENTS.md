@@ -89,7 +89,7 @@ ap e2e
 
 ## Logging
 
-- New and touched code logs through `tc.Log()` inside tasks or `scoped.Log(ctx)` elsewhere, constant messages with key/value pairs, warnings as `log.Info(msg, "level", "warning")`. No new package-level `klog.*` calls; existing call sites migrate per package in their own issues (#696–#702).
+- New and touched code logs through `scoped.Log(ctx)`, constant messages with key/value pairs, warnings as `log.Info(msg, "level", "warning")`. No new package-level `klog.*` calls; existing call sites migrate per package in their own issues (#696–#702).
 
 ## Writing
 

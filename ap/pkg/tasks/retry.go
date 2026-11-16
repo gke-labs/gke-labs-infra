@@ -236,13 +236,12 @@ func deriveTaskLogPath(scope *TaskContext, task Task) string {
 func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
 	buf := &syncBuffer{}
 	taskScope := scope.WithOutput(buf, buf)
-	taskLog := newBufferLogger(taskScope.Stderr(), scope.Log())
-	taskScope = taskScope.WithLog(taskLog)
-	ctx = scoped.WithLog(ctx, taskLog)
+	taskLog := newBufferLogger(taskScope.Stderr(), scoped.Log(ctx))
+	taskCtx := scoped.WithLog(ctx, taskLog)
 	out := scope.Stdout()
 
 	start := time.Now()
-	err := runTaskWithRetry(ctx, taskScope, task)
+	err := runTaskWithRetry(taskCtx, taskScope, task)
 	duration := time.Since(start)
 
 	status := "ok"
@@ -255,10 +254,10 @@ func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
 
 	writef(out, "=== %s (%s, %.1fs)\n", task.GetName(), status, duration.Seconds())
 	output := buf.Bytes()
-	if err != nil || scope.Log().V(1).Enabled() || scope.PrintOutput() {
+	if err != nil || scoped.Log(ctx).V(1).Enabled() || scope.PrintOutput() {
 		if len(output) > 0 {
 			if _, writeErr := out.Write(output); writeErr != nil {
-				scope.Log().V(2).Info("failed to write task output", "error", writeErr)
+				scoped.Log(ctx).V(2).Info("failed to write task output", "error", writeErr)
 			}
 			if !bytes.HasSuffix(output, []byte("\n")) {
 				writef(out, "\n")
@@ -269,11 +268,11 @@ func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
 	if artifactsDir := scope.ArtifactsDir(); artifactsDir != "" {
 		logFile := deriveTaskLogPath(scope, task)
 		if mkdirErr := os.MkdirAll(filepath.Dir(logFile), 0755); mkdirErr != nil {
-			scope.Log().Info("failed to create artifacts tasks directory", "level", "warning", "dir", filepath.Dir(logFile), "error", mkdirErr)
+			scoped.Log(ctx).Info("failed to create artifacts tasks directory", "level", "warning", "dir", filepath.Dir(logFile), "error", mkdirErr)
 		} else {
 			content := append([]byte(task.GetName()+"\n"), output...)
 			if writeErr := os.WriteFile(logFile, content, 0644); writeErr != nil {
-				scope.Log().Info("failed to write task artifact log", "level", "warning", "file", logFile, "error", writeErr)
+				scoped.Log(ctx).Info("failed to write task artifact log", "level", "warning", "file", logFile, "error", writeErr)
 			}
 		}
 	}
@@ -299,7 +298,7 @@ func runTaskWithRetry(ctx context.Context, scope *TaskContext, task Task) error 
 		if !ok {
 			return fmt.Errorf("task %s failed: %w", task.GetName(), err)
 		}
-		scope.Log().Info("task failed, retrying", "level", "warning", "task", task.GetName(), "attempt", attempt+1, "error", err, "wait", wait)
+		scoped.Log(ctx).Info("task failed, retrying", "level", "warning", "task", task.GetName(), "attempt", attempt+1, "error", err, "wait", wait)
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("task %s failed: %w", task.GetName(), ctx.Err())

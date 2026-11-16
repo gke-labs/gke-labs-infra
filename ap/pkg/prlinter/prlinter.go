@@ -20,6 +20,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
@@ -32,16 +33,16 @@ type PRLintTask struct {
 func (t *PRLintTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
 	baseBranch, err := detectBaseBranch(ctx, t.RepoRoot)
 	if err != nil {
-		scope.Log().V(2).Info("could not detect base branch", "error", err)
+		scoped.Log(ctx).V(2).Info("could not detect base branch", "error", err)
 		return nil
 	}
 
 	if baseBranch == "" {
-		scope.Log().V(2).Info("no base branch detected, skipping PR lint")
+		scoped.Log(ctx).V(2).Info("no base branch detected, skipping PR lint")
 		return nil
 	}
 
-	scope.Log().Info("comparing against base branch", "branch", baseBranch)
+	scoped.Log(ctx).Info("comparing against base branch", "branch", baseBranch)
 
 	diff, err := getDiff(ctx, t.RepoRoot, baseBranch)
 	if err != nil {

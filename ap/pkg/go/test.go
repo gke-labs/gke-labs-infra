@@ -50,7 +50,7 @@ type GoTestTask struct {
 }
 
 func (t *GoTestTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
-	scope.Log().Info("running go test", "dir", t.Dir)
+	scoped.Log(ctx).Info("running go test", "dir", t.Dir)
 	opts := RunGoTestOptions{
 		Stdout: scope.Stdout(),
 		Stderr: scope.Stderr(),
@@ -102,7 +102,7 @@ type GoE2eTask struct {
 }
 
 func (t *GoE2eTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
-	scope.Log().Info("running go e2e test", "dir", t.Dir)
+	scoped.Log(ctx).Info("running go e2e test", "dir", t.Dir)
 	opts := RunGoTestOptions{
 		Env:    []string{"RUN_E2E=1"},
 		Args:   []string{"-v", "-count=1", "-timeout", "30m", "./tests/e2e/..."},

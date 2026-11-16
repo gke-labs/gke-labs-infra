@@ -245,7 +245,7 @@ func Run(ctx context.Context, scope *TaskContext, ts []Task, opts RunOptions) er
 	defer func() {
 		if scope != nil && scope.SourceTree() != nil {
 			if saveErr := scope.SourceTree().Save(); saveErr != nil {
-				scope.Log().V(2).Info("failed to save sourcetree hash cache", "error", saveErr)
+				scoped.Log(ctx).V(2).Info("failed to save sourcetree hash cache", "error", saveErr)
 			}
 		}
 	}()
