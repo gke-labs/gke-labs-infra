@@ -16,8 +16,10 @@ package stdio
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net"
+	"os"
 	"os/exec"
 	"sync"
 	"sync/atomic"
@@ -27,65 +29,76 @@ import (
 // ErrDeadlinesNotSupported is returned when a deadline method is invoked on a stdio connection.
 var ErrDeadlinesNotSupported = errors.New("stdio: deadlines not supported")
 
+// closeGracePeriod is the time allowed for a child process to exit cleanly
+// after its pipes are closed before forcefully terminating it.
+const closeGracePeriod = 2 * time.Second
+
 type stdioAddr string
 
-func (a stdioAddr) Network() string { return string(a) }
-func (a stdioAddr) String() string  { return string(a) }
+func (address stdioAddr) Network() string { return string(address) }
+func (address stdioAddr) String() string  { return string(address) }
 
 type baseConn struct{}
 
-func (baseConn) LocalAddr() net.Addr              { return stdioAddr("stdio") }
-func (baseConn) RemoteAddr() net.Addr             { return stdioAddr("stdio") }
-func (baseConn) SetDeadline(time.Time) error      { return ErrDeadlinesNotSupported }
-func (baseConn) SetReadDeadline(time.Time) error  { return ErrDeadlinesNotSupported }
+// LocalAddr returns the local network address for the stdio connection.
+func (baseConn) LocalAddr() net.Addr { return stdioAddr("stdio") }
+
+// RemoteAddr returns the remote network address for the stdio connection.
+func (baseConn) RemoteAddr() net.Addr { return stdioAddr("stdio") }
+
+// SetDeadline returns ErrDeadlinesNotSupported because stdio streams do not support deadlines.
+func (baseConn) SetDeadline(time.Time) error { return ErrDeadlinesNotSupported }
+
+// SetReadDeadline returns ErrDeadlinesNotSupported because stdio streams do not support deadlines.
+func (baseConn) SetReadDeadline(time.Time) error { return ErrDeadlinesNotSupported }
+
+// SetWriteDeadline returns ErrDeadlinesNotSupported because stdio streams do not support deadlines.
 func (baseConn) SetWriteDeadline(time.Time) error { return ErrDeadlinesNotSupported }
 
-// Conn wraps an io.Reader and io.Writer into a net.Conn.
+// Conn wraps an io.ReadCloser and io.WriteCloser into a net.Conn.
 type Conn struct {
 	baseConn
-	r         io.Reader
-	w         io.Writer
-	onClose   func()
-	closeOnce sync.Once
-	closed    atomic.Bool
-	closeErr  error
+	reader     io.ReadCloser
+	writer     io.WriteCloser
+	closeOnce  sync.Once
+	closed     atomic.Bool
+	closeError error
 }
 
-// NewConn returns a net.Conn over an io.Reader and io.Writer.
-func NewConn(r io.Reader, w io.Writer) *Conn {
-	return &Conn{r: r, w: w}
+// NewConn returns a net.Conn over an io.ReadCloser and io.WriteCloser.
+func NewConn(reader io.ReadCloser, writer io.WriteCloser) *Conn {
+	return &Conn{
+		reader: reader,
+		writer: writer,
+	}
 }
 
-func (c *Conn) Read(p []byte) (int, error) {
-	if c.closed.Load() {
+// Read reads data from the underlying reader into buffer.
+func (connection *Conn) Read(buffer []byte) (int, error) {
+	if connection.closed.Load() {
 		return 0, net.ErrClosed
 	}
-	return c.r.Read(p)
+	return connection.reader.Read(buffer)
 }
 
-func (c *Conn) Write(p []byte) (int, error) {
-	if c.closed.Load() {
+// Write writes data from buffer to the underlying writer.
+func (connection *Conn) Write(buffer []byte) (int, error) {
+	if connection.closed.Load() {
 		return 0, net.ErrClosed
 	}
-	return c.w.Write(p)
+	return connection.writer.Write(buffer)
 }
 
-func (c *Conn) Close() error {
-	c.closed.Store(true)
-	c.closeOnce.Do(func() {
-		var errs []error
-		if c.onClose != nil {
-			c.onClose()
-		}
-		if rc, ok := c.r.(io.Closer); ok {
-			errs = append(errs, rc.Close())
-		}
-		if wc, ok := c.w.(io.Closer); ok && any(c.w) != any(c.r) {
-			errs = append(errs, wc.Close())
-		}
-		c.closeErr = errors.Join(errs...)
+// Close closes both the underlying reader and writer.
+func (connection *Conn) Close() error {
+	connection.closed.Store(true)
+	connection.closeOnce.Do(func() {
+		connection.closeError = errors.Join(
+			connection.reader.Close(),
+			connection.writer.Close(),
+		)
 	})
-	return c.closeErr
+	return connection.closeError
 }
 
 var _ net.Conn = (*Conn)(nil)
@@ -93,147 +106,179 @@ var _ net.Conn = (*Conn)(nil)
 // Listener implements net.Listener for the plugin side, yielding one
 // connection over stdin and stdout and then blocking until closed.
 type Listener struct {
-	conn      *Conn
 	yield     chan net.Conn
 	done      chan struct{}
 	closeOnce sync.Once
 }
 
-// NewListener returns a net.Listener that yields a single net.Conn over in and out.
-func NewListener(in io.Reader, out io.Writer) *Listener {
-	l := &Listener{
+type listenerConn struct {
+	*Conn
+	listener *Listener
+}
+
+func (connection *listenerConn) Close() error {
+	return errors.Join(
+		connection.listener.Close(),
+		connection.Conn.Close(),
+	)
+}
+
+// NewListener returns a net.Listener that yields a single net.Conn over reader and writer.
+func NewListener(reader io.ReadCloser, writer io.WriteCloser) *Listener {
+	listener := &Listener{
 		yield: make(chan net.Conn, 1),
 		done:  make(chan struct{}),
 	}
-	l.conn = &Conn{
-		r: in,
-		w: out,
-		onClose: func() {
-			l.closeOnce.Do(func() {
-				close(l.done)
-			})
-		},
+	listenerConnection := &listenerConn{
+		Conn:     NewConn(reader, writer),
+		listener: listener,
 	}
-	l.yield <- l.conn
-	return l
+	listener.yield <- listenerConnection
+	return listener
 }
 
-func (l *Listener) Accept() (net.Conn, error) {
+// Accept yields the single connection over reader and writer on first call.
+// Subsequent calls block until the listener is closed, then return net.ErrClosed.
+func (listener *Listener) Accept() (net.Conn, error) {
 	select {
-	case <-l.done:
+	case <-listener.done:
 		return nil, net.ErrClosed
 	default:
 	}
 	select {
-	case <-l.done:
+	case <-listener.done:
 		return nil, net.ErrClosed
-	case c := <-l.yield:
-		return c, nil
+	case connection := <-listener.yield:
+		return connection, nil
 	}
 }
 
-func (l *Listener) Close() error {
-	var err error
-	l.closeOnce.Do(func() {
-		close(l.done)
-		select {
-		case c := <-l.yield:
-			err = c.Close()
-		default:
-		}
+// Close closes the listener, unblocking any blocked Accept calls.
+func (listener *Listener) Close() error {
+	listener.closeOnce.Do(func() {
+		close(listener.done)
 	})
-	return err
+	return nil
 }
 
-func (l *Listener) Addr() net.Addr {
+// Addr returns the stdio network address.
+func (listener *Listener) Addr() net.Addr {
 	return stdioAddr("stdio")
 }
 
 var _ net.Listener = (*Listener)(nil)
 
 // CommandConn implements net.Conn for the host (ap) side over a started command's
-// stdin and stdout pipes. Closing it closes the pipes and waits for the command;
-// a command that exits early turns pending reads and writes into errors that carry
-// the exit status.
+// stdin and stdout pipes. Closing it closes the pipes and waits a bounded duration
+// for the command to exit, killing it if it does not exit promptly. A command that
+// exits early turns pending reads and writes into errors carrying the exit status.
 type CommandConn struct {
 	baseConn
-	cmd       *exec.Cmd
-	in        io.WriteCloser
-	out       io.ReadCloser
-	closeOnce sync.Once
-	closeErr  error
-	waitOnce  sync.Once
-	waitErr   error
-	closed    atomic.Bool
+	command    *exec.Cmd
+	stdinPipe  io.WriteCloser
+	stdoutPipe io.ReadCloser
+	closeOnce  sync.Once
+	closeError error
+	waitOnce   sync.Once
+	waitDone   chan struct{}
+	waitError  error
+	closed     atomic.Bool
 }
 
 // NewCommandConn returns a net.Conn over a started command's stdin and stdout pipes.
-func NewCommandConn(cmd *exec.Cmd, in io.WriteCloser, out io.ReadCloser) *CommandConn {
+func NewCommandConn(command *exec.Cmd, stdinPipe io.WriteCloser, stdoutPipe io.ReadCloser) *CommandConn {
 	return &CommandConn{
-		cmd: cmd,
-		in:  in,
-		out: out,
+		command:    command,
+		stdinPipe:  stdinPipe,
+		stdoutPipe: stdoutPipe,
+		waitDone:   make(chan struct{}),
 	}
 }
 
-func (c *CommandConn) wait() error {
-	c.waitOnce.Do(func() {
-		c.waitErr = c.cmd.Wait()
+func (commandConnection *CommandConn) startWait() {
+	commandConnection.waitOnce.Do(func() {
+		commandConnection.waitError = commandConnection.command.Wait()
+		close(commandConnection.waitDone)
 	})
-	return c.waitErr
 }
 
-func (c *CommandConn) Read(p []byte) (int, error) {
-	if c.closed.Load() {
+func (commandConnection *CommandConn) wait() error {
+	commandConnection.startWait()
+	<-commandConnection.waitDone
+	return commandConnection.waitError
+}
+
+// Read reads bytes from the child process's stdout pipe into buffer.
+// If the child process exits early, pending and subsequent reads return
+// an error carrying the child's exit status.
+func (commandConnection *CommandConn) Read(buffer []byte) (int, error) {
+	if commandConnection.closed.Load() {
 		return 0, net.ErrClosed
 	}
-	n, err := c.out.Read(p)
+	bytesRead, err := commandConnection.stdoutPipe.Read(buffer)
 	if err != nil {
-		if c.closed.Load() {
-			return n, net.ErrClosed
+		if commandConnection.closed.Load() {
+			return bytesRead, net.ErrClosed
 		}
-		if n > 0 && err == io.EOF {
-			return n, nil
+		if bytesRead > 0 && err == io.EOF {
+			return bytesRead, nil
 		}
-		if werr := c.wait(); werr != nil {
-			return n, werr
+		if waitError := commandConnection.wait(); waitError != nil {
+			return bytesRead, waitError
 		}
-		return n, err
+		return bytesRead, err
 	}
-	return n, nil
+	return bytesRead, nil
 }
 
-func (c *CommandConn) Write(p []byte) (int, error) {
-	if c.closed.Load() {
+// Write writes bytes from buffer to the child process's stdin pipe.
+// If the child process exits early, pending and subsequent writes return
+// an error carrying the child's exit status.
+func (commandConnection *CommandConn) Write(buffer []byte) (int, error) {
+	if commandConnection.closed.Load() {
 		return 0, net.ErrClosed
 	}
-	n, err := c.in.Write(p)
+	bytesWritten, err := commandConnection.stdinPipe.Write(buffer)
 	if err != nil {
-		if c.closed.Load() {
-			return n, net.ErrClosed
+		if commandConnection.closed.Load() {
+			return bytesWritten, net.ErrClosed
 		}
-		if werr := c.wait(); werr != nil {
-			return n, werr
+		if waitError := commandConnection.wait(); waitError != nil {
+			return bytesWritten, waitError
 		}
-		return n, err
+		return bytesWritten, err
 	}
-	return n, nil
+	return bytesWritten, nil
 }
 
-func (c *CommandConn) Close() error {
-	c.closed.Store(true)
-	c.closeOnce.Do(func() {
-		var errs []error
-		if c.in != nil {
-			errs = append(errs, c.in.Close())
+// Close closes the child process's stdin and stdout pipes and waits a bounded
+// duration for the child process to exit. If the child process does not exit
+// within the grace period, Close forcefully terminates it and returns an error
+// indicating that the child was killed.
+func (commandConnection *CommandConn) Close() error {
+	commandConnection.closed.Store(true)
+	commandConnection.closeOnce.Do(func() {
+		var closeErrors []error
+		closeErrors = append(closeErrors, commandConnection.stdinPipe.Close())
+		closeErrors = append(closeErrors, commandConnection.stdoutPipe.Close())
+
+		go commandConnection.startWait()
+
+		select {
+		case <-commandConnection.waitDone:
+			closeErrors = append(closeErrors, commandConnection.waitError)
+		case <-time.After(closeGracePeriod):
+			killError := commandConnection.command.Process.Kill()
+			<-commandConnection.waitDone
+			if killError != nil && !errors.Is(killError, os.ErrProcessDone) {
+				closeErrors = append(closeErrors, fmt.Errorf("child process did not exit within %v and kill failed: %w (exit: %v)", closeGracePeriod, killError, commandConnection.waitError))
+			} else {
+				closeErrors = append(closeErrors, fmt.Errorf("child process did not exit within %v and was killed: %w", closeGracePeriod, commandConnection.waitError))
+			}
 		}
-		if c.out != nil {
-			errs = append(errs, c.out.Close())
-		}
-		errs = append(errs, c.wait())
-		c.closeErr = errors.Join(errs...)
+		commandConnection.closeError = errors.Join(closeErrors...)
 	})
-	return c.closeErr
+	return commandConnection.closeError
 }
 
 var _ net.Conn = (*CommandConn)(nil)

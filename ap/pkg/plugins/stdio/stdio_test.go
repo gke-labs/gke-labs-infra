@@ -33,170 +33,173 @@ import (
 
 const envTestMode = "AP_STDIO_TEST_MODE"
 
-func TestMain(m *testing.M) {
+func TestMain(testRunner *testing.M) {
 	switch os.Getenv(envTestMode) {
 	case "server":
 		runTestServer()
 		os.Exit(0)
 	case "early_exit":
 		os.Exit(42)
+	case "ignore_stdin":
+		time.Sleep(8 * time.Second)
+		os.Exit(0)
 	default:
-		os.Exit(m.Run())
+		os.Exit(testRunner.Run())
 	}
 }
 
 func runTestServer() {
-	srv := grpc.NewServer()
-	h := health.NewServer()
-	healthpb.RegisterHealthServer(srv, h)
-	h.SetServingStatus("test", healthpb.HealthCheckResponse_SERVING)
+	server := grpc.NewServer()
+	healthServer := health.NewServer()
+	healthpb.RegisterHealthServer(server, healthServer)
+	healthServer.SetServingStatus("test", healthpb.HealthCheckResponse_SERVING)
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		h.SetServingStatus("test", healthpb.HealthCheckResponse_NOT_SERVING)
+		healthServer.SetServingStatus("test", healthpb.HealthCheckResponse_NOT_SERVING)
 	}()
-	lis := NewListener(os.Stdin, os.Stdout)
-	if err := srv.Serve(lis); err != nil && !errors.Is(err, net.ErrClosed) {
+	listener := NewListener(os.Stdin, os.Stdout)
+	if err := server.Serve(listener); err != nil && !errors.Is(err, net.ErrClosed) {
 		os.Exit(1)
 	}
 }
 
 func startChild(t *testing.T, mode string) *CommandConn {
 	t.Helper()
-	bin, err := os.Executable()
+	executablePath, err := os.Executable()
 	if err != nil {
-		bin = os.Args[0]
+		executablePath = os.Args[0]
 	}
-	cmd := exec.Command(bin)
-	cmd.Env = append(os.Environ(), envTestMode+"="+mode)
-	in, err := cmd.StdinPipe()
+	command := exec.Command(executablePath)
+	command.Env = append(os.Environ(), envTestMode+"="+mode)
+	stdinPipe, err := command.StdinPipe()
 	if err != nil {
 		t.Fatalf("StdinPipe: %v", err)
 	}
-	out, err := cmd.StdoutPipe()
+	stdoutPipe, err := command.StdoutPipe()
 	if err != nil {
 		t.Fatalf("StdoutPipe: %v", err)
 	}
-	if err := cmd.Start(); err != nil {
+	if err := command.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	return NewCommandConn(cmd, in, out)
+	return NewCommandConn(command, stdinPipe, stdoutPipe)
 }
 
-func testRoundTrip(t *testing.T, conn net.Conn, onInitialStream func()) {
+func testRoundTrip(t *testing.T, connection net.Conn, onInitialStream func()) {
 	t.Helper()
-	cc, err := grpc.NewClient("passthrough:///stdio",
+	clientConnection, err := grpc.NewClient("passthrough:///stdio",
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
-			return conn, nil
+			return connection, nil
 		}),
 	)
 	if err != nil {
 		t.Fatalf("grpc.NewClient: %v", err)
 	}
 	defer func() {
-		if err := cc.Close(); err != nil {
-			t.Errorf("cc.Close: %v", err)
+		if err := clientConnection.Close(); err != nil {
+			t.Errorf("clientConnection.Close: %v", err)
 		}
 	}()
 
-	client := healthpb.NewHealthClient(cc)
+	client := healthpb.NewHealthClient(clientConnection)
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 
-	resp, err := client.Check(ctx, &healthpb.HealthCheckRequest{Service: "test"})
+	response, err := client.Check(ctx, &healthpb.HealthCheckRequest{Service: "test"})
 	if err != nil {
 		t.Fatalf("client.Check: %v", err)
 	}
-	if resp.Status != healthpb.HealthCheckResponse_SERVING {
-		t.Fatalf("expected SERVING, got %v", resp.Status)
+	if response.Status != healthpb.HealthCheckResponse_SERVING {
+		t.Fatalf("expected SERVING, got %v", response.Status)
 	}
 
 	stream, err := client.Watch(ctx, &healthpb.HealthCheckRequest{Service: "test"})
 	if err != nil {
 		t.Fatalf("client.Watch: %v", err)
 	}
-	sResp, err := stream.Recv()
+	initialResponse, err := stream.Recv()
 	if err != nil {
 		t.Fatalf("stream.Recv initial: %v", err)
 	}
-	if sResp.Status != healthpb.HealthCheckResponse_SERVING {
-		t.Fatalf("expected initial SERVING, got %v", sResp.Status)
+	if initialResponse.Status != healthpb.HealthCheckResponse_SERVING {
+		t.Fatalf("expected initial SERVING, got %v", initialResponse.Status)
 	}
 
 	if onInitialStream != nil {
 		onInitialStream()
 	}
 
-	sResp2, err := stream.Recv()
+	updatedResponse, err := stream.Recv()
 	if err != nil {
 		t.Fatalf("stream.Recv update: %v", err)
 	}
-	if sResp2.Status != healthpb.HealthCheckResponse_NOT_SERVING {
-		t.Fatalf("expected updated NOT_SERVING, got %v", sResp2.Status)
+	if updatedResponse.Status != healthpb.HealthCheckResponse_NOT_SERVING {
+		t.Fatalf("expected updated NOT_SERVING, got %v", updatedResponse.Status)
 	}
 }
 
 func TestRoundTrip_InProcess(t *testing.T) {
-	serverR, clientW := io.Pipe()
-	clientR, serverW := io.Pipe()
+	serverReader, clientWriter := io.Pipe()
+	clientReader, serverWriter := io.Pipe()
 
-	serverLis := NewListener(serverR, serverW)
-	clientConn := NewConn(clientR, clientW)
+	serverListener := NewListener(serverReader, serverWriter)
+	clientConnection := NewConn(clientReader, clientWriter)
 
-	srv := grpc.NewServer()
-	h := health.NewServer()
-	healthpb.RegisterHealthServer(srv, h)
-	h.SetServingStatus("test", healthpb.HealthCheckResponse_SERVING)
+	server := grpc.NewServer()
+	healthServer := health.NewServer()
+	healthpb.RegisterHealthServer(server, healthServer)
+	healthServer.SetServingStatus("test", healthpb.HealthCheckResponse_SERVING)
 
-	serverErr := make(chan error, 1)
+	serverErrorChannel := make(chan error, 1)
 	go func() {
-		serverErr <- srv.Serve(serverLis)
+		serverErrorChannel <- server.Serve(serverListener)
 	}()
 
-	testRoundTrip(t, clientConn, func() {
-		h.SetServingStatus("test", healthpb.HealthCheckResponse_NOT_SERVING)
+	testRoundTrip(t, clientConnection, func() {
+		healthServer.SetServingStatus("test", healthpb.HealthCheckResponse_NOT_SERVING)
 	})
 
-	srv.GracefulStop()
-	if err := <-serverErr; err != nil && !errors.Is(err, net.ErrClosed) {
-		t.Fatalf("srv.Serve error: %v", err)
+	server.GracefulStop()
+	if err := <-serverErrorChannel; err != nil && !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("server.Serve error: %v", err)
 	}
 }
 
 func TestRoundTrip_ChildProcess(t *testing.T) {
-	conn := startChild(t, "server")
-	testRoundTrip(t, conn, nil)
-	if err := conn.Close(); err != nil {
-		t.Fatalf("conn.Close: %v", err)
+	connection := startChild(t, "server")
+	testRoundTrip(t, connection, nil)
+	if err := connection.Close(); err != nil {
+		t.Fatalf("connection.Close: %v", err)
 	}
 }
 
 func TestChildProcess_EarlyExit(t *testing.T) {
-	conn := startChild(t, "early_exit")
+	connection := startChild(t, "early_exit")
 	defer func() {
-		_ = conn.Close()
+		_ = connection.Close()
 	}()
 
-	cc, err := grpc.NewClient("passthrough:///stdio",
+	clientConnection, err := grpc.NewClient("passthrough:///stdio",
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
-			return conn, nil
+			return connection, nil
 		}),
 	)
 	if err != nil {
 		t.Fatalf("grpc.NewClient: %v", err)
 	}
 	defer func() {
-		_ = cc.Close()
+		_ = clientConnection.Close()
 	}()
 
-	client := healthpb.NewHealthClient(cc)
+	client := healthpb.NewHealthClient(clientConnection)
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 
-	t0 := time.Now()
+	startTime := time.Now()
 	_, err = client.Check(ctx, &healthpb.HealthCheckRequest{Service: "test"})
-	elapsed := time.Since(t0)
+	elapsed := time.Since(startTime)
 	if err == nil {
 		t.Fatal("expected error from early exit child, got nil")
 	}
@@ -207,21 +210,65 @@ func TestChildProcess_EarlyExit(t *testing.T) {
 		t.Fatalf("expected bounded time error, took: %v", elapsed)
 	}
 
-	closeErr := conn.Close()
-	if closeErr == nil || !strings.Contains(closeErr.Error(), "42") {
-		t.Fatalf("expected Close() to return exit status 42, got: %v", closeErr)
+	closeError := connection.Close()
+	if closeError == nil || !strings.Contains(closeError.Error(), "42") {
+		t.Fatalf("expected Close() to return exit status 42, got: %v", closeError)
+	}
+}
+
+func TestChildProcess_IgnoresStdinClose(t *testing.T) {
+	connection := startChild(t, "ignore_stdin")
+
+	startTime := time.Now()
+	err := connection.Close()
+	elapsed := time.Since(startTime)
+
+	if err == nil {
+		t.Fatal("expected Close to return error when child process was killed, got nil")
+	}
+	if !strings.Contains(err.Error(), "killed") {
+		t.Fatalf("expected error to mention child was killed, got: %v", err)
+	}
+	if elapsed < 1500*time.Millisecond {
+		t.Fatalf("Close returned too quickly (%v), expected to wait grace period", elapsed)
+	}
+	if elapsed > 4*time.Second {
+		t.Fatalf("Close took too long (%v), expected bounded wait (< 4s)", elapsed)
 	}
 }
 
 func TestDeadlines(t *testing.T) {
+	pipeReader, pipeWriter := io.Pipe()
+	defer func() {
+		_ = pipeReader.Close()
+		_ = pipeWriter.Close()
+	}()
+
+	testCommand := exec.Command("true")
+	commandStdin, err := testCommand.StdinPipe()
+	if err != nil {
+		t.Fatalf("StdinPipe: %v", err)
+	}
+	commandStdout, err := testCommand.StdoutPipe()
+	if err != nil {
+		t.Fatalf("StdoutPipe: %v", err)
+	}
+	if err := testCommand.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	commandConnection := NewCommandConn(testCommand, commandStdin, commandStdout)
+	defer func() {
+		_ = commandConnection.Close()
+	}()
+
 	now := time.Now()
-	for name, c := range map[string]net.Conn{
-		"Conn":        NewConn(nil, nil),
-		"CommandConn": NewCommandConn(exec.Command("true"), nil, nil),
+	for name, connection := range map[string]net.Conn{
+		"Conn":        NewConn(pipeReader, pipeWriter),
+		"CommandConn": commandConnection,
 	} {
-		if !errors.Is(c.SetDeadline(now), ErrDeadlinesNotSupported) ||
-			!errors.Is(c.SetReadDeadline(now), ErrDeadlinesNotSupported) ||
-			!errors.Is(c.SetWriteDeadline(now), ErrDeadlinesNotSupported) {
+		if !errors.Is(connection.SetDeadline(now), ErrDeadlinesNotSupported) ||
+			!errors.Is(connection.SetReadDeadline(now), ErrDeadlinesNotSupported) ||
+			!errors.Is(connection.SetWriteDeadline(now), ErrDeadlinesNotSupported) {
 			t.Errorf("%s: expected ErrDeadlinesNotSupported", name)
 		}
 	}
