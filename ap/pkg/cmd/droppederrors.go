@@ -161,13 +161,11 @@ func RunDroppedErrors(ctx context.Context, cmd *cobra.Command, opt DroppedErrors
 		configuredBaseline = cfg.DroppedErrorsBaseline()
 	}
 
-	deSettings := &config.DroppedErrorsConfig{
-		CommonLinterConfig: config.CommonLinterConfig{
-			Mode:          mode,
-			SkipGenerated: &skipGenerated,
-			SkipTests:     &skipTests,
-			Baseline:      configuredBaseline,
-		},
+	droppedErrorsSettings := &config.AnalyzerConfig{
+		Mode:               mode,
+		SkipGenerated:      &skipGenerated,
+		SkipTests:          &skipTests,
+		Baseline:           configuredBaseline,
 		Exclude:            exclude,
 		UseDefaultExcludes: &useDefaultExcludes,
 	}
@@ -177,7 +175,7 @@ func RunDroppedErrors(ctx context.Context, cmd *cobra.Command, opt DroppedErrors
 		RepoRoot:      repoRoot,
 		Enabled:       map[string]codestyle.Mode{"droppederrors": codestyle.Mode(mode)},
 		Policies:      map[string]fileset.Policy{"droppederrors": policy},
-		Settings:      map[string]config.LinterConfig{"droppederrors": deSettings},
+		Settings:      map[string]*config.AnalyzerConfig{"droppederrors": droppedErrorsSettings},
 		Analyzers:     []*analysis.Analyzer{analyzer},
 		GOOS:          goosList,
 		WriteBaseline: opt.WriteBaseline,

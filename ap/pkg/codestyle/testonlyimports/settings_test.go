@@ -17,31 +17,24 @@ package testonlyimports
 import (
 	"testing"
 
-	"sigs.k8s.io/yaml"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 )
 
-func TestDecodeSettings(t *testing.T) {
-	yamlContent := `
-mode: warn
-packages:
-  - example.com/extra
-skipGenerated: true
-skipTests: true
-`
-	var s Settings
-	if err := yaml.Unmarshal([]byte(yamlContent), &s); err != nil {
-		t.Fatalf("failed to unmarshal Settings: %v", err)
+func TestNewWithConfig(t *testing.T) {
+	config.RegisterAnalyzer("testOnlyImports")
+	cfg := &config.Config{
+		Lint: &config.LintConfig{
+			Analyzers: map[string]config.AnalyzerConfig{
+				"testOnlyImports": {
+					Mode:     "warn",
+					Packages: []string{"example.com/extra"},
+				},
+			},
+		},
 	}
-	if s.Mode != "warn" {
-		t.Errorf("expected Mode warn, got %q", s.Mode)
-	}
-	if len(s.Packages) != 1 || s.Packages[0] != "example.com/extra" {
-		t.Errorf("expected Packages [example.com/extra], got %v", s.Packages)
-	}
-	if s.SkipGeneratedOverride() == nil || *s.SkipGeneratedOverride() != true {
-		t.Errorf("expected SkipGeneratedOverride true")
-	}
-	if s.SkipTestsOverride() == nil || *s.SkipTestsOverride() != true {
-		t.Errorf("expected SkipTestsOverride true")
+	analyzer := New(fileset.Policy{}, cfg)
+	if analyzer == nil {
+		t.Fatal("expected non-nil analyzer")
 	}
 }

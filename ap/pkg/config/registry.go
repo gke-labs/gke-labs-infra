@@ -18,30 +18,23 @@ import (
 	"sort"
 )
 
-var linterRegistry = make(map[string]func() LinterConfig)
+var analyzers = make(map[string]bool)
 
-// RegisterLinter registers a constructor for a linter's settings type under name and any aliases.
-func RegisterLinter(name string, newConfig func() LinterConfig, aliases ...string) {
-	if newConfig == nil {
-		newConfig = func() LinterConfig { return &CommonLinterConfig{} }
-	}
-	linterRegistry[name] = newConfig
-	for _, alias := range aliases {
-		linterRegistry[alias] = newConfig
-	}
+// RegisterAnalyzer registers a canonical analyzer name.
+func RegisterAnalyzer(name string) {
+	analyzers[name] = true
 }
 
-// RegisteredLinters returns a sorted list of registered linter names.
-func RegisteredLinters() []string {
-	names := make([]string, 0, len(linterRegistry))
-	for name := range linterRegistry {
+// RegisteredAnalyzers returns a sorted list of registered analyzer names.
+func RegisteredAnalyzers() []string {
+	names := make([]string, 0, len(analyzers))
+	for name := range analyzers {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	return names
 }
 
-// RegisteredLinterConstructor returns the constructor for the named linter, or nil if not registered.
-func RegisteredLinterConstructor(name string) func() LinterConfig {
-	return linterRegistry[name]
+func isAnalyzer(name string) bool {
+	return analyzers[name]
 }

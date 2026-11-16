@@ -20,32 +20,12 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
-// ParametersSettings declares the YAML configuration for unusedparameters in .ap/go.yaml.
-type ParametersSettings struct {
-	config.CommonLinterConfig
-}
-
-// CheckParameters reports whether unused parameter checking is enabled.
-func (s *ParametersSettings) CheckParameters() bool {
-	return s != nil && s.IsEnabled() && s.Mode != ""
-}
-
-// NewParametersSettings returns a new empty ParametersSettings instance.
-func NewParametersSettings() config.LinterConfig {
-	return &ParametersSettings{}
-}
-
-// NewSettings returns a new empty CommonLinterConfig instance for unused.
-func NewSettings() config.LinterConfig {
-	return &config.CommonLinterConfig{}
-}
-
 // New constructs the unused Analyzer from the resolved policy and loaded config.
 func New(policy fileset.Policy, cfg *config.Config) *analysis.Analyzer {
 	checkParams := false
 	if cfg != nil {
-		if ps, ok := cfg.Linter("unusedparameters").(*ParametersSettings); ok && ps != nil {
-			checkParams = ps.CheckParameters()
+		if parametersConfig := cfg.Linter("unusedparameters"); parametersConfig != nil {
+			checkParams = parametersConfig.IsEnabled() && parametersConfig.GetMode() != ""
 		}
 	}
 	return NewAnalyzer(Config{

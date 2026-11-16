@@ -20,23 +20,12 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
-// Settings declares the YAML configuration for testOnlyImports in .ap/go.yaml.
-type Settings struct {
-	config.CommonLinterConfig
-	Packages []string `json:"packages"`
-}
-
-// NewSettings returns a new empty Settings instance.
-func NewSettings() config.LinterConfig {
-	return &Settings{}
-}
-
 // New constructs the testonlyimports Analyzer from the resolved policy and loaded config.
 func New(policy fileset.Policy, cfg *config.Config) *analysis.Analyzer {
 	c := Config{Policy: policy}
 	if cfg != nil {
-		if s, ok := cfg.Linter("testOnlyImports").(*Settings); ok && s != nil {
-			c.Packages = s.Packages
+		if analyzerConfig := cfg.Linter("testOnlyImports"); analyzerConfig != nil {
+			c.Packages = analyzerConfig.Packages
 		}
 	}
 	return NewAnalyzer(c)

@@ -147,13 +147,14 @@ func TestCloseWriterConfig(t *testing.T) {
 
 	yamlContent := `
 lint:
-  closeWriter:
-    mode: warn
-    types:
-      - "*bufio.Writer"
-      - example.com/custom.MyWriter
-    skipGenerated: true
-    skipTests: true
+  analyzers:
+    closeWriter:
+      mode: warn
+      types:
+        - "*bufio.Writer"
+        - example.com/custom.MyWriter
+      skipGenerated: true
+      skipTests: true
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 		t.Fatal(err)
@@ -164,20 +165,20 @@ lint:
 		t.Fatalf("Load failed: %v", err)
 	}
 
-	cw := cfg.Linter("closeWriter")
-	if !cw.IsEnabled() {
+	closeWriterConfig := cfg.Linter("closeWriter")
+	if !closeWriterConfig.IsEnabled() {
 		t.Errorf("expected closeWriter to be enabled")
 	}
-	if cw.IsError() {
+	if closeWriterConfig.IsError() {
 		t.Errorf("expected closeWriter not to be error mode (warn)")
 	}
-	if cw.GetMode() != "warn" {
-		t.Errorf("expected mode warn, got %q", cw.GetMode())
+	if closeWriterConfig.GetMode() != "warn" {
+		t.Errorf("expected mode warn, got %q", closeWriterConfig.GetMode())
 	}
-	if cw.SkipGeneratedOverride() == nil || *cw.SkipGeneratedOverride() != true {
+	if closeWriterConfig.SkipGeneratedOverride() == nil || *closeWriterConfig.SkipGeneratedOverride() != true {
 		t.Errorf("expected skipGenerated to be true")
 	}
-	if cw.SkipTestsOverride() == nil || *cw.SkipTestsOverride() != true {
+	if closeWriterConfig.SkipTestsOverride() == nil || *closeWriterConfig.SkipTestsOverride() != true {
 		t.Errorf("expected skipTests to be true")
 	}
 }
@@ -196,8 +197,9 @@ func TestConfig_InvalidCloseWriterMode(t *testing.T) {
 
 	yamlContent := `
 lint:
-  closeWriter:
-    mode: invalid
+  analyzers:
+    closeWriter:
+      mode: invalid
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 		t.Fatal(err)
@@ -226,13 +228,14 @@ func TestTestOnlyImportsConfig(t *testing.T) {
 
 	yamlContent := `
 lint:
-  testOnlyImports:
-    mode: warn
-    packages:
-      - github.com/google/go-cmp
-      - example.com/custom
-    skipGenerated: true
-    skipTests: true
+  analyzers:
+    testOnlyImports:
+      mode: warn
+      packages:
+        - github.com/google/go-cmp
+        - example.com/custom
+      skipGenerated: true
+      skipTests: true
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 		t.Fatal(err)
@@ -243,20 +246,20 @@ lint:
 		t.Fatalf("Load failed: %v", err)
 	}
 
-	toi := cfg.Linter("testOnlyImports")
-	if !toi.IsEnabled() {
+	testOnlyImportsConfig := cfg.Linter("testOnlyImports")
+	if !testOnlyImportsConfig.IsEnabled() {
 		t.Errorf("expected testOnlyImports to be enabled")
 	}
-	if toi.IsError() {
+	if testOnlyImportsConfig.IsError() {
 		t.Errorf("expected testOnlyImports not to be error mode (warn)")
 	}
-	if toi.GetMode() != "warn" {
-		t.Errorf("expected mode warn, got %q", toi.GetMode())
+	if testOnlyImportsConfig.GetMode() != "warn" {
+		t.Errorf("expected mode warn, got %q", testOnlyImportsConfig.GetMode())
 	}
-	if toi.SkipGeneratedOverride() == nil || *toi.SkipGeneratedOverride() != true {
+	if testOnlyImportsConfig.SkipGeneratedOverride() == nil || *testOnlyImportsConfig.SkipGeneratedOverride() != true {
 		t.Errorf("expected skipGenerated to be true")
 	}
-	if toi.SkipTestsOverride() == nil || *toi.SkipTestsOverride() != true {
+	if testOnlyImportsConfig.SkipTestsOverride() == nil || *testOnlyImportsConfig.SkipTestsOverride() != true {
 		t.Errorf("expected skipTests to be true")
 	}
 }
@@ -321,7 +324,7 @@ func TestConfig_InvalidLinterModes(t *testing.T) {
 			if err := os.Mkdir(apDir, 0755); err != nil {
 				t.Fatal(err)
 			}
-			yamlContent := fmt.Sprintf("lint:\n  %s:\n    mode: invalid\n", linter)
+			yamlContent := fmt.Sprintf("lint:\n  analyzers:\n    %s:\n      mode: invalid\n", linter)
 			if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 				t.Fatal(err)
 			}
@@ -351,8 +354,9 @@ func TestConfig_InvalidTestOnlyImportsMode(t *testing.T) {
 
 	yamlContent := `
 lint:
-  testOnlyImports:
-    mode: invalid
+  analyzers:
+    testOnlyImports:
+      mode: invalid
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 		t.Fatal(err)
@@ -367,7 +371,7 @@ lint:
 	}
 }
 
-func TestCommonLinterConfig_ModeIgnore(t *testing.T) {
+func TestAnalyzerConfig_ModeIgnore(t *testing.T) {
 	tempDir := t.TempDir()
 	apDir := filepath.Join(tempDir, ".ap")
 	if err := os.Mkdir(apDir, 0755); err != nil {
@@ -376,10 +380,11 @@ func TestCommonLinterConfig_ModeIgnore(t *testing.T) {
 
 	yamlContent := `
 lint:
-  unused:
-    mode: ignore
-  replaceEmptyInterfaceWithAny:
-    mode: ignore
+  analyzers:
+    unused:
+      mode: ignore
+    replaceEmptyInterfaceWithAny:
+      mode: ignore
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 		t.Fatal(err)
@@ -398,7 +403,7 @@ lint:
 	}
 }
 
-func TestCommonLinterConfig_Baseline(t *testing.T) {
+func TestAnalyzerConfig_Baseline(t *testing.T) {
 	tempDir := t.TempDir()
 	apDir := filepath.Join(tempDir, ".ap")
 	if err := os.Mkdir(apDir, 0755); err != nil {
@@ -407,10 +412,11 @@ func TestCommonLinterConfig_Baseline(t *testing.T) {
 
 	yamlContent := `
 lint:
-  closeWriter:
-    baseline: .ap/custom-closewriter.txt
-  unused:
-    baseline: .ap/custom-unused.txt
+  analyzers:
+    closeWriter:
+      baseline: .ap/custom-closewriter.txt
+    unused:
+      baseline: .ap/custom-unused.txt
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 		t.Fatal(err)
@@ -421,14 +427,14 @@ lint:
 		t.Fatalf("Load failed: %v", err)
 	}
 
-	cw := cfg.Linter("closeWriter")
-	if cw.GetBaseline() != ".ap/custom-closewriter.txt" {
-		t.Errorf("expected closewriter baseline .ap/custom-closewriter.txt, got %q", cw.GetBaseline())
+	closeWriterConfig := cfg.Linter("closeWriter")
+	if closeWriterConfig.GetBaseline() != ".ap/custom-closewriter.txt" {
+		t.Errorf("expected closewriter baseline .ap/custom-closewriter.txt, got %q", closeWriterConfig.GetBaseline())
 	}
 
-	u := cfg.Linter("unused")
-	if u.GetBaseline() != ".ap/custom-unused.txt" {
-		t.Errorf("expected unused baseline .ap/custom-unused.txt, got %q", u.GetBaseline())
+	unusedConfig := cfg.Linter("unused")
+	if unusedConfig.GetBaseline() != ".ap/custom-unused.txt" {
+		t.Errorf("expected unused baseline .ap/custom-unused.txt, got %q", unusedConfig.GetBaseline())
 	}
 }
 
@@ -441,8 +447,9 @@ func TestConfig_InvalidUnusedMode(t *testing.T) {
 
 	yamlContent := `
 lint:
-  unused:
-    mode: badmode
+  analyzers:
+    unused:
+      mode: badmode
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 		t.Fatal(err)
@@ -454,6 +461,38 @@ lint:
 	}
 	if !strings.Contains(err.Error(), "invalid unused mode") {
 		t.Errorf("expected error to mention 'invalid unused mode', got: %v", err)
+	}
+}
+
+func TestConfig_Validate_UnknownAnalyzer(t *testing.T) {
+	tempDir := t.TempDir()
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.Mkdir(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	yamlContent := `
+lint:
+  analyzers:
+    nonExistentAnalyzer:
+      mode: error
+`
+	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(tempDir)
+	if err == nil {
+		t.Fatalf("expected Load to fail on unknown analyzer")
+	}
+	if !strings.Contains(err.Error(), ".ap/go.yaml") {
+		t.Errorf("expected error to name .ap/go.yaml, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), `unknown analyzer "nonExistentAnalyzer"`) {
+		t.Errorf("expected error to name unknown analyzer, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "valid analyzers:") {
+		t.Errorf("expected error to list valid analyzers, got: %v", err)
 	}
 }
 
@@ -473,14 +512,15 @@ func TestDroppedErrorsConfig(t *testing.T) {
 lint:
   goos:
     - linux
-  droppedErrors:
-    mode: error
-    exclude:
-      - fmt.Fprintln
-    baseline: .ap/droppederrors-baseline.txt
-    skipTests: false
-    skipGenerated: true
-    useDefaultExcludes: false
+  analyzers:
+    droppedErrors:
+      mode: error
+      exclude:
+        - fmt.Fprintln
+      baseline: .ap/droppederrors-baseline.txt
+      skipTests: false
+      skipGenerated: true
+      useDefaultExcludes: false
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 		t.Fatal(err)
@@ -602,8 +642,9 @@ func TestLintConfig_SkipGenerated(t *testing.T) {
 	yamlContent := `
 lint:
   skipGenerated: true
-  droppedErrors:
-    skipGenerated: false
+  analyzers:
+    droppedErrors:
+      skipGenerated: false
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 		t.Fatal(err)
@@ -652,8 +693,9 @@ func TestLintConfig_SkipTests(t *testing.T) {
 	yamlContent := `
 lint:
   skipTests: true
-  droppedErrors:
-    skipTests: false
+  analyzers:
+    droppedErrors:
+      skipTests: false
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 		t.Fatal(err)
@@ -725,7 +767,7 @@ platforms:
 	}
 }
 
-func TestLintConfig_MarshalJSON_RoundTrip(t *testing.T) {
+func TestLintConfig_RoundTrip(t *testing.T) {
 	trueVal := true
 	falseVal := false
 	tests := []struct {
@@ -740,11 +782,11 @@ func TestLintConfig_MarshalJSON_RoundTrip(t *testing.T) {
 			name: "lint with droppederrors exclude and unused mode",
 			cfg: &Config{
 				Lint: &LintConfig{
-					linters: map[string]LinterConfig{
-						"droppedErrors": &DroppedErrorsConfig{
+					Analyzers: map[string]AnalyzerConfig{
+						"droppedErrors": {
 							Exclude: []string{"fmt.Fprintln", "os.Remove"},
 						},
-						"unused": &CommonLinterConfig{
+						"unused": {
 							Mode: "warn",
 						},
 					},
@@ -761,16 +803,14 @@ func TestLintConfig_MarshalJSON_RoundTrip(t *testing.T) {
 					SkipGenerated: &trueVal,
 					SkipTests:     &falseVal,
 					GOOS:          []string{"linux", "darwin"},
-					linters: map[string]LinterConfig{
-						"droppedErrors": &DroppedErrorsConfig{
-							CommonLinterConfig: CommonLinterConfig{
-								Mode:     "error",
-								Baseline: ".ap/droppederrors-baseline.txt",
-							},
+					Analyzers: map[string]AnalyzerConfig{
+						"droppedErrors": {
+							Mode:               "error",
+							Baseline:           ".ap/droppederrors-baseline.txt",
 							Exclude:            []string{"fmt.Println"},
 							UseDefaultExcludes: &falseVal,
 						},
-						"unused": &CommonLinterConfig{
+						"unused": {
 							Mode:     "ignore",
 							Baseline: ".ap/unused-baseline.txt",
 						},
@@ -780,9 +820,9 @@ func TestLintConfig_MarshalJSON_RoundTrip(t *testing.T) {
 		},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			data, err := yaml.Marshal(tc.cfg)
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			data, err := yaml.Marshal(testCase.cfg)
 			if err != nil {
 				t.Fatalf("yaml.Marshal failed: %v", err)
 			}
@@ -792,8 +832,8 @@ func TestLintConfig_MarshalJSON_RoundTrip(t *testing.T) {
 				t.Fatalf("UnmarshalStrict failed: %v\nYAML:\n%s", err, string(data))
 			}
 
-			if !reflect.DeepEqual(tc.cfg, &got) {
-				t.Errorf("round-trip mismatch:\nwant: %+v\ngot:  %+v", tc.cfg, &got)
+			if !reflect.DeepEqual(testCase.cfg, &got) {
+				t.Errorf("round-trip mismatch:\nwant: %+v\ngot:  %+v", testCase.cfg, &got)
 			}
 		})
 	}
@@ -815,14 +855,12 @@ func TestConfig_DeepCopy(t *testing.T) {
 			SkipGenerated: &trueVal,
 			SkipTests:     &falseVal,
 			GOOS:          []string{"linux", "darwin"},
-			linters: map[string]LinterConfig{
-				"droppedErrors": &DroppedErrorsConfig{
-					CommonLinterConfig: CommonLinterConfig{
-						Mode: "error",
-					},
+			Analyzers: map[string]AnalyzerConfig{
+				"droppedErrors": {
+					Mode:    "error",
 					Exclude: []string{"fmt.Println"},
 				},
-				"unused": &CommonLinterConfig{
+				"unused": {
 					Mode: "warn",
 				},
 			},
@@ -839,8 +877,8 @@ func TestConfig_DeepCopy(t *testing.T) {
 	copyCfg.Skip[0] = "mutated"
 	copyCfg.Lint.GOOS[0] = "windows"
 	*copyCfg.Gofmt.Enabled = false
-	de := copyCfg.DroppedErrors()
-	de.Exclude[0] = "mutated"
+	droppedErrorsConfig := copyCfg.DroppedErrors()
+	droppedErrorsConfig.Exclude[0] = "mutated"
 
 	if orig.Toolchain == "go1.28.0" {
 		t.Errorf("mutating copy affected orig.Toolchain")

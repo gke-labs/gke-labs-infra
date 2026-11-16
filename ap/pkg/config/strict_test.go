@@ -56,8 +56,9 @@ func TestLoad_UnknownNestedKeyUnderLintCheck(t *testing.T) {
 
 	yamlContent := `
 lint:
-  unused:
-    unknownNestedField: true
+  analyzers:
+    unused:
+      unknownNestedField: true
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 		t.Fatal(err)
@@ -65,13 +66,39 @@ lint:
 
 	_, err := Load(tempDir)
 	if err == nil {
-		t.Fatalf("expected Load to fail with unknown nested key under lint.unused")
+		t.Fatalf("expected Load to fail with unknown nested key under lint.analyzers.unused")
 	}
 	if !strings.Contains(err.Error(), ".ap/go.yaml") {
 		t.Errorf("expected error to name .ap/go.yaml, got %v", err)
 	}
-	if !strings.Contains(err.Error(), `"lint.unused.unknownNestedField"`) {
-		t.Errorf("expected error to name key path \"lint.unused.unknownNestedField\", got %v", err)
+	if !strings.Contains(err.Error(), `"lint.analyzers.unused.unknownNestedField"`) {
+		t.Errorf("expected error to name key path \"lint.analyzers.unused.unknownNestedField\", got %v", err)
+	}
+}
+
+func TestLoad_OldStyleLintKeyError(t *testing.T) {
+	tempDir := t.TempDir()
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.Mkdir(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	yamlContent := `
+lint:
+  droppedErrors:
+    mode: error
+`
+	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(tempDir)
+	if err == nil {
+		t.Fatalf("expected Load to fail on old-style lint.droppedErrors key")
+	}
+	want := `unknown key "lint.droppedErrors": analyzer settings moved to lint.analyzers.droppedErrors`
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("expected error to contain %q, got: %v", want, err)
 	}
 }
 
@@ -92,86 +119,61 @@ skp:
 			wantDidYou: `"skip"`,
 		},
 		{
-			name: "typo in lint check name",
+			name: "typo in lint analyzers key",
 			yaml: `
 lint:
-  droppedErros:
-    mode: error
+  analyze:
+    unused:
+      mode: error
 `,
-			wantKey:    `"lint.droppedErros"`,
-			wantDidYou: `"droppedErrors"`,
+			wantKey:    `"lint.analyze"`,
+			wantDidYou: `"analyzers"`,
 		},
 		{
-			name: "typo in lint.unused skipGenerated",
+			name: "typo in lint.analyzers.unused skipGenerated",
 			yaml: `
 lint:
-  unused:
-    skipGenerted: false
+  analyzers:
+    unused:
+      skipGenerted: false
 `,
-			wantKey:    `"lint.unused.skipGenerted"`,
+			wantKey:    `"lint.analyzers.unused.skipGenerted"`,
 			wantDidYou: `"skipGenerated"`,
 		},
 		{
-			name: "typo in lint.droppedErrors baseline",
+			name: "typo in lint.analyzers.droppedErrors baseline",
 			yaml: `
 lint:
-  droppedErrors:
-    basline: .ap/baseline.txt
+  analyzers:
+    droppedErrors:
+      basline: .ap/baseline.txt
 `,
-			wantKey:    `"lint.droppedErrors.basline"`,
+			wantKey:    `"lint.analyzers.droppedErrors.basline"`,
 			wantDidYou: `"baseline"`,
 		},
 		{
-			name: "typo in lint.testOnlyImports key",
+			name: "typo in lint.analyzers.testOnlyImports packages",
 			yaml: `
 lint:
-  testOnlyImprts:
-    mode: error
+  analyzers:
+    testOnlyImports:
+      pakcages:
+        - github.com/google/go-cmp
 `,
-			wantKey:    `"lint.testOnlyImprts"`,
-			wantDidYou: `"testOnlyImports"`,
-		},
-		{
-			name: "typo in lint.testOnlyImports packages",
-			yaml: `
-lint:
-  testOnlyImports:
-    pakcages:
-      - github.com/google/go-cmp
-`,
-			wantKey:    `"lint.testOnlyImports.pakcages"`,
+			wantKey:    `"lint.analyzers.testOnlyImports.pakcages"`,
 			wantDidYou: `"packages"`,
 		},
 		{
-			name: "typo in lint.closeWriter key",
+			name: "typo in lint.analyzers.closeWriter types",
 			yaml: `
 lint:
-  closeWritr:
-    mode: error
+  analyzers:
+    closeWriter:
+      typess:
+        - "*bufio.Writer"
 `,
-			wantKey:    `"lint.closeWritr"`,
-			wantDidYou: `"closeWriter"`,
-		},
-		{
-			name: "typo in lint.closeWriter types",
-			yaml: `
-lint:
-  closeWriter:
-    typess:
-      - "*bufio.Writer"
-`,
-			wantKey:    `"lint.closeWriter.typess"`,
+			wantKey:    `"lint.analyzers.closeWriter.typess"`,
 			wantDidYou: `"types"`,
-		},
-		{
-			name: "typo in lint.deferInLoop key",
-			yaml: `
-lint:
-  deferInLop:
-    mode: error
-`,
-			wantKey:    `"lint.deferInLop"`,
-			wantDidYou: `"deferInLoop"`,
 		},
 	}
 
@@ -221,40 +223,41 @@ lint:
   skipTests: false
   goos:
     - linux
-  unused:
-    mode: error
-    skipGenerated: false
-    skipTests: true
-  testcontext:
-    mode: error
-    skipGenerated: true
-    skipTests: true
-  unusedparameters:
-    mode: warn
-  replaceEmptyInterfaceWithAny:
-    mode: error
-    skipGenerated: true
-    skipTests: false
-  droppedErrors:
-    mode: error
-    exclude:
-      - fmt.Println
-    baseline: .ap/droppederrors-baseline.txt
-    skipTests: true
-    skipGenerated: false
-    useDefaultExcludes: true
-  testOnlyImports:
-    mode: error
-    packages:
-      - github.com/google/go-cmp
-    skipGenerated: true
-    skipTests: true
-  closeWriter:
-    mode: error
-    types:
-      - "*bufio.Writer"
-    skipGenerated: false
-    skipTests: true
+  analyzers:
+    unused:
+      mode: error
+      skipGenerated: false
+      skipTests: true
+    testcontext:
+      mode: error
+      skipGenerated: true
+      skipTests: true
+    unusedparameters:
+      mode: warn
+    replaceEmptyInterfaceWithAny:
+      mode: error
+      skipGenerated: true
+      skipTests: false
+    droppedErrors:
+      mode: error
+      exclude:
+        - fmt.Println
+      baseline: .ap/droppederrors-baseline.txt
+      skipTests: true
+      skipGenerated: false
+      useDefaultExcludes: true
+    testOnlyImports:
+      mode: error
+      packages:
+        - github.com/google/go-cmp
+      skipGenerated: true
+      skipTests: true
+    closeWriter:
+      mode: error
+      types:
+        - "*bufio.Writer"
+      skipGenerated: false
+      skipTests: true
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 		t.Fatal(err)

@@ -80,37 +80,29 @@ func validateUnknownKeys(rawMap map[string]any, targetType reflect.Type, parentP
 
 	fields, names := getStructFields(targetType)
 
-	if targetType == reflect.TypeOf(LintConfig{}) {
-		for name, newFn := range linterRegistry {
-			if _, exists := fields[name]; !exists {
-				cfg := newFn()
-				fields[name] = structFieldInfo{
-					field: reflect.StructField{
-						Name: name,
-						Type: reflect.TypeOf(cfg),
-					},
-					name: name,
-				}
-				names = append(names, name)
-			}
-		}
-	}
-
 	var rawKeys []string
-	for k := range rawMap {
-		rawKeys = append(rawKeys, k)
+	for rawKey := range rawMap {
+		rawKeys = append(rawKeys, rawKey)
 	}
 	sort.Strings(rawKeys)
 
-	for _, k := range rawKeys {
-		fullPath := k
+	for _, rawKey := range rawKeys {
+		fullPath := rawKey
 		if parentPath != "" {
-			fullPath = parentPath + "." + k
+			fullPath = parentPath + "." + rawKey
 		}
 
-		fieldInfo, ok := fields[k]
+		fieldInfo, ok := fields[rawKey]
 		if !ok {
-			closest := findClosest(k, names)
+			if targetType == reflect.TypeOf(LintConfig{}) {
+				if isAnalyzer(rawKey) {
+					return fmt.Errorf("unknown key %q: analyzer settings moved to lint.analyzers.%s", fullPath, rawKey)
+				}
+				if rawKey == "replace-empty-interface-with-any" {
+					return fmt.Errorf("unknown key %q: analyzer settings moved to lint.analyzers.replaceEmptyInterfaceWithAny", fullPath)
+				}
+			}
+			closest := findClosest(rawKey, names)
 			if closest != "" {
 				return fmt.Errorf("unknown key %q (did you mean %q?)", fullPath, closest)
 			}
@@ -118,7 +110,7 @@ func validateUnknownKeys(rawMap map[string]any, targetType reflect.Type, parentP
 			return fmt.Errorf("unknown key %q (valid keys: %s)", fullPath, strings.Join(names, ", "))
 		}
 
-		val := rawMap[k]
+		val := rawMap[rawKey]
 		if val == nil {
 			continue
 		}

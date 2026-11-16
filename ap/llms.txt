@@ -6,7 +6,7 @@
 
 - The git repository root (containing `.git`) is the only root; configuration is read from `<repo>/.ap/`.
 - Commands operate on a subtree of the repository: either the positional target when specified (e.g., `ap e2e autodeploy`, `ap deploy <dir>`), the subtree of the current working directory, or the whole repository when run from the root.
-- Subtree overrides: A `.ap/` directory in a subtree can override configuration options for files beneath it. The effective configuration for a path is the base configuration with keys overridden by the nearest enclosing subtree `.ap/go.yaml`, walking up to the root (only present keys override, absent keys inherit, lists such as `skip` replace, explicitly written keys win, mapping sections merge per key). Overrides apply to `gofmt`, `govet`, `govulncheck`, `tidy`, `skip`, `lint` (analyzer modes and baselines), and `toolchain`, while tool version files (`protoc.yaml`, `docker.yaml`, `helm.yaml`, `kind.yaml`, `kubectl.yaml`, `kustomize.yaml`) and `.ap/ap.yaml` remain root-only. Subtree `.ap/` directories do not change discovery, build context, image naming, or generated presubmits. Example subtree `.ap/go.yaml`:
+- Subtree overrides: A `.ap/` directory in a subtree can override configuration options for files beneath it. The effective configuration for a path is the base configuration with keys overridden by the nearest enclosing subtree `.ap/go.yaml`, walking up to the root (only present keys override, absent keys inherit, lists such as `skip` replace, explicitly written keys win, mapping sections merge per key). Overrides apply to `gofmt`, `govet`, `govulncheck`, `tidy`, `skip`, `lint` (analyzer modes and baselines under `lint.analyzers.<name>`, e.g. `lint.analyzers.droppedErrors.mode: error`), and `toolchain`, while tool version files (`protoc.yaml`, `docker.yaml`, `helm.yaml`, `kind.yaml`, `kubectl.yaml`, `kustomize.yaml`) and `.ap/ap.yaml` remain root-only. Subtree `.ap/` directories do not change discovery, build context, image naming, or generated presubmits. Example subtree `.ap/go.yaml`:
   ```yaml
   govulncheck:
     enabled: false
@@ -34,7 +34,7 @@ When making changes to an AP-managed project, coding agents should follow this v
 
 0.  **Initialize (if onboarding)**: If the repository or component is not yet configured for `ap`, run `ap init`.
 1.  **Generate Code**: Run `ap generate` to update any generated files, CI scripts, or manifests (note: `ap generate` also runs `ap fmt` to format code, tidy Go modules, and stamp license headers).
-2.  **Lint**: Run `ap lint` to ensure code follows project style and quality guidelines.
+2.  **Lint**: Run `ap lint` to ensure code follows project style and quality guidelines. Analyzer settings are configured under `lint.analyzers.<name>` (e.g. `lint.analyzers.droppedErrors.mode: error`).
     -   When adopting a strict check at `mode: error` with existing findings, run `ap lint --write-baseline`, commit the `.ap/*-baseline.txt` files, and fix entries over time.
     -   Task scripts must be portable across macOS and Linux; `ap lint` flags known GNU-only / bash-4-only constructs.
 3.  **Test**:

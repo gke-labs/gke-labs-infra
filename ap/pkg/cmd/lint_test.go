@@ -43,11 +43,12 @@ func TestRunLint_UnknownKeyFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Misspelled key under lint.unused
+	// Misspelled key under lint.analyzers.unused
 	yamlContent := `
 lint:
-  unused:
-    skipGenerted: false
+  analyzers:
+    unused:
+      skipGenerted: false
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 		t.Fatal(err)
@@ -66,8 +67,8 @@ lint:
 	if err == nil {
 		t.Fatalf("expected RunLint to fail with unknown key error")
 	}
-	if !strings.Contains(err.Error(), `"lint.unused.skipGenerted"`) {
-		t.Errorf("expected error to name key path \"lint.unused.skipGenerted\", got: %v", err)
+	if !strings.Contains(err.Error(), `"lint.analyzers.unused.skipGenerted"`) {
+		t.Errorf("expected error to name key path \"lint.analyzers.unused.skipGenerted\", got: %v", err)
 	}
 	if !strings.Contains(err.Error(), `"skipGenerated"`) {
 		t.Errorf("expected error to suggest \"skipGenerated\", got: %v", err)

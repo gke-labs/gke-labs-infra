@@ -179,7 +179,7 @@ func TestLintTasks_DroppedErrors(t *testing.T) {
 	})
 
 	t.Run("mode_warn", func(t *testing.T) {
-		dir, r := setupModule(t, "lint:\n  droppedErrors:\n    mode: warn\n")
+		dir, r := setupModule(t, "lint:\n  analyzers:\n    droppedErrors:\n      mode: warn\n")
 		taskGroup, err := LintTasks(r, dir)
 		if err != nil {
 			t.Fatal(err)
@@ -194,7 +194,7 @@ func TestLintTasks_DroppedErrors(t *testing.T) {
 	})
 
 	t.Run("mode_error", func(t *testing.T) {
-		dir, r := setupModule(t, "lint:\n  droppedErrors:\n    mode: error\n")
+		dir, r := setupModule(t, "lint:\n  analyzers:\n    droppedErrors:\n      mode: error\n")
 		taskGroup, err := LintTasks(r, dir)
 		if err != nil {
 			t.Fatal(err)
@@ -209,7 +209,7 @@ func TestLintTasks_DroppedErrors(t *testing.T) {
 	})
 
 	t.Run("mode_ignore", func(t *testing.T) {
-		dir, r := setupModule(t, "lint:\n  droppedErrors:\n    mode: ignore\n")
+		dir, r := setupModule(t, "lint:\n  analyzers:\n    droppedErrors:\n      mode: ignore\n")
 		taskGroup, err := LintTasks(r, dir)
 		if err != nil {
 			t.Fatal(err)
@@ -342,9 +342,10 @@ func TestLintTasks_PerCheckOverrides(t *testing.T) {
 	t.Run("unused_skipGenerated_false_takes_effect", func(t *testing.T) {
 		dir, r := setupModule(t, `
 lint:
-  unused:
-    skipGenerated: false
-    skipTests: true
+  analyzers:
+    unused:
+      skipGenerated: false
+      skipTests: true
 `)
 		taskGroup, err := LintTasks(r, dir)
 		if err != nil {
@@ -365,12 +366,13 @@ lint:
 	t.Run("testcontext_and_any_overrides_take_effect", func(t *testing.T) {
 		dir, r := setupModule(t, `
 lint:
-  testcontext:
-    skipGenerated: true
-    skipTests: true
-  replaceEmptyInterfaceWithAny:
-    skipGenerated: false
-    skipTests: true
+  analyzers:
+    testcontext:
+      skipGenerated: true
+      skipTests: true
+    replaceEmptyInterfaceWithAny:
+      skipGenerated: false
+      skipTests: true
 `)
 		taskGroup, err := LintTasks(r, dir)
 		if err != nil {
@@ -408,8 +410,9 @@ lint:
 		}
 		yamlContent := `
 lint:
-  unusedparameters:
-    mode: error
+  analyzers:
+    unusedparameters:
+      mode: error
 `
 		if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 			t.Fatal(err)
@@ -521,12 +524,13 @@ func TestLintTasks_TestOnlyImports(t *testing.T) {
 	t.Run("configured_warn_mode_and_custom_packages", func(t *testing.T) {
 		dir, r := setupModule(t, `
 lint:
-  testOnlyImports:
-    mode: warn
-    packages:
-      - github.com/google/go-cmp
-    skipGenerated: true
-    skipTests: true
+  analyzers:
+    testOnlyImports:
+      mode: warn
+      packages:
+        - github.com/google/go-cmp
+      skipGenerated: true
+      skipTests: true
 `)
 		taskGroup, err := LintTasks(r, dir)
 		if err != nil {
@@ -554,8 +558,9 @@ lint:
 	t.Run("mode_ignore_disables_task", func(t *testing.T) {
 		dir, r := setupModule(t, `
 lint:
-  testOnlyImports:
-    mode: ignore
+  analyzers:
+    testOnlyImports:
+      mode: ignore
 `)
 		taskGroup, err := LintTasks(r, dir)
 		if err != nil {
@@ -631,12 +636,13 @@ func TestLintTasks_CloseWriter(t *testing.T) {
 	t.Run("configured_types_and_warn_mode", func(t *testing.T) {
 		dir, r := setupModule(t, `
 lint:
-  closeWriter:
-    mode: warn
-    types:
-      - "*bufio.Writer"
-    skipGenerated: true
-    skipTests: true
+  analyzers:
+    closeWriter:
+      mode: warn
+      types:
+        - "*bufio.Writer"
+      skipGenerated: true
+      skipTests: true
 `)
 		taskGroup, err := LintTasks(r, dir)
 		if err != nil {
@@ -664,8 +670,9 @@ lint:
 	t.Run("mode_ignore_disables_task", func(t *testing.T) {
 		dir, r := setupModule(t, `
 lint:
-  closeWriter:
-    mode: ignore
+  analyzers:
+    closeWriter:
+      mode: ignore
 `)
 		taskGroup, err := LintTasks(r, dir)
 		if err != nil {

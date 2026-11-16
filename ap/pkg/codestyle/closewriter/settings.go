@@ -20,23 +20,12 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
-// Settings declares the YAML configuration for closeWriter in .ap/go.yaml.
-type Settings struct {
-	config.CommonLinterConfig
-	Types []string `json:"types"`
-}
-
-// NewSettings returns a new empty Settings instance.
-func NewSettings() config.LinterConfig {
-	return &Settings{}
-}
-
 // New constructs the closewriter Analyzer from the resolved policy and loaded config.
 func New(policy fileset.Policy, cfg *config.Config) *analysis.Analyzer {
 	c := Config{Policy: policy}
 	if cfg != nil {
-		if s, ok := cfg.Linter("closeWriter").(*Settings); ok && s != nil {
-			c.Types = s.Types
+		if analyzerConfig := cfg.Linter("closeWriter"); analyzerConfig != nil {
+			c.Types = analyzerConfig.Types
 		}
 	}
 	return NewAnalyzer(c)
