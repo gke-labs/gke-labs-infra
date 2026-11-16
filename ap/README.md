@@ -314,6 +314,23 @@ generates `dev/ci/presubmits/ap-audit-generated` (which runs
 `ap generate --audit-generated --strict`), adding an automated presubmit check
 that fails if any generated file lacks a standard generated code header.
 
+### plugins.yaml
+
+Configures plugins for extensible build tooling.
+
+Example `.ap/plugins.yaml`:
+```yaml
+plugins:
+  astro:
+    image: ghcr.io/gke-labs/astro-builder@sha256:4b22262d5395690dfa3...
+    network: false
+```
+
+- `plugins`: Map of plugin names to declarations.
+- `image`: Remote container image pinned immutably by digest (`<repo>@sha256:...`).
+- `network`: Boolean flag (default `false`). When `true`, authorizes network access for the plugin if the plugin also declares that it requires network access.
+- `enabled`: Optional boolean flag. When `false`, disables the plugin (useful in subtree `.ap/plugins.yaml` overrides).
+
 ## Usage
 
 Run `go run ap/main.go` or build the binary.

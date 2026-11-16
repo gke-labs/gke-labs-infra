@@ -18,10 +18,13 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/plugins"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
 )
@@ -64,6 +67,16 @@ func RunLs(ctx context.Context, opt LsOptions) error {
 	}
 
 	scopes, err := DiscoverScopes(ctx, r, opt.RepoRoot, opt.Dir)
+	if err != nil {
+		return err
+	}
+
+	cacheDirectory, err := fileutils.CacheDir()
+	if err != nil {
+		return err
+	}
+
+	activatedPluginTasks, err := plugins.ActivatedTasks(r, opt.RepoRoot, opt.Dir, cacheDirectory)
 	if err != nil {
 		return err
 	}
@@ -115,7 +128,30 @@ func RunLs(ctx context.Context, opt LsOptions) error {
 			all = append(all, &tasks.Group{Name: "format-tasks", Tasks: scope.FormatTasks})
 		}
 
+		if pluginTasks := activatedPluginTasks[dir]; len(pluginTasks) > 0 {
+			all = append(all, pluginTasks...)
+			delete(activatedPluginTasks, dir)
+		}
+
 		for _, task := range all {
+			printTask(task, 1)
+		}
+	}
+
+	var otherDirectories []string
+	for directory := range activatedPluginTasks {
+		otherDirectories = append(otherDirectories, directory)
+	}
+	sort.Strings(otherDirectories)
+
+	for _, directory := range otherDirectories {
+		rel, err := filepath.Rel(opt.RepoRoot, directory)
+		name := rel
+		if err != nil {
+			name = directory
+		}
+		fmt.Printf("%s\n", filepath.ToSlash(name))
+		for _, task := range activatedPluginTasks[directory] {
 			printTask(task, 1)
 		}
 	}
