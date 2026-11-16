@@ -111,13 +111,13 @@ type IgnoreList struct {
 // NewIgnoreList creates a new IgnoreList.
 func NewIgnoreList(patterns []string) *IgnoreList {
 	var matchers []*pathMatcher
-	for _, p := range patterns {
-		m, err := parsePattern(p, false)
+	for _, pattern := range patterns {
+		matcher, err := parsePattern(pattern, false)
 		if err != nil {
-			klog.Errorf("invalid ignore pattern %q: %v", p, err)
+			klog.Errorf("invalid ignore pattern %q: %v", pattern, err)
 			continue
 		}
-		matchers = append(matchers, m)
+		matchers = append(matchers, matcher)
 	}
 	return &IgnoreList{matchers: matchers}
 }
