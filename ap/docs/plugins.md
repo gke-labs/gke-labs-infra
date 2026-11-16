@@ -85,6 +85,13 @@ message TaskResult {
 }
 ```
 
+- **File Transmission Limits & Semantics**: `FileChunk` carries only regular file content.
+  - *Symlinks*: Symlinks in the repository view cannot be represented directly as symlinks in `FileChunk`; their target files are dereferenced and transmitted as regular file content. Output files cannot be symlinks (attempted symlinks in output streams are rejected by `fileutils.UntrustedRoot`).
+  - *Empty Directories*: Empty directories are not transmitted; directories are created implicitly on the receiving side from file path hierarchies.
+  - *File Modes*: When writing output files, `ap` applies only the permission bits of `mode` (`os.FileMode(mode).Perm()`), preserving executable flags (`0755` vs `0644`) while discarding setuid/setgid/sticky bits.
+- **Two Failure Modes**:
+  - *Task execution failure (`TaskResult` with non-zero `exit_code`)*: The task ran inside the plugin and completed with an error status (e.g. test failure or linter issue). `ap` records the exit status, flushes any streamed `LogLine` output into the task log, and prints the standard task failure line (e.g. `=== astro-build docs (failed, 1.4s)`).
+  - *gRPC status error*: An infrastructure, protocol, or plugin crash (e.g. unknown task, invalid chunk framing, unhandled panic, or stream disconnection). `ap` treats this as a plugin fault, prints the gRPC status code and error message along with any container stderr, and aborts execution with an error.
 - **Relation to `SandboxService`**: `SandboxService` in `ap/pkg/sandbox/api/ap.proto` is an internal container execution service for running generic argv commands with per-file `WriteFile`/`ReadFile` RPCs. In contrast, `PluginService` defines an autonomous plugin domain model with capability discovery (`Describe`) and a single pipelined streaming RPC (`RunTask`) carrying files, logs, and outputs in one session. Reusing `SandboxService` would couple external plugins to internal execution semantics and force hundreds of sequential single-file RPCs instead of a single stream.
 - **Versioning**: The contract is versioned as `ap.plugin/v1alpha1`. Because plugin support is unreleased and no external plugins exist, the gRPC protocol completely replaces the command-line contract without backward compatibility shims. Invocations of legacy CLI plugins fail immediately with an actionable error.
 - **Recommendation**: Define `PluginService` as a dedicated gRPC service in `ap.plugin/v1alpha1`.
@@ -95,10 +102,12 @@ message TaskResult {
 ## 3. Framing on Stdio & Transport
 
 - **Duplex Stdio Connection**: gRPC runs over HTTP/2, requiring a bidirectional byte stream (`net.Conn`).
-  - On the host, `ap` spawns `docker run -i --network none <image>` and wraps `cmd.StdinPipe()` and `cmd.StdoutPipe()` into a `net.Conn` duplex adapter passed to `grpc.WithContextDialer` (the same mechanism used by `buildctl dial-stdio` in Moby/BuildKit and HashiCorp `go-plugin`).
+  - On the host, `ap` spawns `docker run -i --network none <image>` and wraps `cmd.StdinPipe()` and `cmd.StdoutPipe()` into a `net.Conn` duplex adapter passed to `grpc.WithContextDialer` (the same command-as-connection mechanism used by BuildKit's connection helpers in `github.com/docker/cli/cli/connhelper/commandconn` and `buildctl dial-stdio`).
   - Inside the container, the plugin wraps `os.Stdin` and `os.Stdout` into a `net.Conn` and serves it with a `net.Listener` whose `Accept()` returns the connection once and blocks on subsequent calls.
-- **Strict Stderr Rule**: Because container stdout carries binary HTTP/2 frames, any unstructured write to stdout corrupts the framing and breaks the connection. **Plugins MUST write all human-readable logs, debug messages, and diagnostic output to `stderr` only**. `ap` routes container stderr directly to host stderr/logging. Structured task logs can also be streamed via `LogLine` messages within `RunTaskResponse`.
-- **Recommendation**: Run gRPC over container stdio using a BuildKit-style `dial-stdio` adapter, with all unstructured logging restricted to stderr.
+- **Logging Roles (Two Channels)**:
+  - *Task tool output (`LogLine`)*: Output produced by the tools that a task executes travels strictly as `LogLine` messages over the `RunTaskResponse` stream. This allows `ap` to interleave stdout and stderr in chronological order within the task log and route output to `TaskContext.Stdout()` and `TaskContext.Stderr()`.
+  - *Container stderr*: The container's raw `stderr` is reserved exclusively for the plugin process's own internal diagnostics when no task stream exists (e.g. startup initialization failures or fatal crashes before gRPC serves). `ap` writes container stderr to its verbose debug log (`scoped.Log(ctx).V(2)`), or prints it to host stderr if the container exits unexpectedly. Container stdout carries binary HTTP/2 frames and must never receive unstructured text.
+- **Recommendation**: Run gRPC over container stdio using a BuildKit-style `dial-stdio` adapter, routing task output to `LogLine` and plugin process diagnostics to stderr.
 - **Alternative Not Taken**: Unix domain sockets or localhost TCP. Bind-mounted unix sockets fail on macOS where Docker runs inside a VM (the socket appears in the filesystem but `connect(2)` fails across the hypervisor). TCP requires port allocation and risks port conflicts or firewall blocks.
 
 ---
@@ -107,16 +116,16 @@ message TaskResult {
 
 - **Baseline (RPC Streaming)**: `ap` streams the repository view as `FileChunk` messages over `RunTaskRequest`. `ap` populates this from `sourcetree.SourceTree`, which already filters out `.git/`, `node_modules/`, `.cache/`, and patterns in `.gitignore` and `.ap/` configs.
 - **Evaluation of Read-Only Bind Mount (`-v <repoRoot>:/src:ro`)**:
-  - *VM Compatibility*: Regular files are accessible across hypervisor-backed mounts (e.g. virtiofs on macOS Docker Desktop).
-  - *Ignore Rule Enforcement*: A bind mount exposes the entire physical checkout to the container, including `.git/` (which may contain credentials or private hooks), untracked files, and ignored build caches. Enforcing `SourceTree` ignore rules would require dynamically creating dozens of empty mask mounts (`-v /empty:/src/.git:ro`), which is fragile, slow to start, and hits Docker mount count limits. Without masking, plugins can read uncommitted or private files, violating hermeticity.
-  - *Large Tree Latency*: Filesystem virtualization across VM boundaries incurs significant metadata/stat overhead. Traversing a 10,000-file repository across virtiofs can take 2–5 seconds. Conversely, `ap` traverses the host tree once in memory (sub-millisecond) and streams a single linear payload into container memory or tmpfs.
-- **Measured Numbers on this Repository**:
-  - Checkout size: 420 tracked files, 2.16 MB total file content.
-  - `SourceTree` load/cache: 3.3 ms.
-  - RPC streaming (read and serialize all 420 files): ~16.6 ms. Total delivery time over stdio is under 30 ms.
-  - Read-only bind mount setup takes ~0 ms on Linux, but reading 420 files across a VM boundary adds 100–300 ms of metadata sync overhead while leaking `.git` and untracked files.
+  - *VM Compatibility*: Regular files are accessible across hypervisor-backed mounts (e.g. virtiofs / reverse sshfs on macOS Docker Desktop / lima).
+  - *Ignore Rule Enforcement*: A bind mount exposes the entire physical checkout to the container, including `.git/` (which was confirmed visible in VM bind-mount tests and may contain credentials or private hooks), untracked files, and ignored build caches. Enforcing `SourceTree` ignore rules would require dynamically creating dozens of empty mask mounts (`-v /empty:/src/.git:ro`), which is fragile, slow to start, and hits Docker mount count limits. Without masking, plugins can read uncommitted or private files, violating hermeticity.
+- **Measured Figures & Latency**:
+  - *Host baseline*: 420 tracked files (2.27 MB total content). `SourceTree` load takes ~3.3 ms; reading and serializing all 420 files takes ~16.6 ms.
+  - *VM bind-mount benchmark (measured on macOS with Docker in a lima VM)*: Container startup takes ~0.25 s; reading 280 files through a read-only bind mount of a checkout took 0.23 s (compared to 0.06 s for 420 files on host native storage), and `.git` was visible inside the mount.
+- **Cost of the Recommendation & When to Revisit**:
+  - Streaming the whole repository view happens for every task run and scales with repository size. Furthermore, because external tools inside the container require filesystem paths, the plugin must unpack and write incoming `FileChunk` messages to its local filesystem before tool execution can begin.
+  - If repositories grow to sizes where per-task streaming overhead becomes prohibitive, the maintainer's "faster way" (a read-only bind mount) should be revisited—specifically when container sandboxing can reliably mask `.git` and enforce ignore rules without VM virtualization penalties.
 - **Recommendation**: Stream the filtered `SourceTree` view over the RPC in `RunTaskRequest`.
-- **Alternative Not Taken**: Read-only workspace bind mount. Rejected because it exposes sensitive `.git` contents, fails to honour ignore rules without complex volume masking, and suffers high metadata latency over VM boundaries.
+- **Alternative Not Taken**: Read-only workspace bind mount. Rejected because it exposes sensitive `.git` contents, fails to honour ignore rules without complex volume masking, and incurs metadata overhead over VM boundaries.
 
 ---
 
@@ -137,7 +146,7 @@ message TaskResult {
 
 ## 6. Configuration & Multi-Plugin Orchestration
 
-- **Configuration**: Plugins are declared in `.ap/plugins.yaml` (or `ap.yaml` under `plugins:`):
+- **Configuration**: Plugins are declared in `.ap/plugins.yaml`:
   ```yaml
   plugins:
     astro:
@@ -149,7 +158,7 @@ message TaskResult {
   ```
 - **Two-Key Network Authorization**: Both the manifest (`network: true`) and `.ap/plugins.yaml` (`network: true`) must agree; otherwise, `ap` refuses execution.
 - **Discovery Caching**: On cold discovery, `ap` runs `Describe` over stdio and caches the manifest under `${AP_CACHE_DIR:-$HOME/.cache/ap}/plugins/describe/<digest-or-id>.json`. Warm commands (`ap ls`, `ap test`) read cached JSON with zero container invocations.
-- **Task Naming & Conflicts**: Plugin tasks use hyphenated names (`<plugin>-<task>`, e.g. `astro-build`). Multiple plugins in the same directory execute in deterministic alphabetical order. Overlapping task output paths are detected during discovery and fail fast.
+- **Task Naming & Conflicts**: Plugin tasks use hyphenated names (`<plugin>-<task>`, e.g. `astro-build`). Multiple plugins in the same directory execute in deterministic alphabetical order. Overlapping task output path detection during discovery is planned.
 - **Recommendation**: Maintain two-key network authorization, discovery caching under `AP_CACHE_DIR`, and hyphenated task naming.
 - **Alternative Not Taken**: Dynamic container discovery on every run, or static image labels that restrict dynamic task declarations.
 
@@ -186,7 +195,12 @@ func (s *server) RunTask(stream pb.PluginService_RunTaskServer) error {
 		if err != nil { return err }
 		_ = req // process start config and incoming file chunks
 	}
-	// Execute task logic; send logs to os.Stderr
+	// Execute task logic; stream tool logs as LogLine messages
+	_ = stream.Send(&pb.RunTaskResponse{
+		Payload: &pb.RunTaskResponse_Log{
+			Log: &pb.LogLine{Stream: pb.LogLine_STDOUT, Data: []byte("built dist/\n")},
+		},
+	})
 	return stream.Send(&pb.RunTaskResponse{
 		Payload: &pb.RunTaskResponse_Result{Result: &pb.TaskResult{ExitCode: 0}},
 	})
