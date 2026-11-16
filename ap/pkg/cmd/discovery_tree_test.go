@@ -301,11 +301,9 @@ func TestDiscoverScopes_ScriptAndGoE2e(t *testing.T) {
 	}
 
 	var logBuf bytes.Buffer
-	klog.SetOutput(&logBuf)
-	klog.LogToStderr(false)
+	klog.SetLoggerWithOptions(tasks.NewLogger(&logBuf), klog.ContextualLogger(true))
 	defer func() {
-		klog.SetOutput(os.Stderr)
-		klog.LogToStderr(true)
+		klog.SetLoggerWithOptions(tasks.NewLogger(os.Stderr), klog.ContextualLogger(true))
 	}()
 
 	rootOpt := RootOptions{RepoRoot: tempDir, DryRun: true}

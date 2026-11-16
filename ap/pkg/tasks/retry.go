@@ -168,14 +168,10 @@ func (s bufferSink) writeLine(msg string, keysAndValues []any) {
 		parts = append(parts, fmt.Sprintf("%s=%s", key, formatValue(value)))
 	}
 	line := strings.Join(parts, " ")
-	w := s.writer
-	if w == nil {
-		w = os.Stderr
-	}
 	if s.name != "" {
-		writef(w, "%s: %s\n", s.name, line)
+		writef(s.writer, "%s: %s\n", s.name, line)
 	} else {
-		writef(w, "%s\n", line)
+		writef(s.writer, "%s\n", line)
 	}
 }
 
@@ -188,7 +184,6 @@ func formatValue(value any) string {
 }
 
 // NewLogger returns a plain logger that formats log entries as 'message key=value'.
-// If writer is nil, entries are written to os.Stderr.
 func NewLogger(writer io.Writer) logr.Logger {
 	return logr.New(bufferSink{
 		writer: writer,

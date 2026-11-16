@@ -22,20 +22,19 @@ import (
 	"testing"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
+	"k8s.io/klog/v2"
 )
 
 func TestCommandLogging(t *testing.T) {
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	origStderr := os.Stderr
-	os.Stderr = w
+	var buf bytes.Buffer
+	klog.SetLoggerWithOptions(tasks.NewLogger(&buf), klog.ContextualLogger(true))
 	defer func() {
-		os.Stderr = origStderr
+		klog.SetLoggerWithOptions(tasks.NewLogger(os.Stderr), klog.ContextualLogger(true))
 	}()
 
 	cmd := BuildRootCommand()
+	cmd.SetOut(io.Discard)
 	cmd.SetArgs([]string{"version"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
@@ -45,17 +44,31 @@ func TestCommandLogging(t *testing.T) {
 	logger.Info("command started", "component", "root", "target", "local")
 	logger.V(2).Info("verbose debug message", "should", "hide")
 
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-	var out bytes.Buffer
-	if _, err := io.Copy(&out, r); err != nil {
-		t.Fatal(err)
-	}
-
-	got := strings.TrimSpace(out.String())
+	got := strings.TrimSpace(buf.String())
 	want := "command started component=root target=local"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+
+	buf.Reset()
+	rootCmd := BuildRootCommand()
+	rootCmd.SetOut(io.Discard)
+	rootCmd.SetArgs([]string{"bash", "-h"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	bashCmd, _, err := rootCmd.Find([]string{"bash"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bashLogger := scoped.Log(bashCmd.Context())
+	bashLogger.Info("bash is older than 4; scripts run in CI with bash 5. Install a newer bash (e.g. brew install bash) and make sure it is first on PATH.",
+		"level", "warning", "path", "/bin/bash", "version", "3.2.57(1)-release")
+
+	gotBash := strings.TrimSpace(buf.String())
+	wantBash := "bash is older than 4; scripts run in CI with bash 5. Install a newer bash (e.g. brew install bash) and make sure it is first on PATH. level=warning path=/bin/bash version=3.2.57(1)-release"
+	if gotBash != wantBash {
+		t.Errorf("got %q, want %q", gotBash, wantBash)
 	}
 }
