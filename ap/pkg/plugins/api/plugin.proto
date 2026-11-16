@@ -1,0 +1,142 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+package ap.plugin.v1alpha1;
+
+option go_package = "github.com/gke-labs/gke-labs-infra/ap/pkg/plugins/api";
+
+// PluginService defines the gRPC contract between ap and a container plugin.
+service PluginService {
+  // Describe queries the plugin for its metadata, activation patterns, and supported tasks.
+  rpc Describe(DescribeRequest) returns (DescribeResponse);
+
+  // RunTask executes a task in the plugin using bidirectional streaming for files, logs, and results.
+  rpc RunTask(stream RunTaskRequest) returns (stream RunTaskResponse);
+}
+
+// DescribeRequest is an empty request for PluginService.Describe.
+message DescribeRequest {}
+
+// DescribeResponse returns plugin metadata, activation triggers, and task specifications.
+message DescribeResponse {
+  // Name is the identifier of the plugin (e.g. "astro").
+  string name = 1;
+
+  // Activation holds repository-relative glob patterns that trigger this plugin (e.g. "docs/astro.config.*").
+  repeated string activation = 2;
+
+  // Network indicates whether the plugin requires network access during task execution.
+  bool network = 3;
+
+  // Tasks lists the tasks supported by this plugin.
+  repeated TaskMetadata tasks = 4;
+}
+
+// TaskMetadata describes an individual task implemented by the plugin.
+message TaskMetadata {
+  // Name is the task name without the plugin prefix (e.g. "build").
+  string name = 1;
+
+  // Verb is the ap verb this task maps to (e.g. "build", "generate", "test", "lint").
+  string verb = 2;
+
+  // Description is a human-readable explanation of what the task does.
+  string description = 3;
+
+  // Outputs lists output file paths or patterns produced by the task, relative to the activated directory.
+  repeated string outputs = 4;
+}
+
+// RunTaskRequest is sent from ap to the plugin. The first message contains TaskStart,
+// followed by FileChunk messages streaming the repository view.
+message RunTaskRequest {
+  oneof payload {
+    // Start initializes the task execution with task parameters.
+    TaskStart start = 1;
+
+    // File streams input files from the repository view into the plugin container.
+    FileChunk file = 2;
+  }
+}
+
+// TaskStart specifies the task to run and its working directory.
+message TaskStart {
+  // Task is the name of the task to execute (matching TaskMetadata.name).
+  string task = 1;
+
+  // Dir is the activated directory relative to the repository root.
+  string dir = 2;
+}
+
+// FileChunk carries a piece of regular file content in either direction.
+// Symlinks and empty directories are never transmitted; directories are created implicitly.
+// Files exceeding 1 MB are split across multiple consecutive FileChunks with the same path,
+// setting is_last_chunk = false until the final chunk.
+message FileChunk {
+  // Path is relative to the repository root for input files (ap -> plugin),
+  // or relative to the activated directory for output files (plugin -> ap).
+  string path = 1;
+
+  // Mode holds POSIX file mode permission bits only (e.g. 0644, 0755).
+  // Non-permission bits (setuid, setgid, sticky) are ignored and discarded.
+  uint32 mode = 2;
+
+  // Content is the raw byte content of the chunk (at most 1 MB per chunk).
+  bytes content = 3;
+
+  // IsLastChunk indicates whether this is the final chunk of the file
+  // (or the only chunk if the file is <= 1 MB).
+  bool is_last_chunk = 4;
+}
+
+// RunTaskResponse is sent from the plugin to ap. Streamed logs and output files
+// may arrive in any order; TaskResult is sent once as the terminal message.
+message RunTaskResponse {
+  oneof payload {
+    // Log carries an interleaved stdout or stderr log chunk from task execution.
+    LogLine log = 1;
+
+    // OutputFile carries a chunk of a generated output file to be staged on the host.
+    FileChunk output_file = 2;
+
+    // Result reports the final completion status of the task.
+    TaskResult result = 3;
+  }
+}
+
+// LogLine carries output emitted by tools running inside the plugin container.
+message LogLine {
+  // Stream distinguishes stdout from stderr.
+  enum Stream {
+    STDOUT = 0;
+    STDERR = 1;
+  }
+
+  // Stream indicates whether the data is from stdout or stderr.
+  Stream stream = 1;
+
+  // Data contains the raw log bytes.
+  bytes data = 2;
+}
+
+// TaskResult conveys the final status of a completed task.
+message TaskResult {
+  // ExitCode is the process exit code (0 for success, non-zero for failure).
+  int32 exit_code = 1;
+
+  // ErrorMessage contains human-readable error details if the task failed.
+  string error_message = 2;
+}
