@@ -27,6 +27,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/go-logr/logr"
+	"k8s.io/klog/v2"
 )
 
 // RetryPolicy reports whether a failed attempt (0-based) should be retried, and after how long.
@@ -105,7 +106,7 @@ func (s bufferSink) Enabled(level int) bool {
 	if s.parent != nil {
 		return s.parent.Enabled(level)
 	}
-	return false
+	return klog.V(klog.Level(level)).Enabled()
 }
 
 func (s bufferSink) Info(level int, msg string, keysAndValues ...any) {
@@ -180,6 +181,13 @@ func formatValue(value any) string {
 		return fmt.Sprintf("%q", formatted)
 	}
 	return formatted
+}
+
+// NewLogger returns a plain logger that formats log entries as 'message key=value'.
+func NewLogger(writer io.Writer) logr.Logger {
+	return logr.New(bufferSink{
+		writer: writer,
+	})
 }
 
 func newBufferLogger(writer io.Writer, parent logr.Logger) logr.Logger {

@@ -26,6 +26,7 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/gitsource"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool"
 	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
@@ -110,6 +111,10 @@ func (opt *RootOptions) Resolve(args []string) error {
 
 	opt.Dir = resolved
 	return nil
+}
+
+func init() {
+	klog.SetLoggerWithOptions(tasks.NewLogger(os.Stderr), klog.ContextualLogger(true))
 }
 
 // BuildRootCommand constructs the root cobra command.
