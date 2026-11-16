@@ -570,3 +570,30 @@ plugins:
 		}
 	})
 }
+
+func TestContainerTask_GetName(t *testing.T) {
+	tests := []struct {
+		relativeDirectory string
+		want              string
+	}{
+		{relativeDirectory: ".", want: "astro-build"},
+		{relativeDirectory: "docs", want: "astro-build docs"},
+		{relativeDirectory: "blog", want: "astro-build blog"},
+	}
+	names := make(map[string]bool)
+	for _, tc := range tests {
+		task := &plugins.ContainerTask{
+			PluginName:        "astro",
+			TaskMetadata:      plugins.TaskMetadata{Name: "build"},
+			RelativeDirectory: tc.relativeDirectory,
+		}
+		got := task.GetName()
+		if got != tc.want {
+			t.Errorf("task.GetName() for relative directory %q = %q, want %q", tc.relativeDirectory, got, tc.want)
+		}
+		names[got] = true
+	}
+	if len(names) != len(tests) {
+		t.Errorf("expected %d distinct names, got %d", len(tests), len(names))
+	}
+}

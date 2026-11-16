@@ -153,16 +153,23 @@ func (plugin *ContainerPlugin) DiscoverTasks(ctx context.Context, directory stri
 	}
 
 	var discoveredTasks []PluginTask
-	for _, activatedDir := range activatedDirectories {
+	for _, activatedDirectory := range activatedDirectories {
+		relativeDirectory, err := filepath.Rel(plugin.RepoRoot, activatedDirectory)
+		if err != nil {
+			return nil, fmt.Errorf("plugin %q: calculating relative directory for %s: %w", plugin.Name, activatedDirectory, err)
+		}
+		relativeDirectory = filepath.ToSlash(relativeDirectory)
+
 		for _, taskMetadata := range plugin.Manifest.Tasks {
 			containerTask := &ContainerTask{
-				PluginName:   plugin.Name,
-				TaskMetadata: taskMetadata,
-				Declaration:  plugin.Declaration,
-				ImageRef:     plugin.ImageRef,
-				Manifest:     plugin.Manifest,
-				Dir:          activatedDir,
-				RepoRoot:     plugin.RepoRoot,
+				PluginName:        plugin.Name,
+				TaskMetadata:      taskMetadata,
+				Declaration:       plugin.Declaration,
+				ImageRef:          plugin.ImageRef,
+				Manifest:          plugin.Manifest,
+				Dir:               activatedDirectory,
+				RelativeDirectory: relativeDirectory,
+				RepoRoot:          plugin.RepoRoot,
 			}
 			discoveredTasks = append(discoveredTasks, PluginTask{
 				Plugin:       plugin.Name,
@@ -221,13 +228,14 @@ func LoadContainerPlugins(ctx context.Context, scope *tasks.TaskContext, cacheDi
 
 // ContainerTask represents a task executed inside a container plugin.
 type ContainerTask struct {
-	PluginName   string
-	TaskMetadata TaskMetadata
-	Declaration  config.PluginDeclaration
-	ImageRef     string
-	Manifest     *PluginManifest
-	Dir          string
-	RepoRoot     string
+	PluginName        string
+	TaskMetadata      TaskMetadata
+	Declaration       config.PluginDeclaration
+	ImageRef          string
+	Manifest          *PluginManifest
+	Dir               string
+	RelativeDirectory string
+	RepoRoot          string
 }
 
 var (
@@ -235,9 +243,13 @@ var (
 	_ tasks.Sourced = (*ContainerTask)(nil)
 )
 
-// GetName returns the hyphenated task name `<plugin>-<task>`.
+// GetName returns the hyphenated task name `<plugin>-<task>`, suffixed by the activating directory.
 func (task *ContainerTask) GetName() string {
-	return fmt.Sprintf("%s-%s", task.PluginName, task.TaskMetadata.Name)
+	name := fmt.Sprintf("%s-%s", task.PluginName, task.TaskMetadata.Name)
+	if task.RelativeDirectory == "" || task.RelativeDirectory == "." {
+		return name
+	}
+	return fmt.Sprintf("%s %s", name, task.RelativeDirectory)
 }
 
 // GetChildren returns no children for leaf container tasks.
@@ -261,18 +273,17 @@ func (task *ContainerTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 		return fmt.Errorf("plugin %q in %s requires a container runtime (docker): %w", task.PluginName, task.Dir, err)
 	}
 
-	relativeDir, err := filepath.Rel(scope.RepoRoot(), task.Dir)
-	if err != nil {
-		return fmt.Errorf("calculating relative directory for %s: %w", task.Dir, err)
+	relativeDirectory := task.RelativeDirectory
+	if relativeDirectory == "" {
+		relativeDirectory = "."
 	}
-	relativeDir = filepath.ToSlash(relativeDir)
 
 	var createArguments []string
 	createArguments = append(createArguments, "create")
 	if !task.Manifest.Network || !task.Declaration.Network {
 		createArguments = append(createArguments, "--network", "none")
 	}
-	createArguments = append(createArguments, task.ImageRef, "run", task.TaskMetadata.Name, "--src", "/src", "--dir", relativeDir, "--out", "/out")
+	createArguments = append(createArguments, task.ImageRef, "run", task.TaskMetadata.Name, "--src", "/src", "--dir", relativeDirectory, "--out", "/out")
 
 	createCommand := exec.CommandContext(ctx, dockerPath, createArguments...)
 	createOutput, err := createCommand.Output()
