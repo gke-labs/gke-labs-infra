@@ -31,7 +31,6 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"gopkg.in/yaml.v3"
-	"k8s.io/klog/v2"
 )
 
 // IsKustomization reports whether a path refers to a kustomization.yaml file.
@@ -489,7 +488,7 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 	if err != nil {
 		return err
 	}
-	klog.Infof("Applying manifest %s", relPath)
+	scope.Log().Info("applying manifest", "path", relPath)
 
 	replaced, err := replacePlaceholderImages(string(content), naming)
 	if err != nil {
@@ -521,10 +520,10 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 			return fmt.Errorf("failed to retarget namespace in %s: %w", relPath, err)
 		}
 		for _, declared := range result.RetargetedNamespaces {
-			klog.Infof("retargeting %s: namespace %s -> %s", relPath, declared, t.Namespace)
+			scope.Log().Info("retargeting namespace", "path", relPath, "from", declared, "to", t.Namespace)
 		}
 		if len(result.ClusterScoped) > 0 {
-			klog.Infof("cluster-scoped, not retargeted in %s: %s", relPath, strings.Join(result.ClusterScoped, ", "))
+			scope.Log().Info("cluster-scoped, not retargeted", "path", relPath, "resources", strings.Join(result.ClusterScoped, ", "))
 		}
 		replaced = result.Content
 	}
@@ -572,10 +571,10 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 	// If this was a CRD, wait for it to be established
 	crdNames, err := getCRDNames(content)
 	if err != nil {
-		klog.Warningf("Failed to check if %s is a CRD: %v", relPath, err)
+		scope.Log().Info("failed to check if manifest is a CRD", "level", "warning", "path", relPath, "error", err)
 	} else {
 		for _, name := range crdNames {
-			klog.Infof("Waiting for CRD %s to be established...", name)
+			scope.Log().Info("waiting for CRD to be established", "crd", name)
 			var waitArgs []string
 			waitArgs = append(waitArgs, t.Cluster.KubectlArgs()...)
 			waitArgs = append(waitArgs, "wait", "--for=condition=Established", "customresourcedefinition/"+name, "--timeout=60s")

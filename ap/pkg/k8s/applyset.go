@@ -24,10 +24,10 @@ import (
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/applyset"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/version"
 	"gopkg.in/yaml.v3"
-	"k8s.io/klog/v2"
 )
 
 // AppliedObjectInfo records the GroupKind and namespace of an applied object.
@@ -389,7 +389,7 @@ func (t *UpdateApplySetParentTask) GetChildren() []tasks.Task {
 // ResolveParentRef resolves the namespace and kind of parent using discovery.
 // If the parent is namespaced and deployNamespace is empty, it returns the error:
 // "namespace is required to use namespace-scoped ApplySet"
-func ResolveParentRef(parent *applyset.ParentRef, deployNamespace string, cluster KubeCluster, kubectlBin string) error {
+func ResolveParentRef(ctx context.Context, parent *applyset.ParentRef, deployNamespace string, cluster KubeCluster, kubectlBin string) error {
 	if parent == nil {
 		return nil
 	}
@@ -398,7 +398,7 @@ func ResolveParentRef(parent *applyset.ParentRef, deployNamespace string, cluste
 	if kubectlBin != "" {
 		r, err := GetDiscoveryScopeResolver(cluster, kubectlBin)
 		if err != nil {
-			klog.V(2).Infof("could not get discovery scope resolver: %v", err)
+			scoped.Log(ctx).V(2).Info("could not get discovery scope resolver", "error", err)
 		} else {
 			resolver = r
 		}
@@ -425,7 +425,7 @@ func ResolveParentRef(parent *applyset.ParentRef, deployNamespace string, cluste
 		gvk := GroupVersionKind{Group: parent.Group, Kind: parent.Kind}
 		ns, err := resolver.IsNamespaced(gvk)
 		if err != nil {
-			klog.V(2).Infof("could not determine scope for %s: %v", gvk.String(), err)
+			scoped.Log(ctx).V(2).Info("could not determine scope", "gvk", gvk.String(), "error", err)
 		} else if !ns {
 			isNamespaced = false
 		}
