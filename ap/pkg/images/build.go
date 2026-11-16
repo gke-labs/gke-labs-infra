@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -36,6 +37,7 @@ import (
 )
 
 var execCommandContext = exec.CommandContext
+var newBuildkitForwarder = k8s.NewBuildkitForwarder
 
 // DefaultK8sBuildkitHost is the default buildkit host used for the k8s shorthand.
 const DefaultK8sBuildkitHost = "k8s://autodeploy-system/buildkit"
@@ -188,7 +190,7 @@ func (t *DockerBuildTask) supportsMultiPlatform(ctx context.Context, buildxBin s
 	return true
 }
 
-func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskContext, root, fullImageName, relDockerfilePath string, naming ImageNaming, platforms []string) error {
+func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskContext, root, fullImageName, relDockerfilePath string, naming ImageNaming, platforms []string) (retErr error) {
 	start := time.Now()
 
 	output := fmt.Sprintf("type=image,name=%s,push=%t", fullImageName, t.Push)
@@ -222,50 +224,37 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 
 	var progressBuf bytes.Buffer
 
+	buildkitHost := t.BuildkitHost
 	if host, ok := strings.CutPrefix(t.BuildkitHost, "k8s://"); ok {
-		// handle port forward
 		parts := strings.Split(host, "/")
-		// Defensive check; host is already validated by ResolveBuildkitHost.
-		if len(parts) != 2 {
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 			return fmt.Errorf("invalid buildkit host: %s, expected k8s://namespace/service", t.BuildkitHost)
 		}
 		namespace, service := parts[0], parts[1]
 
-		localPort, err := k8s.PickFreePort()
-		if err != nil {
-			return fmt.Errorf("finding free local port for buildkit port-forward: %w", err)
+		if k8s.IsInCluster() {
+			buildkitHost = fmt.Sprintf("tcp://%s.%s.svc:2375", service, namespace)
+		} else {
+			forwarder, err := newBuildkitForwarder(ctx, t.Cluster, namespace, service)
+			if err != nil {
+				return err
+			}
+			defer func() {
+				if closeErr := forwarder.Close(); closeErr != nil {
+					retErr = errors.Join(retErr, closeErr)
+				}
+			}()
+			buildkitHost = "unix://" + forwarder.SocketPath()
 		}
+	}
 
-		pfTask := &k8s.PortForwardTask{
-			Child: &tasks.FuncTask{
-				Name: "run-buildctl",
-				RunFn: func(ctx context.Context, scope *tasks.TaskContext) error {
-					cmd := execCommandContext(ctx, "buildctl", buildctlArgs...)
-					cmd.Dir = root
-					cmd.Stdout = scope.Stdout()
-					cmd.Stderr = io.MultiWriter(scope.Stderr(), &progressBuf)
-					cmd.Env = append(os.Environ(), fmt.Sprintf("BUILDKIT_HOST=tcp://localhost:%d", localPort))
-					return cmd.Run()
-				},
-			},
-			Service:    service,
-			Namespace:  namespace,
-			LocalPort:  localPort,
-			RemotePort: 2375,
-			Cluster:    t.Cluster,
-		}
-		if err := pfTask.Run(ctx, scope); err != nil {
-			return err
-		}
-	} else {
-		cmd := execCommandContext(ctx, "buildctl", buildctlArgs...)
-		cmd.Dir = root
-		cmd.Stdout = scope.Stdout()
-		cmd.Stderr = io.MultiWriter(scope.Stderr(), &progressBuf)
-		cmd.Env = append(os.Environ(), "BUILDKIT_HOST="+t.BuildkitHost)
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("buildctl build failed for %s: %w", t.ImageName, err)
-		}
+	cmd := execCommandContext(ctx, "buildctl", buildctlArgs...)
+	cmd.Dir = root
+	cmd.Stdout = scope.Stdout()
+	cmd.Stderr = io.MultiWriter(scope.Stderr(), &progressBuf)
+	cmd.Env = append(os.Environ(), "BUILDKIT_HOST="+buildkitHost)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("buildctl build failed for %s: %w", t.ImageName, err)
 	}
 
 	digest := extractDigestFromMetadataFile(metaFile)

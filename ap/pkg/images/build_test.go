@@ -17,6 +17,7 @@ package images
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,6 +31,8 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
+	"k8s.io/apimachinery/pkg/util/httpstream"
+	"k8s.io/client-go/tools/portforward"
 )
 
 func TestHasImages(t *testing.T) {
@@ -883,6 +886,22 @@ func TestFormatDuration(t *testing.T) {
 	}
 }
 
+type stubDialer struct{}
+
+func (s *stubDialer) Dial(_ ...string) (httpstream.Connection, string, error) {
+	return &stubConn{closeChan: make(chan bool)}, portforward.PortForwardProtocolV1Name, nil
+}
+
+type stubConn struct {
+	closeChan chan bool
+}
+
+func (c *stubConn) CreateStream(_ http.Header) (httpstream.Stream, error) { return nil, nil }
+func (c *stubConn) Close() error                                          { return nil }
+func (c *stubConn) CloseChan() <-chan bool                                { return c.closeChan }
+func (c *stubConn) SetIdleTimeout(_ time.Duration)                        {}
+func (c *stubConn) RemoveStreams(_ ...httpstream.Stream)                  {}
+
 func TestBuildTasks_ParallelK8sBuildkitHost(t *testing.T) {
 	t.Setenv("KUBERNETES_SERVICE_HOST", "")
 	t.Setenv("ARTIFACTS", t.TempDir())
@@ -898,23 +917,6 @@ func TestBuildTasks_ParallelK8sBuildkitHost(t *testing.T) {
 
 	r, err := sourcetree.Open(tmpDir)
 	if err != nil {
-		t.Fatal(err)
-	}
-
-	// mock-kubectl prints "Forwarding from 127.0.0.1:<port> -> 2375" and waits to be killed.
-	mockKubectl := filepath.Join(tmpDir, "mock-kubectl")
-	kubectlScript := `#!/bin/sh
-for arg in "$@"; do
-	case "$arg" in
-		*:2375)
-			port="${arg%:2375}"
-			echo "Forwarding from 127.0.0.1:$port -> 2375"
-			;;
-	esac
-done
-sleep 60
-`
-	if err := os.WriteFile(mockKubectl, []byte(kubectlScript), 0755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -941,7 +943,13 @@ echo "$BUILDKIT_HOST" > "%s/host-$$-$(date +%%s%%N)"
 		return origExec(ctx, name, args...)
 	}
 
-	scope := tasks.NewTaskContext(tmpDir, tmpDir, r).WithTool("kubectl", mockKubectl)
+	origForwarder := newBuildkitForwarder
+	defer func() { newBuildkitForwarder = origForwarder }()
+	newBuildkitForwarder = func(ctx context.Context, cluster k8s.KubeCluster, namespace, service string) (*k8s.BuildkitForwarder, error) {
+		return k8s.NewBuildkitForwarderWithDialer(&stubDialer{}, 2375)
+	}
+
+	scope := tasks.NewTaskContext(tmpDir, tmpDir, r)
 	naming := ResolveImageNaming(nil)
 
 	task, err := BuildTasksForImages(r, tmpDir, false, "k8s://autodeploy-system/buildkit", []string{"img1", "img2"}, naming, k8s.CurrentCluster())
@@ -961,25 +969,22 @@ echo "$BUILDKIT_HOST" > "%s/host-$$-$(date +%%s%%N)"
 		t.Fatalf("expected 2 buildctl executions, found %d", len(files))
 	}
 
-	seenPorts := make(map[string]bool)
+	seenSockets := make(map[string]bool)
 	for _, f := range files {
 		content, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatalf("failed to read %s: %v", f, err)
 		}
 		host := strings.TrimSpace(string(content))
-		if !strings.HasPrefix(host, "tcp://localhost:") {
+		if !strings.HasPrefix(host, "unix://") {
 			t.Errorf("unexpected BUILDKIT_HOST %q", host)
 			continue
 		}
-		port := strings.TrimPrefix(host, "tcp://localhost:")
-		if port == "2375" {
-			t.Errorf("BUILDKIT_HOST should not be default 2375, got %q", host)
+		socketPath := strings.TrimPrefix(host, "unix://")
+		if seenSockets[socketPath] {
+			t.Errorf("duplicate socket %q allocated to multiple builds", socketPath)
 		}
-		if seenPorts[port] {
-			t.Errorf("duplicate port %q allocated to multiple builds", port)
-		}
-		seenPorts[port] = true
+		seenSockets[socketPath] = true
 	}
 }
 
