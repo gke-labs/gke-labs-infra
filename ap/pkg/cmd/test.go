@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
+	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
 )
@@ -26,6 +28,7 @@ import (
 // TestOptions holds the configuration for the "test" command.
 type TestOptions struct {
 	*RootOptions
+	Race bool
 }
 
 // BuildTestCommand constructs the cobra command for "test".
@@ -39,14 +42,34 @@ func BuildTestCommand(rootOpt *RootOptions) *cobra.Command {
 		Short: "Run tests",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := opt.Resolve(args); err != nil {
+			if err := opt.Resolve(cmd, args); err != nil {
 				return err
 			}
 			return RunTest(cmd.Context(), opt)
 		},
 	}
 
+	cmd.Flags().BoolVar(&opt.Race, "test.race", false, "Run tests under the data race detector")
+
 	return cmd
+}
+
+// Resolve resolves arguments and config defaults for TestOptions.
+func (opt *TestOptions) Resolve(cmd *cobra.Command, args []string) error {
+	if err := opt.RootOptions.Resolve(args); err != nil {
+		return err
+	}
+	if cmd.Flags().Changed("test.race") {
+		return nil
+	}
+	cfg, err := config.LoadAPConfig(opt.RepoRoot)
+	if err != nil {
+		return err
+	}
+	if cfg != nil {
+		opt.Race = cfg.Test.Race
+	}
+	return nil
 }
 
 // RunTest executes the business logic for the "test" command.
@@ -74,6 +97,12 @@ func RunTest(ctx context.Context, opt TestOptions) error {
 				ContinueOnError: true,
 			}
 			allTasks = append(allTasks, group)
+		}
+	}
+
+	if opt.Race {
+		for _, task := range allTasks {
+			golang.SetRace(task, true)
 		}
 	}
 

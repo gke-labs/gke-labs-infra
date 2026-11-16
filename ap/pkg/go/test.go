@@ -46,6 +46,7 @@ type GoTestTask struct {
 	Dir        string
 	Name       string
 	ResultFile string
+	Race       bool
 }
 
 func (t *GoTestTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
@@ -53,6 +54,7 @@ func (t *GoTestTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
 	opts := RunGoTestOptions{
 		Stdout: scope.Stdout(),
 		Stderr: scope.Stderr(),
+		Race:   t.Race,
 	}
 	if err := RunGoTest(ctx, t.Dir, t.ResultFile, opts); err != nil {
 		return fmt.Errorf("go test failed in %s: %w", t.Dir, err)
@@ -68,11 +70,29 @@ func (t *GoTestTask) GetChildren() []tasks.Task {
 	return nil
 }
 
+func (t *GoTestTask) SetRace(race bool) {
+	t.Race = race
+}
+
 func (t *GoTestTask) SourcePath() string {
 	return t.Dir
 }
 
 var _ tasks.Sourced = (*GoTestTask)(nil)
+
+type raceSetter interface {
+	SetRace(bool)
+}
+
+// SetRace recursively sets Race on any task supporting it in the task tree.
+func SetRace(t tasks.Task, race bool) {
+	if setter, ok := t.(raceSetter); ok {
+		setter.SetRace(race)
+	}
+	for _, child := range t.GetChildren() {
+		SetRace(child, race)
+	}
+}
 
 // GoE2eTask represents a task to run go e2e tests.
 type GoE2eTask struct {
@@ -171,6 +191,7 @@ type RunGoTestOptions struct {
 	Args   []string
 	Stdout io.Writer
 	Stderr io.Writer
+	Race   bool
 }
 
 func writef(w io.Writer, format string, args ...any) {
@@ -194,6 +215,9 @@ func RunGoTest(ctx context.Context, dir string, resultFile string, opts RunGoTes
 	}()
 
 	args := []string{"test", "-json"}
+	if opts.Race {
+		args = append(args, "-race")
+	}
 	if len(opts.Args) > 0 {
 		args = append(args, opts.Args...)
 	} else {

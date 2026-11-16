@@ -271,6 +271,8 @@ General configuration for `ap` itself.
 Example `.ap/ap.yaml`:
 ```yaml
 version: "v0.1.0"
+test:
+  race: true
 presubmits:
   skipIfOnlyChanged:
   - docs/*
@@ -289,6 +291,11 @@ It accepts `!self` (to run `go run ./ap` within this repository), `latest`
 (to float to the latest release), or a valid Go module version string (such as
 `v0.1.0` or a pseudo-version like `v0.0.0-20261024111447-4ab120e48572`). Branch
 names and commit hashes are rejected on purpose.
+
+`test.race` is an optional boolean flag. When set to `true`, `ap test` runs Go unit
+tests under the data race detector (`-race`) by default. This also ensures generated
+presubmit jobs (`ap-test`) run tests under the race detector. Pass `--test.race=false` to
+bypass the race detector for an individual invocation.
 
 `presubmits.skipIfOnlyChanged` is an optional list of bash case globs
 matched against each repo-relative changed path (`*` also matches `/`).
@@ -358,7 +365,7 @@ For built images, `ap` logs a summary line at default verbosity: `built <image> 
 Commands:
 - `init`: Initialize `.ap/` configuration for a repository
 - `ls`: List discovered tasks under the selected subtree
-- `test`: Run tests
+- `test`: Run tests (supports `--test.race` to run unit tests under the Go data race detector)
 - `e2e`: Run e2e tests
 - `lint`: Run linting tasks: go vet, govulncheck, go mod tidy -diff, and the ap analyzers (`unused` [error], `testcontext` [warn], `replaceEmptyInterfaceWithAny` [warn], `testonlyimports` [error], `droppederrors` [error], `closewriter` [error], `deferinloop` [error])
 - `build`: Build artifacts. Positional targets can be subtree directories (building all images and build tasks beneath them) or specific image directories (`<parent>/images/<name>` containing a `Dockerfile`, building exactly that image with the repository root as the build context). Multiple targets build the union of specified images and subtrees.
