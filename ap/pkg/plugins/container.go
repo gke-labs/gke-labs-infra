@@ -35,8 +35,53 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
+func buildPluginImage(ctx context.Context, scope *tasks.TaskContext, pluginName, dockerfilePath string) (string, error) {
+	dockerPath, err := scope.Tool(ctx, "docker")
+	if err != nil {
+		return "", fmt.Errorf("plugin %q requires a container runtime (docker): %w", pluginName, err)
+	}
+
+	tempDir, err := os.MkdirTemp("", "ap-plugin-build-*")
+	if err != nil {
+		return "", fmt.Errorf("creating temp directory for plugin %q: %w", pluginName, err)
+	}
+	defer func() {
+		if removeErr := os.RemoveAll(tempDir); removeErr != nil && !os.IsNotExist(removeErr) {
+			scoped.Log(ctx).V(2).Info("failed to remove temp directory", "dir", tempDir, "error", removeErr)
+		}
+	}()
+
+	iidFile := filepath.Join(tempDir, "iid")
+	command := exec.CommandContext(ctx, dockerPath, "build", "--iidfile", iidFile, "-f", dockerfilePath, ".")
+	command.Dir = scope.RepoRoot()
+	command.Stdout = scope.Stdout()
+	command.Stderr = scope.Stderr()
+
+	if err := command.Run(); err != nil {
+		return "", fmt.Errorf("building plugin %q with Dockerfile %s: %w", pluginName, dockerfilePath, err)
+	}
+
+	imageIDBytes, err := os.ReadFile(iidFile)
+	if err != nil {
+		return "", fmt.Errorf("reading image ID for plugin %q (Dockerfile %s): %w", pluginName, dockerfilePath, err)
+	}
+	imageID := strings.TrimSpace(string(imageIDBytes))
+	if imageID == "" {
+		return "", fmt.Errorf("empty image ID for plugin %q (Dockerfile %s)", pluginName, dockerfilePath)
+	}
+	return imageID, nil
+}
+
 // DescribeContainer runs `<image> describe` in a container on cold runs and caches the manifest.
 func DescribeContainer(ctx context.Context, scope *tasks.TaskContext, cacheDirectory, pluginName string, declaration config.PluginDeclaration) (*PluginManifest, error) {
+	if declaration.Dockerfile != "" && declaration.Image == "" {
+		imageID, err := buildPluginImage(ctx, scope, pluginName, declaration.Dockerfile)
+		if err != nil {
+			return nil, err
+		}
+		declaration.Image = imageID
+	}
+
 	key := CacheKey(declaration)
 	manifest, err := LoadCachedManifest(cacheDirectory, key)
 	if err == nil {
@@ -139,6 +184,13 @@ func LoadContainerPlugins(ctx context.Context, scope *tasks.TaskContext, cacheDi
 		declaration := pluginsConfig.Plugins[name]
 		if !declaration.IsEnabled() {
 			continue
+		}
+		if declaration.Dockerfile != "" && declaration.Image == "" {
+			imageID, err := buildPluginImage(ctx, scope, name, declaration.Dockerfile)
+			if err != nil {
+				return nil, err
+			}
+			declaration.Image = imageID
 		}
 		manifest, err := DescribeContainer(ctx, scope, cacheDirectory, name, declaration)
 		if err != nil {

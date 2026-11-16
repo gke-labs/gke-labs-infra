@@ -58,6 +58,24 @@ case "$1" in
       exit 42
     fi
     ;;
+  build)
+    if [ -f "$STATE_DIR/fail-build" ]; then
+      echo "simulated build failure" >&2
+      exit 42
+    fi
+    echo "$*" > "$STATE_DIR/build-args"
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --iidfile)
+          echo "sha256:fake-built-image-1234" > "$2"
+          shift 2
+          ;;
+        *)
+          shift
+          ;;
+      esac
+    done
+    ;;
   rm)
     touch "$STATE_DIR/container-removed"
     ;;
@@ -366,4 +384,81 @@ func TestContainerRemovalOnFailure(t *testing.T) {
 	if _, statErr := os.Stat(filepath.Join(stateDir, "container-removed")); statErr != nil {
 		t.Errorf("expected container to be removed on failure, stat error: %v", statErr)
 	}
+}
+
+func TestDockerfilePlugin(t *testing.T) {
+	repoRoot := t.TempDir()
+	cacheDir := t.TempDir()
+
+	apDir := filepath.Join(repoRoot, ".ap")
+	if err := os.MkdirAll(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	pluginsContent := `
+plugins:
+  mockplugin:
+    dockerfile: images/mock/Dockerfile
+`
+	if err := os.WriteFile(filepath.Join(apDir, "plugins.yaml"), []byte(pluginsContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tree, err := sourcetree.Open(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fakeBinDir, stateDir := setupFakeDocker(t)
+	fakeDockerPath := filepath.Join(fakeBinDir, "docker")
+	scope := tasks.NewTaskContext(repoRoot, repoRoot, tree).WithTool("docker", fakeDockerPath)
+
+	t.Run("build invoked with expected arguments and image ID becomes cache key", func(t *testing.T) {
+		loadedPlugins, err := plugins.LoadContainerPlugins(t.Context(), scope, cacheDir)
+		if err != nil {
+			t.Fatalf("LoadContainerPlugins failed: %v", err)
+		}
+		if len(loadedPlugins) != 1 {
+			t.Fatalf("expected 1 plugin, got %d", len(loadedPlugins))
+		}
+
+		buildArgsData, err := os.ReadFile(filepath.Join(stateDir, "build-args"))
+		if err != nil {
+			t.Fatalf("reading build args: %v", err)
+		}
+		buildArgs := string(buildArgsData)
+		if !strings.HasPrefix(buildArgs, "build ") {
+			t.Errorf("expected build command, got: %s", buildArgs)
+		}
+		if !strings.Contains(buildArgs, "-f images/mock/Dockerfile") {
+			t.Errorf("expected -f images/mock/Dockerfile in args, got: %s", buildArgs)
+		}
+		if !strings.Contains(buildArgs, "--iidfile") {
+			t.Errorf("expected --iidfile in args, got: %s", buildArgs)
+		}
+		if !strings.HasSuffix(strings.TrimSpace(buildArgs), ".") {
+			t.Errorf("expected build context . at end of args, got: %s", buildArgs)
+		}
+
+		cachedFile := filepath.Join(cacheDir, "plugins", "describe", "sha256-fake-built-image-1234.json")
+		if _, err := os.Stat(cachedFile); err != nil {
+			t.Errorf("expected cached manifest at %s: %v", cachedFile, err)
+		}
+	})
+
+	t.Run("failing build is reported", func(t *testing.T) {
+		if err := os.WriteFile(filepath.Join(stateDir, "fail-build"), []byte("fail"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		emptyCacheDir := t.TempDir()
+		_, err := plugins.LoadContainerPlugins(t.Context(), scope, emptyCacheDir)
+		if err == nil {
+			t.Fatal("expected LoadContainerPlugins to fail when build fails")
+		}
+		if !strings.Contains(err.Error(), "mockplugin") {
+			t.Errorf("expected error to name plugin mockplugin, got: %v", err)
+		}
+		if !strings.Contains(err.Error(), "images/mock/Dockerfile") {
+			t.Errorf("expected error to name Dockerfile images/mock/Dockerfile, got: %v", err)
+		}
+	})
 }
