@@ -234,34 +234,43 @@ func deriveTaskLogPath(scope *TaskContext, task Task) string {
 }
 
 func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
-	buf := &syncBuffer{}
-	taskScope := scope.WithOutput(buf, buf)
+	outputBuffer := &syncBuffer{}
+	outputWriter := scope.Stdout()
+
+	var taskStdout, taskStderr io.Writer
+	if scope.PrintOutput() {
+		taskStdout = io.MultiWriter(outputWriter, outputBuffer)
+		taskStderr = io.MultiWriter(scope.Stderr(), outputBuffer)
+	} else {
+		taskStdout = outputBuffer
+		taskStderr = outputBuffer
+	}
+
+	taskScope := scope.WithOutput(taskStdout, taskStderr)
 	taskLog := newBufferLogger(taskScope.Stderr(), scoped.Log(ctx))
 	taskCtx := scoped.WithLog(ctx, taskLog)
-	out := scope.Stdout()
 
-	var taskDir string
+	var taskDirectory string
 	if scope.ArtifactsDir() != "" {
 		logFile := deriveTaskLogPath(scope, task)
-		taskDir = filepath.Dir(logFile)
-		if mkdirErr := os.MkdirAll(taskDir, 0755); mkdirErr != nil {
-			scope.Log().Info("failed to create artifacts tasks directory", "level", "warning", "dir", taskDir, "error", mkdirErr)
+		taskDirectory = filepath.Dir(logFile)
+		if err := os.MkdirAll(taskDirectory, 0755); err != nil {
+			return fmt.Errorf("creating task artifacts directory %s: %w", taskDirectory, err)
 		}
 		taskScope.taskLogFile = logFile
 	} else {
-		tmp, err := os.MkdirTemp("", "ap-task-*")
+		temporaryDirectory, err := os.MkdirTemp("", "ap-task-*")
 		if err != nil {
-			scope.Log().Info("failed to create temporary task directory", "level", "warning", "error", err)
-		} else {
-			defer func() {
-				if rmErr := os.RemoveAll(tmp); rmErr != nil {
-					scope.Log().Info("failed to remove temporary task directory", "level", "warning", "error", rmErr)
-				}
-			}()
-			taskDir = tmp
+			return fmt.Errorf("creating temporary task directory: %w", err)
 		}
+		defer func() {
+			if removeErr := os.RemoveAll(temporaryDirectory); removeErr != nil {
+				scoped.Log(ctx).Info("failed to remove temporary task directory", "level", "warning", "error", removeErr)
+			}
+		}()
+		taskDirectory = temporaryDirectory
 	}
-	taskScope.taskDir = taskDir
+	taskScope.taskDir = taskDirectory
 
 	start := time.Now()
 	err := runTaskWithRetry(taskCtx, taskScope, task)
@@ -275,15 +284,15 @@ func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
 	runnerMu.Lock()
 	defer runnerMu.Unlock()
 
-	writef(out, "=== %s (%s, %.1fs)\n", task.GetName(), status, duration.Seconds())
-	output := buf.Bytes()
-	if err != nil || scoped.Log(ctx).V(1).Enabled() || scope.PrintOutput() {
+	writef(outputWriter, "=== %s (%s, %.1fs)\n", task.GetName(), status, duration.Seconds())
+	output := outputBuffer.Bytes()
+	if !scope.PrintOutput() && (err != nil || scoped.Log(ctx).V(1).Enabled()) {
 		if len(output) > 0 {
-			if _, writeErr := out.Write(output); writeErr != nil {
+			if _, writeErr := outputWriter.Write(output); writeErr != nil {
 				scoped.Log(ctx).V(2).Info("failed to write task output", "error", writeErr)
 			}
 			if !bytes.HasSuffix(output, []byte("\n")) {
-				writef(out, "\n")
+				writef(outputWriter, "\n")
 			}
 		}
 	}

@@ -17,11 +17,11 @@ package tasks
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 
@@ -209,19 +209,13 @@ func (s *TaskContext) ScriptEnv() ([]string, error) {
 	return env, nil
 }
 
-// WithTaskDir returns a shallow copy of the task context with the given task directory.
-func (s *TaskContext) WithTaskDir(dir string) *TaskContext {
-	clone := *s
-	clone.taskDir = dir
-	return &clone
-}
-
 // Command holds the configuration for a command to execute.
 type Command struct {
-	Program string
-	Args    []string
-	Dir     string
-	Env     []string
+	Program               string
+	Args                  []string
+	Dir                   string
+	Env                   []string
+	MachineReadableStdout bool
 }
 
 // CommandResult holds the captured artifact paths from a command execution.
@@ -233,24 +227,16 @@ type CommandResult struct {
 // RunCommand executes a command, capturing stdout and stderr to files and writing
 // both to the task log in stdout-then-stderr order upon completion (or streaming in e2e mode).
 func (s *TaskContext) RunCommand(ctx context.Context, cmd Command) (*CommandResult, error) {
-	dir := s.taskDir
-	if dir == "" {
-		if s.artifactsDir != "" {
-			dir = filepath.Join(s.artifactsDir, "tasks")
-			if err := os.MkdirAll(dir, 0755); err != nil {
-				return nil, fmt.Errorf("creating tasks directory: %w", err)
-			}
-		} else {
-			dir = os.TempDir()
-		}
+	if s.taskDir == "" {
+		return nil, errors.New("task directory is not set on TaskContext")
 	}
 
-	stdoutFile, err := os.CreateTemp(dir, "cmd-*-stdout.log")
+	stdoutFile, err := os.CreateTemp(s.taskDir, "cmd-*-stdout.log")
 	if err != nil {
 		return nil, fmt.Errorf("creating stdout capture file: %w", err)
 	}
 
-	stderrFile, err := os.CreateTemp(dir, "cmd-*-stderr.log")
+	stderrFile, err := os.CreateTemp(s.taskDir, "cmd-*-stderr.log")
 	if err != nil {
 		if closeErr := stdoutFile.Close(); closeErr != nil {
 			return nil, fmt.Errorf("creating stderr capture file: %w (failed closing stdout: %v)", err, closeErr)
@@ -258,21 +244,25 @@ func (s *TaskContext) RunCommand(ctx context.Context, cmd Command) (*CommandResu
 		return nil, fmt.Errorf("creating stderr capture file: %w", err)
 	}
 
-	c := exec.CommandContext(ctx, cmd.Program, cmd.Args...)
-	c.Dir = cmd.Dir
-	if len(cmd.Env) > 0 {
-		c.Env = append(os.Environ(), cmd.Env...)
-	}
+	var stdoutDestination io.Writer = stdoutFile
+	var stderrDestination io.Writer = stderrFile
 
 	if s.PrintOutput() {
-		c.Stdout = io.MultiWriter(stdoutFile, s.Stdout())
-		c.Stderr = io.MultiWriter(stderrFile, s.Stderr())
-	} else {
-		c.Stdout = stdoutFile
-		c.Stderr = stderrFile
+		if !cmd.MachineReadableStdout {
+			stdoutDestination = io.MultiWriter(stdoutFile, s.Stdout())
+		}
+		stderrDestination = io.MultiWriter(stderrFile, s.Stderr())
 	}
 
-	runErr := c.Run()
+	execCommand := exec.CommandContext(ctx, cmd.Program, cmd.Args...)
+	execCommand.Dir = cmd.Dir
+	if len(cmd.Env) > 0 {
+		execCommand.Env = append(os.Environ(), cmd.Env...)
+	}
+	execCommand.Stdout = stdoutDestination
+	execCommand.Stderr = stderrDestination
+
+	execErr := execCommand.Run()
 	if closeErr := stdoutFile.Close(); closeErr != nil {
 		return nil, fmt.Errorf("closing stdout capture file: %w", closeErr)
 	}
@@ -281,13 +271,23 @@ func (s *TaskContext) RunCommand(ctx context.Context, cmd Command) (*CommandResu
 	}
 
 	if !s.PrintOutput() {
-		if stdoutBytes, readErr := os.ReadFile(stdoutFile.Name()); readErr == nil && len(stdoutBytes) > 0 {
-			writef(s.Stdout(), "--- stdout ---\n%s", stdoutBytes)
-			if !bytes.HasSuffix(stdoutBytes, []byte("\n")) {
-				writef(s.Stdout(), "\n")
+		if !cmd.MachineReadableStdout {
+			stdoutBytes, err := os.ReadFile(stdoutFile.Name())
+			if err != nil {
+				return nil, fmt.Errorf("reading stdout capture file: %w", err)
+			}
+			if len(stdoutBytes) > 0 {
+				writef(s.Stdout(), "--- stdout ---\n%s", stdoutBytes)
+				if !bytes.HasSuffix(stdoutBytes, []byte("\n")) {
+					writef(s.Stdout(), "\n")
+				}
 			}
 		}
-		if stderrBytes, readErr := os.ReadFile(stderrFile.Name()); readErr == nil && len(stderrBytes) > 0 {
+		stderrBytes, err := os.ReadFile(stderrFile.Name())
+		if err != nil {
+			return nil, fmt.Errorf("reading stderr capture file: %w", err)
+		}
+		if len(stderrBytes) > 0 {
 			writef(s.Stderr(), "--- stderr ---\n%s", stderrBytes)
 			if !bytes.HasSuffix(stderrBytes, []byte("\n")) {
 				writef(s.Stderr(), "\n")
@@ -295,16 +295,16 @@ func (s *TaskContext) RunCommand(ctx context.Context, cmd Command) (*CommandResu
 		}
 	}
 
-	res := &CommandResult{
+	result := &CommandResult{
 		StdoutFile: stdoutFile.Name(),
 		StderrFile: stderrFile.Name(),
 	}
-	if runErr != nil {
-		cmdName := cmd.Program
+	if execErr != nil {
+		commandName := cmd.Program
 		if len(cmd.Args) > 0 {
-			cmdName = fmt.Sprintf("%s %s", cmd.Program, strings.Join(cmd.Args, " "))
+			commandName = fmt.Sprintf("%s %s", cmd.Program, strings.Join(cmd.Args, " "))
 		}
-		return res, fmt.Errorf("%s: %w", cmdName, runErr)
+		return result, fmt.Errorf("%s: %w", commandName, execErr)
 	}
-	return res, nil
+	return result, nil
 }

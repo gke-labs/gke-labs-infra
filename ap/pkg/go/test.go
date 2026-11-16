@@ -208,37 +208,36 @@ func RunGoTest(ctx context.Context, scope *tasks.TaskContext, dir string, result
 		args = append(args, "./...")
 	}
 
-	res, cmdErr := scope.RunCommand(ctx, tasks.Command{
-		Program: "go",
-		Args:    args,
-		Dir:     dir,
-		Env:     opts.Env,
+	result, commandErr := scope.RunCommand(ctx, tasks.Command{
+		Program:               "go",
+		Args:                  args,
+		Dir:                   dir,
+		Env:                   opts.Env,
+		MachineReadableStdout: true,
 	})
-	if res == nil {
-		return cmdErr
-	}
 
 	if resultFile != "" {
-		data, err := os.ReadFile(res.StdoutFile)
+		data, err := os.ReadFile(result.StdoutFile)
 		if err != nil {
-			log.Info("failed to read captured test output", "level", "warning", "error", err)
-		} else if writeErr := os.WriteFile(resultFile, data, 0644); writeErr != nil {
-			log.Info("failed to write test result file", "level", "warning", "error", writeErr)
+			return fmt.Errorf("reading test output: %w", err)
+		}
+		if err := os.WriteFile(resultFile, data, 0644); err != nil {
+			return fmt.Errorf("writing test result file: %w", err)
 		}
 	}
 
-	f, err := os.Open(res.StdoutFile)
+	file, err := os.Open(result.StdoutFile)
 	if err != nil {
-		return cmdErr
+		return commandErr
 	}
 	defer func() {
-		if closeErr := f.Close(); closeErr != nil {
+		if closeErr := file.Close(); closeErr != nil {
 			log.V(2).Info("failed to close test output file", "error", closeErr)
 		}
 	}()
 
-	var buf bytes.Buffer
-	decoder := json.NewDecoder(f)
+	var outputBuffer bytes.Buffer
+	decoder := json.NewDecoder(file)
 
 	for {
 		var event testEvent
@@ -254,15 +253,15 @@ func RunGoTest(ctx context.Context, scope *tasks.TaskContext, dir string, result
 		switch event.Action {
 		case "pass":
 			if event.Test != "" {
-				fmt.Fprintf(&buf, "%s--- PASS: %s (%.2fs)\n", indent, event.Test, event.Elapsed)
+				fmt.Fprintf(&outputBuffer, "%s--- PASS: %s (%.2fs)\n", indent, event.Test, event.Elapsed)
 			}
 		case "fail":
 			if event.Test != "" {
-				fmt.Fprintf(&buf, "%s--- FAIL: %s (%.2fs)\n", indent, event.Test, event.Elapsed)
+				fmt.Fprintf(&outputBuffer, "%s--- FAIL: %s (%.2fs)\n", indent, event.Test, event.Elapsed)
 			}
 		case "skip":
 			if event.Test != "" {
-				fmt.Fprintf(&buf, "%s--- SKIP: %s (%.2fs)\n", indent, event.Test, event.Elapsed)
+				fmt.Fprintf(&outputBuffer, "%s--- SKIP: %s (%.2fs)\n", indent, event.Test, event.Elapsed)
 			}
 		case "output":
 			out := event.Output
@@ -275,9 +274,9 @@ func RunGoTest(ctx context.Context, scope *tasks.TaskContext, dir string, result
 					continue
 				}
 			}
-			buf.WriteString(out)
+			outputBuffer.WriteString(out)
 		case "build-output":
-			buf.WriteString(event.Output)
+			outputBuffer.WriteString(event.Output)
 		case "run", "pause", "cont", "bench", "start", "build-fail":
 			// Ignore these for pretty printing
 		default:
@@ -285,11 +284,11 @@ func RunGoTest(ctx context.Context, scope *tasks.TaskContext, dir string, result
 		}
 	}
 
-	if buf.Len() > 0 && opts.Stdout != nil {
-		if _, writeErr := opts.Stdout.Write(buf.Bytes()); writeErr != nil {
-			log.V(2).Info("failed to write test output", "error", writeErr)
+	if outputBuffer.Len() > 0 && opts.Stdout != nil {
+		if _, writeError := opts.Stdout.Write(outputBuffer.Bytes()); writeError != nil {
+			log.V(2).Info("failed to write test output", "error", writeError)
 		}
 	}
 
-	return cmdErr
+	return commandErr
 }
