@@ -936,6 +936,88 @@ func TestTaskOutputArtifacts_Unset(t *testing.T) {
 	}
 }
 
+func TestTaskOutputArtifacts_UniquePathsAndHumanName(t *testing.T) {
+	artifactsDir := t.TempDir()
+	repoRoot := t.TempDir()
+
+	tree, err := sourcetree.Open(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var outBuf syncBuffer
+	scope := NewTaskContext(repoRoot, repoRoot, tree).WithOutput(&outBuf, &outBuf).WithArtifactsDir(artifactsDir)
+
+	taskDiffDir1 := &FuncTask{
+		Name: "go-vet",
+		Dir:  filepath.Join(repoRoot, "ap"),
+		RunFn: func(ctx context.Context, s *TaskContext) error {
+			fmt.Fprintln(s.Stdout(), "output ap")
+			return nil
+		},
+	}
+	taskDiffDir2 := &FuncTask{
+		Name: "go-vet",
+		Dir:  filepath.Join(repoRoot, "autodeploy"),
+		RunFn: func(ctx context.Context, s *TaskContext) error {
+			fmt.Fprintln(s.Stdout(), "output autodeploy")
+			return nil
+		},
+	}
+	taskSameDir1 := &FuncTask{
+		Name: "build-step",
+		Dir:  filepath.Join(repoRoot, "pkg"),
+		RunFn: func(ctx context.Context, s *TaskContext) error {
+			fmt.Fprintln(s.Stdout(), "step 1")
+			return nil
+		},
+	}
+	taskSameDir2 := &FuncTask{
+		Name: "build-step",
+		Dir:  filepath.Join(repoRoot, "pkg"),
+		RunFn: func(ctx context.Context, s *TaskContext) error {
+			fmt.Fprintln(s.Stdout(), "step 2")
+			return nil
+		},
+	}
+
+	grp := &Group{
+		Name:  "test-group",
+		Tasks: []Task{taskDiffDir1, taskDiffDir2, taskSameDir1, taskSameDir2},
+	}
+
+	if err := grp.Run(t.Context(), scope); err != nil {
+		t.Fatalf("grp.Run failed: %v", err)
+	}
+
+	// Two tasks with the same name in different directories produce two files.
+	apPath := filepath.Join(artifactsDir, "tasks", "ap", "go-vet.log")
+	autodeployPath := filepath.Join(artifactsDir, "tasks", "autodeploy", "go-vet.log")
+
+	apContent, err := os.ReadFile(apPath)
+	if err != nil {
+		t.Fatalf("expected ap log file %s: %v", apPath, err)
+	}
+	// The file starts with the human name.
+	if !strings.HasPrefix(string(apContent), "go-vet\n") {
+		t.Errorf("expected log to start with human name 'go-vet\n', got: %q", string(apContent))
+	}
+	if _, err := os.ReadFile(autodeployPath); err != nil {
+		t.Fatalf("expected autodeploy log file %s: %v", autodeployPath, err)
+	}
+
+	// Two tasks with the same name in the same directory produce two files.
+	step1Path := filepath.Join(artifactsDir, "tasks", "pkg", "build-step.log")
+	step2Path := filepath.Join(artifactsDir, "tasks", "pkg", "build-step-2.log")
+
+	if _, err := os.ReadFile(step1Path); err != nil {
+		t.Fatalf("expected step1 log file %s: %v", step1Path, err)
+	}
+	if _, err := os.ReadFile(step2Path); err != nil {
+		t.Fatalf("expected step2 log file %s: %v", step2Path, err)
+	}
+}
+
 func TestTaskLog_PerTaskBuffer(t *testing.T) {
 	var taskABuf, taskBBuf string
 	taskA := &FuncTask{

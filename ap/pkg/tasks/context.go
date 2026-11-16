@@ -27,9 +27,15 @@ import (
 	"k8s.io/klog/v2"
 )
 
+type runState struct {
+	mu        sync.Mutex
+	usedPaths map[string]bool
+}
+
 var (
 	toolResolveMu      sync.Mutex
 	scriptEnvResolveMu sync.Mutex
+	runStateMu         sync.Mutex
 )
 
 // TaskContext represents the context for an ap root directory.
@@ -46,6 +52,7 @@ type TaskContext struct {
 	log          logr.Logger
 	printOutput  bool
 	artifactsDir string
+	runState     *runState
 
 	// tools holds memoized resolved tool binary paths keyed by tool name.
 	tools map[string]string
@@ -74,7 +81,20 @@ func NewTaskContext(repoRoot, dir string, tree *sourcetree.SourceTree) *TaskCont
 		sourceTree:   tree,
 		tools:        make(map[string]string),
 		artifactsDir: os.Getenv("ARTIFACTS"),
+		runState:     &runState{usedPaths: make(map[string]bool)},
 	}
+}
+
+func (s *TaskContext) getRunState() *runState {
+	if s == nil {
+		return nil
+	}
+	runStateMu.Lock()
+	defer runStateMu.Unlock()
+	if s.runState == nil {
+		s.runState = &runState{usedPaths: make(map[string]bool)}
+	}
+	return s.runState
 }
 
 // RepoRoot returns the repository root directory.

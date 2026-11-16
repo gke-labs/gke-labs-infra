@@ -67,6 +67,13 @@ func (r *RetryableTask) SourcePath() string {
 	return ""
 }
 
+func (r *RetryableTask) TaskDir() string {
+	if d, ok := r.Task.(interface{ TaskDir() string }); ok {
+		return d.TaskDir()
+	}
+	return ""
+}
+
 func (r *RetryableTask) WithChildren(children []Task) Task {
 	if p, ok := r.Task.(Parent); ok {
 		return &RetryableTask{
@@ -189,13 +196,83 @@ func newBufferLogger(writer io.Writer, parent logr.Logger) logr.Logger {
 	})
 }
 
-func sanitizeLogTaskName(name string) string {
+func sanitizePathComponent(name string) string {
 	return strings.Map(func(r rune) rune {
 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '-' || r == '_' {
 			return r
 		}
 		return '_'
 	}, name)
+}
+
+func deriveTaskLogPath(scope *TaskContext, task Task) string {
+	taskDir := ""
+	if d, ok := task.(interface{ TaskDir() string }); ok && d.TaskDir() != "" {
+		taskDir = d.TaskDir()
+	} else if d, ok := task.(interface{ Dir() string }); ok && d.Dir() != "" {
+		taskDir = d.Dir()
+	} else if s, ok := task.(Sourced); ok && s.SourcePath() != "" {
+		taskDir = s.SourcePath()
+		if fi, err := os.Stat(taskDir); err == nil && !fi.IsDir() {
+			taskDir = filepath.Dir(taskDir)
+		}
+	} else if scope != nil {
+		taskDir = scope.Dir()
+	}
+
+	root := ""
+	if scope != nil {
+		root = scope.RepoRoot()
+	}
+	if root != "" && filepath.IsAbs(taskDir) {
+		rel, err := filepath.Rel(root, taskDir)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			taskDir = ""
+		} else {
+			taskDir = rel
+		}
+	}
+
+	subdirs := []string{scope.ArtifactsDir(), "tasks"}
+	if taskDir != "" && taskDir != "." {
+		for _, part := range strings.Split(filepath.ToSlash(taskDir), "/") {
+			if part == "" || part == "." {
+				continue
+			}
+			s := sanitizePathComponent(part)
+			if s == ".." {
+				s = "_"
+			}
+			if s != "" {
+				subdirs = append(subdirs, s)
+			}
+		}
+	}
+
+	dir := filepath.Join(subdirs...)
+	baseName := sanitizePathComponent(task.GetName())
+	if baseName == "" {
+		baseName = "_"
+	}
+
+	state := scope.getRunState()
+	if state == nil {
+		return filepath.Join(dir, baseName+".log")
+	}
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	for i := 1; ; i++ {
+		candidate := filepath.Join(dir, baseName+".log")
+		if i > 1 {
+			candidate = filepath.Join(dir, fmt.Sprintf("%s-%d.log", baseName, i))
+		}
+		if !state.usedPaths[candidate] {
+			state.usedPaths[candidate] = true
+			return candidate
+		}
+	}
 }
 
 func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
@@ -232,13 +309,12 @@ func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
 	}
 
 	if artifactsDir := scope.ArtifactsDir(); artifactsDir != "" {
-		tasksDir := filepath.Join(artifactsDir, "tasks")
-		if mkdirErr := os.MkdirAll(tasksDir, 0755); mkdirErr != nil {
-			scope.Log().Info("failed to create artifacts tasks directory", "level", "warning", "dir", tasksDir, "error", mkdirErr)
+		logFile := deriveTaskLogPath(scope, task)
+		if mkdirErr := os.MkdirAll(filepath.Dir(logFile), 0755); mkdirErr != nil {
+			scope.Log().Info("failed to create artifacts tasks directory", "level", "warning", "dir", filepath.Dir(logFile), "error", mkdirErr)
 		} else {
-			safeName := sanitizeLogTaskName(task.GetName())
-			logFile := filepath.Join(tasksDir, safeName+".log")
-			if writeErr := os.WriteFile(logFile, output, 0644); writeErr != nil {
+			content := append([]byte(task.GetName()+"\n"), output...)
+			if writeErr := os.WriteFile(logFile, content, 0644); writeErr != nil {
 				scope.Log().Info("failed to write task artifact log", "level", "warning", "file", logFile, "error", writeErr)
 			}
 		}

@@ -64,6 +64,16 @@ func (t *GoVetTask) GetChildren() []tasks.Task {
 	return nil
 }
 
+func (t *GoVetTask) TaskDir() string {
+	return t.Dir
+}
+
+func (t *GoVetTask) SourcePath() string {
+	return t.Dir
+}
+
+var _ tasks.Sourced = (*GoVetTask)(nil)
+
 // GovulncheckTask represents a task to run govulncheck.
 type GovulncheckTask struct {
 	Dir string
@@ -88,6 +98,16 @@ func (t *GovulncheckTask) GetName() string {
 func (t *GovulncheckTask) GetChildren() []tasks.Task {
 	return nil
 }
+
+func (t *GovulncheckTask) TaskDir() string {
+	return t.Dir
+}
+
+func (t *GovulncheckTask) SourcePath() string {
+	return t.Dir
+}
+
+var _ tasks.Sourced = (*GovulncheckTask)(nil)
 
 // AnalyzersTask represents a task to run enabled code style analyzers in-process.
 type AnalyzersTask struct {
@@ -339,6 +359,16 @@ func (t *AnalyzersTask) GetName() string {
 func (t *AnalyzersTask) GetChildren() []tasks.Task {
 	return nil
 }
+
+func (t *AnalyzersTask) TaskDir() string {
+	return t.Dir
+}
+
+func (t *AnalyzersTask) SourcePath() string {
+	return t.Dir
+}
+
+var _ tasks.Sourced = (*AnalyzersTask)(nil)
 
 func (t *AnalyzersTask) SetWriteBaseline(wb bool) {
 	t.WriteBaseline = wb

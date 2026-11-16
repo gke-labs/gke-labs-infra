@@ -33,6 +33,7 @@ type Task interface {
 // FuncTask represents a task that executes a function.
 type FuncTask struct {
 	Name  string
+	Dir   string
 	RunFn func(ctx context.Context, scope *TaskContext) error
 }
 
@@ -47,6 +48,16 @@ func (t *FuncTask) GetName() string {
 func (t *FuncTask) GetChildren() []Task {
 	return nil
 }
+
+func (t *FuncTask) TaskDir() string {
+	return t.Dir
+}
+
+func (t *FuncTask) SourcePath() string {
+	return t.Dir
+}
+
+var _ Sourced = (*FuncTask)(nil)
 
 // PrintTree prints the task tree to the specified writer.
 func PrintTree(w io.Writer, t Task, indent int) {
