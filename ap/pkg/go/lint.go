@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"go/token"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -46,11 +45,11 @@ type GoVetTask struct {
 
 func (t *GoVetTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
 	scoped.Log(ctx).Info("running go vet", "dir", t.Dir)
-	vetCmd := exec.CommandContext(ctx, "go", "vet", "./...")
-	vetCmd.Dir = t.Dir
-	vetCmd.Stdout = scope.Stdout()
-	vetCmd.Stderr = scope.Stderr()
-	if err := vetCmd.Run(); err != nil {
+	if _, err := scope.RunCommand(ctx, tasks.Command{
+		Program: "go",
+		Args:    []string{"vet", "./..."},
+		Dir:     t.Dir,
+	}); err != nil {
 		return fmt.Errorf("go vet failed in %s: %w", t.Dir, err)
 	}
 	return nil
@@ -71,11 +70,11 @@ type GovulncheckTask struct {
 
 func (t *GovulncheckTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
 	scoped.Log(ctx).Info("running govulncheck", "dir", t.Dir)
-	vulnCmd := exec.CommandContext(ctx, "go", "run", "golang.org/x/vuln/cmd/govulncheck@latest", "./...")
-	vulnCmd.Dir = t.Dir
-	vulnCmd.Stdout = scope.Stdout()
-	vulnCmd.Stderr = scope.Stderr()
-	if err := vulnCmd.Run(); err != nil {
+	if _, err := scope.RunCommand(ctx, tasks.Command{
+		Program: "go",
+		Args:    []string{"run", "golang.org/x/vuln/cmd/govulncheck@latest", "./..."},
+		Dir:     t.Dir,
+	}); err != nil {
 		return fmt.Errorf("govulncheck failed in %s: %w", t.Dir, err)
 	}
 	return nil
@@ -96,12 +95,12 @@ type GoTidyTask struct {
 
 func (t *GoTidyTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
 	scoped.Log(ctx).V(1).Info("running go mod tidy -diff", "dir", t.Dir)
-	cmd := exec.CommandContext(ctx, "go", "mod", "tidy", "-diff")
-	cmd.Dir = t.Dir
-	cmd.Env = append(os.Environ(), "GOWORK=off")
-	cmd.Stdout = scope.Stdout()
-	cmd.Stderr = scope.Stderr()
-	if err := cmd.Run(); err != nil {
+	if _, err := scope.RunCommand(ctx, tasks.Command{
+		Program: "go",
+		Args:    []string{"mod", "tidy", "-diff"},
+		Dir:     t.Dir,
+		Env:     []string{"GOWORK=off"},
+	}); err != nil {
 		return fmt.Errorf("go.mod/go.sum in %s are not tidy; run \"ap format\"", t.Dir)
 	}
 	return nil

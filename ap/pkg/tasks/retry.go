@@ -240,6 +240,29 @@ func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
 	taskCtx := scoped.WithLog(ctx, taskLog)
 	out := scope.Stdout()
 
+	var taskDir string
+	if scope.ArtifactsDir() != "" {
+		logFile := deriveTaskLogPath(scope, task)
+		taskDir = filepath.Dir(logFile)
+		if mkdirErr := os.MkdirAll(taskDir, 0755); mkdirErr != nil {
+			scope.Log().Info("failed to create artifacts tasks directory", "level", "warning", "dir", taskDir, "error", mkdirErr)
+		}
+		taskScope.taskLogFile = logFile
+	} else {
+		tmp, err := os.MkdirTemp("", "ap-task-*")
+		if err != nil {
+			scope.Log().Info("failed to create temporary task directory", "level", "warning", "error", err)
+		} else {
+			defer func() {
+				if rmErr := os.RemoveAll(tmp); rmErr != nil {
+					scope.Log().Info("failed to remove temporary task directory", "level", "warning", "error", rmErr)
+				}
+			}()
+			taskDir = tmp
+		}
+	}
+	taskScope.taskDir = taskDir
+
 	start := time.Now()
 	err := runTaskWithRetry(taskCtx, taskScope, task)
 	duration := time.Since(start)
@@ -265,15 +288,10 @@ func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
 		}
 	}
 
-	if artifactsDir := scope.ArtifactsDir(); artifactsDir != "" {
-		logFile := deriveTaskLogPath(scope, task)
-		if mkdirErr := os.MkdirAll(filepath.Dir(logFile), 0755); mkdirErr != nil {
-			scoped.Log(ctx).Info("failed to create artifacts tasks directory", "level", "warning", "dir", filepath.Dir(logFile), "error", mkdirErr)
-		} else {
-			content := append([]byte(task.GetName()+"\n"), output...)
-			if writeErr := os.WriteFile(logFile, content, 0644); writeErr != nil {
-				scoped.Log(ctx).Info("failed to write task artifact log", "level", "warning", "file", logFile, "error", writeErr)
-			}
+	if taskScope.taskLogFile != "" {
+		content := append([]byte(task.GetName()+"\n"), output...)
+		if writeErr := os.WriteFile(taskScope.taskLogFile, content, 0644); writeErr != nil {
+			scoped.Log(ctx).Info("failed to write task artifact log", "level", "warning", "file", taskScope.taskLogFile, "error", writeErr)
 		}
 	}
 

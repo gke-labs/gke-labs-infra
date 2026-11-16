@@ -1078,3 +1078,87 @@ func TestTaskLog_PerTaskBuffer(t *testing.T) {
 		t.Errorf("expected task B buffer to NOT contain 'hello from task A', got:\n%s", taskBBuf)
 	}
 }
+
+func TestRunCommand(t *testing.T) {
+	// 1. output of a passing command appears in the task log in stdout-then-stderr order
+	t.Run("PassingCommandStdoutThenStderr", func(t *testing.T) {
+		var outBuf syncBuffer
+		scope := newTestScope(t).WithOutput(&outBuf, &outBuf)
+		res, err := scope.RunCommand(t.Context(), Command{
+			Program: "sh",
+			Args:    []string{"-c", "echo out-line && echo err-line >&2"},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res == nil {
+			t.Fatalf("expected non-nil CommandResult")
+		}
+		logOutput := outBuf.String()
+		stdoutIdx := strings.Index(logOutput, "--- stdout ---\nout-line")
+		stderrIdx := strings.Index(logOutput, "--- stderr ---\nerr-line")
+		if stdoutIdx == -1 {
+			t.Errorf("expected stdout section in log, got:\n%s", logOutput)
+		}
+		if stderrIdx == -1 {
+			t.Errorf("expected stderr section in log, got:\n%s", logOutput)
+		}
+		if stdoutIdx >= stderrIdx {
+			t.Errorf("expected stdout before stderr, got stdout at %d, stderr at %d", stdoutIdx, stderrIdx)
+		}
+	})
+
+	// 2. a failing command returns the error and its output is in the log
+	t.Run("FailingCommandReturnsErrorAndOutputInLog", func(t *testing.T) {
+		var outBuf syncBuffer
+		scope := newTestScope(t).WithOutput(&outBuf, &outBuf)
+		res, err := scope.RunCommand(t.Context(), Command{
+			Program: "sh",
+			Args:    []string{"-c", "echo failure-detail >&2 && exit 1"},
+		})
+		if err == nil {
+			t.Fatalf("expected error from failing command, got nil")
+		}
+		if !strings.Contains(err.Error(), "sh") || !strings.Contains(err.Error(), "-c") {
+			t.Errorf("expected error to name program and args, got: %v", err)
+		}
+		if res == nil {
+			t.Fatalf("expected non-nil CommandResult even on failure")
+		}
+		logOutput := outBuf.String()
+		if !strings.Contains(logOutput, "failure-detail") {
+			t.Errorf("expected failing command output in log, got:\n%s", logOutput)
+		}
+	})
+
+	// 3. the e2e mode streams
+	t.Run("E2EModeStreams", func(t *testing.T) {
+		var outBuf syncBuffer
+		scope := newTestScope(t).WithOutput(&outBuf, &outBuf).WithPrintOutput(true)
+		res, err := scope.RunCommand(t.Context(), Command{
+			Program: "sh",
+			Args:    []string{"-c", "echo stream-out && echo stream-err >&2"},
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res == nil {
+			t.Fatalf("expected non-nil CommandResult")
+		}
+		logOutput := outBuf.String()
+		if !strings.Contains(logOutput, "stream-out") || !strings.Contains(logOutput, "stream-err") {
+			t.Errorf("expected streamed output in log, got:\n%s", logOutput)
+		}
+		if strings.Contains(logOutput, "--- stdout ---") {
+			t.Errorf("expected streamed output not to have block headers, got:\n%s", logOutput)
+		}
+		stdoutBytes, err := os.ReadFile(res.StdoutFile)
+		if err != nil || !strings.Contains(string(stdoutBytes), "stream-out") {
+			t.Errorf("expected captured stdout file to contain stream-out, got: %q, err: %v", string(stdoutBytes), err)
+		}
+		stderrBytes, err := os.ReadFile(res.StderrFile)
+		if err != nil || !strings.Contains(string(stderrBytes), "stream-err") {
+			t.Errorf("expected captured stderr file to contain stream-err, got: %q, err: %v", string(stderrBytes), err)
+		}
+	})
+}
