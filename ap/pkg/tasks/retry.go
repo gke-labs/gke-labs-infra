@@ -27,7 +27,6 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/go-logr/logr"
-	"github.com/go-logr/logr/funcr"
 )
 
 // RetryPolicy reports whether a failed attempt (0-based) should be retried, and after how long.
@@ -91,12 +90,16 @@ func RunTask(ctx context.Context, scope *TaskContext, task Task) error {
 var runnerMu sync.Mutex
 
 type bufferSink struct {
-	logr.LogSink
+	writer io.Writer
 	parent logr.LogSink
+	name   string
+	values []any
 }
 
 var _ logr.LogSink = bufferSink{}
 var _ logr.CallDepthLogSink = bufferSink{}
+
+func (s bufferSink) Init(info logr.RuntimeInfo) {}
 
 func (s bufferSink) Enabled(level int) bool {
 	if s.parent != nil {
@@ -105,44 +108,84 @@ func (s bufferSink) Enabled(level int) bool {
 	return false
 }
 
+func (s bufferSink) Info(level int, msg string, keysAndValues ...any) {
+	allKeysAndValues := make([]any, 0, len(s.values)+len(keysAndValues))
+	allKeysAndValues = append(allKeysAndValues, s.values...)
+	allKeysAndValues = append(allKeysAndValues, keysAndValues...)
+	s.writeLine(msg, allKeysAndValues)
+}
+
+func (s bufferSink) Error(err error, msg string, keysAndValues ...any) {
+	allKeysAndValues := make([]any, 0, 2+len(s.values)+len(keysAndValues))
+	allKeysAndValues = append(allKeysAndValues, "error", err)
+	allKeysAndValues = append(allKeysAndValues, s.values...)
+	allKeysAndValues = append(allKeysAndValues, keysAndValues...)
+	s.writeLine(msg, allKeysAndValues)
+}
+
 func (s bufferSink) WithValues(keysAndValues ...any) logr.LogSink {
+	newValues := make([]any, 0, len(s.values)+len(keysAndValues))
+	newValues = append(newValues, s.values...)
+	newValues = append(newValues, keysAndValues...)
 	return bufferSink{
-		LogSink: s.LogSink.WithValues(keysAndValues...),
-		parent:  s.parent,
+		writer: s.writer,
+		parent: s.parent,
+		name:   s.name,
+		values: newValues,
 	}
 }
 
 func (s bufferSink) WithName(name string) logr.LogSink {
+	if s.name != "" {
+		name = s.name + "/" + name
+	}
 	return bufferSink{
-		LogSink: s.LogSink.WithName(name),
-		parent:  s.parent,
+		writer: s.writer,
+		parent: s.parent,
+		name:   name,
+		values: s.values,
 	}
 }
 
 func (s bufferSink) WithCallDepth(depth int) logr.LogSink {
-	if cd, ok := s.LogSink.(logr.CallDepthLogSink); ok {
-		return bufferSink{
-			LogSink: cd.WithCallDepth(depth),
-			parent:  s.parent,
-		}
-	}
 	return s
 }
 
-func newBufferLogger(w io.Writer, parent logr.Logger) logr.Logger {
-	empty := ""
-	fnLog := funcr.New(func(prefix, args string) {
-		if prefix != "" {
-			writef(w, "%s: %s\n", prefix, args)
+func (s bufferSink) writeLine(msg string, keysAndValues []any) {
+	var parts []string
+	if msg != "" {
+		parts = append(parts, msg)
+	}
+	for i := 0; i < len(keysAndValues); i += 2 {
+		key := fmt.Sprint(keysAndValues[i])
+		var value any
+		if i+1 < len(keysAndValues) {
+			value = keysAndValues[i+1]
 		} else {
-			writef(w, "%s\n", args)
+			value = "<no-value>"
 		}
-	}, funcr.Options{
-		LogInfoLevel: &empty,
-	})
+		parts = append(parts, fmt.Sprintf("%s=%s", key, formatValue(value)))
+	}
+	line := strings.Join(parts, " ")
+	if s.name != "" {
+		writef(s.writer, "%s: %s\n", s.name, line)
+	} else {
+		writef(s.writer, "%s\n", line)
+	}
+}
+
+func formatValue(value any) string {
+	formatted := fmt.Sprint(value)
+	if strings.Contains(formatted, " ") {
+		return fmt.Sprintf("%q", formatted)
+	}
+	return formatted
+}
+
+func newBufferLogger(writer io.Writer, parent logr.Logger) logr.Logger {
 	return logr.New(bufferSink{
-		LogSink: fnLog.GetSink(),
-		parent:  parent.GetSink(),
+		writer: writer,
+		parent: parent.GetSink(),
 	})
 }
 
