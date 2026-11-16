@@ -27,8 +27,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/go-logr/logr"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -44,14 +44,14 @@ import (
 // port 2375 of an in-cluster BuildKit pod via the Kubernetes port-forward API.
 type BuildkitForwarder struct {
 	logger           logr.Logger
-	socketDirectory string
-	socketPath      string
-	remotePort      int
-	listener        net.Listener
+	socketDirectory  string
+	socketPath       string
+	remotePort       int
+	listener         net.Listener
 	streamConnection httpstream.Connection
-	stopChannel     chan struct{}
-	closeOnce       sync.Once
-	requestID       atomic.Uint32
+	stopChannel      chan struct{}
+	closeOnce        sync.Once
+	requestID        atomic.Uint32
 }
 
 // NewBuildkitForwarder resolves a ready pod behind service in namespace on cluster,
@@ -177,12 +177,12 @@ func newBuildkitForwarderWithDialer(logger logr.Logger, dialer httpstream.Dialer
 
 	forwarder := &BuildkitForwarder{
 		logger:           logger,
-		socketDirectory: socketDirectory,
-		socketPath:      socketPath,
-		remotePort:      remotePort,
-		listener:        listener,
+		socketDirectory:  socketDirectory,
+		socketPath:       socketPath,
+		remotePort:       remotePort,
+		listener:         listener,
 		streamConnection: streamConnection,
-		stopChannel:     make(chan struct{}),
+		stopChannel:      make(chan struct{}),
 	}
 	go forwarder.acceptLoop()
 	return forwarder, nil
