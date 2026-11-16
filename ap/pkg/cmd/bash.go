@@ -23,9 +23,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool"
 	"github.com/spf13/cobra"
-	"k8s.io/klog/v2"
 )
 
 // BuildBashCommand constructs the cobra command for "bash".
@@ -88,13 +88,14 @@ func RunScript(ctx context.Context, script string, scriptArgs []string) error {
 		}
 	}
 
-	bash, err := resolveBash()
+	bash, err := resolveBash(ctx)
 	if err != nil {
 		return err
 	}
 
 	if bash.Major > 0 && bash.Major < 4 {
-		klog.Warningf("bash at %s is %s; scripts run in CI with bash 5. Install a newer bash (e.g. brew install bash) and make sure it is first on PATH.", bash.Path, bash.Version)
+		scoped.Log(ctx).Info("bash is older than 4; scripts run in CI with bash 5. Install a newer bash (e.g. brew install bash) and make sure it is first on PATH.",
+			"level", "warning", "path", bash.Path, "version", bash.Version)
 	}
 
 	if err := os.Chdir(repoRoot); err != nil {
@@ -117,7 +118,7 @@ type bashTool struct {
 }
 
 // resolveBash locates bash on PATH and attempts to inspect its version.
-func resolveBash() (*bashTool, error) {
+func resolveBash(ctx context.Context) (*bashTool, error) {
 	binary, err := exec.LookPath("bash")
 	if err != nil {
 		return nil, fmt.Errorf("failed to find bash on PATH: %w", err)
@@ -127,16 +128,17 @@ func resolveBash() (*bashTool, error) {
 		Path: binary,
 	}
 
-	cmd := exec.Command(binary, "--version")
+	log := scoped.Log(ctx)
+	cmd := exec.CommandContext(ctx, binary, "--version")
 	out, err := cmd.Output()
 	if err != nil {
-		klog.V(2).Infof("failed to run %s --version: %v", binary, err)
+		log.V(2).Info("failed to run bash --version", "binary", binary, "error", err)
 		return bt, nil
 	}
 
 	ver, major, err := parseBashVersion(string(out))
 	if err != nil {
-		klog.V(2).Infof("failed to parse bash version from %s: %v", binary, err)
+		log.V(2).Info("failed to parse bash version", "binary", binary, "error", err)
 		return bt, nil
 	}
 

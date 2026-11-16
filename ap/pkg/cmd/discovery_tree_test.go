@@ -16,7 +16,6 @@ package cmd
 
 import (
 	"bytes"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -348,12 +347,17 @@ func TestDiscoverScopes_ScriptAndGoE2e(t *testing.T) {
 	}
 
 	scriptPath := filepath.Join(tempDir, "dev", "tasks", "test-e2e")
-	expectedLog := fmt.Sprintf("running %s before go e2e tests in %s", scriptPath, tempDir)
-	if !strings.Contains(logBuf.String(), expectedLog) {
-		t.Fatalf("expected log output to contain %q, got: %s", expectedLog, logBuf.String())
+	if !strings.Contains(logBuf.String(), "running script before go e2e tests") {
+		t.Fatalf("expected log output to contain 'running script before go e2e tests', got: %s", logBuf.String())
 	}
-	if strings.Count(logBuf.String(), expectedLog) != 1 {
-		t.Fatalf("expected log notice to appear once, appeared %d times", strings.Count(logBuf.String(), expectedLog))
+	if !strings.Contains(logBuf.String(), scriptPath) {
+		t.Fatalf("expected log output to contain script path %q, got: %s", scriptPath, logBuf.String())
+	}
+	if !strings.Contains(logBuf.String(), tempDir) {
+		t.Fatalf("expected log output to contain dir %q, got: %s", tempDir, logBuf.String())
+	}
+	if strings.Count(logBuf.String(), "running script before go e2e tests") != 1 {
+		t.Fatalf("expected log notice to appear once, appeared %d times", strings.Count(logBuf.String(), "running script before go e2e tests"))
 	}
 }
 

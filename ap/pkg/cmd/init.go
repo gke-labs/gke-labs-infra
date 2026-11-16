@@ -27,10 +27,10 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/generate"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scaffold"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
-	"k8s.io/klog/v2"
 )
 
 // InitOptions holds the configuration for the "init" command.
@@ -116,7 +116,7 @@ func RunInit(ctx context.Context, opt InitOptions) error {
 			}
 		}
 		if opt.License != "none" && opt.CopyrightHolder == "" {
-			defaultHolder := detectGitUserName(targetDir)
+			defaultHolder := detectGitUserName(ctx, targetDir)
 			if defaultHolder != "" {
 				fmt.Printf("Copyright holder [%s]: ", defaultHolder)
 			} else {
@@ -136,7 +136,7 @@ func RunInit(ctx context.Context, opt InitOptions) error {
 	} else {
 		// Non-interactive fallback: if copyright holder is empty and license is not none, try git config
 		if opt.License != "none" && opt.CopyrightHolder == "" {
-			if defaultHolder := detectGitUserName(targetDir); defaultHolder != "" {
+			if defaultHolder := detectGitUserName(ctx, targetDir); defaultHolder != "" {
 				opt.CopyrightHolder = defaultHolder
 			}
 		}
@@ -222,8 +222,8 @@ func isTerminal(f *os.File) bool {
 	return (stat.Mode() & os.ModeCharDevice) != 0
 }
 
-func detectGitUserName(dir string) string {
-	cmd := exec.Command("git", "config", "user.name")
+func detectGitUserName(ctx context.Context, dir string) string {
+	cmd := exec.CommandContext(ctx, "git", "config", "user.name")
 	cmd.Dir = dir
 	var env []string
 	for _, e := range os.Environ() {
@@ -234,7 +234,7 @@ func detectGitUserName(dir string) string {
 	cmd.Env = env
 	out, err := cmd.Output()
 	if err != nil {
-		klog.V(2).Infof("detectGitUserName in %s failed: %v", dir, err)
+		scoped.Log(ctx).V(2).Info("detectGitUserName failed", "dir", dir, "error", err)
 		return ""
 	}
 	return strings.TrimSpace(string(out))

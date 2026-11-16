@@ -19,9 +19,9 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
-	"k8s.io/klog/v2"
 
 	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
 )
@@ -76,7 +76,7 @@ func RunE2e(ctx context.Context, opt E2eOptions) error {
 				if gt, ok := t.(*golang.GoE2eTask); ok && !seenRoots[gt.Dir] {
 					for _, st := range scope.E2ETasks {
 						if ts, ok := st.(*tasks.TaskScript); ok && ts.Root == gt.Dir {
-							klog.Infof("running %s before go e2e tests in %s", ts.Path, gt.Dir)
+							scoped.Log(ctx).Info("running script before go e2e tests", "script", ts.Path, "dir", gt.Dir)
 							seenRoots[gt.Dir] = true
 							break
 						}
