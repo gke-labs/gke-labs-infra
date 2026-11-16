@@ -36,7 +36,6 @@ import (
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/checker"
 	"golang.org/x/tools/go/packages"
-	"k8s.io/klog/v2"
 )
 
 // GoVetTask represents a task to run go vet.
@@ -45,7 +44,7 @@ type GoVetTask struct {
 }
 
 func (t *GoVetTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
-	klog.Infof("Running go vet in %s", t.Dir)
+	scope.Log().Info("running go vet", "dir", t.Dir)
 	vetCmd := exec.CommandContext(ctx, "go", "vet", "./...")
 	vetCmd.Dir = t.Dir
 	vetCmd.Stdout = scope.Stdout()
@@ -70,7 +69,7 @@ type GovulncheckTask struct {
 }
 
 func (t *GovulncheckTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
-	klog.Infof("Running govulncheck in %s", t.Dir)
+	scope.Log().Info("running govulncheck", "dir", t.Dir)
 	vulnCmd := exec.CommandContext(ctx, "go", "run", "golang.org/x/vuln/cmd/govulncheck@latest", "./...")
 	vulnCmd.Dir = t.Dir
 	vulnCmd.Stdout = scope.Stdout()
@@ -163,7 +162,7 @@ func (t *AnalyzersTask) Types(name string) []string {
 }
 
 func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
-	klog.Infof("Running analyzers in %s", t.Dir)
+	scope.Log().Info("running analyzers", "dir", t.Dir)
 
 	if len(t.Analyzers) == 0 {
 		return nil
@@ -215,7 +214,7 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.TaskContext) error
 		for _, pkg := range pkgs {
 			for _, err := range pkg.Errors {
 				if _, writeErr := fmt.Fprintln(scope.Stderr(), err); writeErr != nil {
-					klog.V(2).Infof("failed to write package error: %v", writeErr)
+					scope.Log().V(2).Info("failed to write package error", "error", writeErr)
 				}
 				pkgErrors++
 			}

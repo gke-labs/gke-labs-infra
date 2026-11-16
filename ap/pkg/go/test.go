@@ -25,9 +25,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
-	"k8s.io/klog/v2"
 )
 
 // testEvent represents a single event in a go test -json stream.
@@ -49,7 +49,7 @@ type GoTestTask struct {
 }
 
 func (t *GoTestTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
-	klog.Infof("Running go test in %s", t.Dir)
+	scope.Log().Info("running go test", "dir", t.Dir)
 	opts := RunGoTestOptions{
 		Stdout: scope.Stdout(),
 		Stderr: scope.Stderr(),
@@ -82,7 +82,7 @@ type GoE2eTask struct {
 }
 
 func (t *GoE2eTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
-	klog.Infof("Running go e2e test in %s", t.Dir)
+	scope.Log().Info("running go e2e test", "dir", t.Dir)
 	opts := RunGoTestOptions{
 		Env:    []string{"RUN_E2E=1"},
 		Args:   []string{"-v", "-count=1", "-timeout", "30m", "./tests/e2e/..."},
@@ -175,12 +175,14 @@ type RunGoTestOptions struct {
 
 func writef(w io.Writer, format string, args ...any) {
 	if _, err := fmt.Fprintf(w, format, args...); err != nil {
-		klog.V(2).Infof("failed to write test output: %v", err)
+		scoped.Log(context.Background()).V(2).Info("failed to write test output", "error", err)
 	}
 }
 
 // RunGoTest runs go tests in the given directory.
 func RunGoTest(ctx context.Context, dir string, resultFile string, opts RunGoTestOptions) (retErr error) {
+	log := scoped.Log(ctx)
+
 	f, err := os.Create(resultFile)
 	if err != nil {
 		return fmt.Errorf("failed to create result file: %w", err)
@@ -222,7 +224,7 @@ func RunGoTest(ctx context.Context, dir string, resultFile string, opts RunGoTes
 			if err == io.EOF {
 				break
 			}
-			klog.Warningf("failed to decode test event: %v", err)
+			log.Info("failed to decode test event", "level", "warning", "error", err)
 			break
 		}
 
@@ -258,7 +260,7 @@ func RunGoTest(ctx context.Context, dir string, resultFile string, opts RunGoTes
 		case "run", "pause", "cont", "bench", "start", "build-fail":
 			// Ignore these for pretty printing
 		default:
-			klog.Warningf("unknown test action: %s", event.Action)
+			log.Info("unknown test action", "level", "warning", "action", event.Action)
 		}
 	}
 
