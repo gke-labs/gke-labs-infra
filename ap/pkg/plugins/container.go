@@ -15,27 +15,92 @@
 package plugins
 
 import (
-	"archive/tar"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/plugins/api"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/plugins/stdio"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
+
+// StartPluginFunc launches or connects to a plugin and returns a gRPC client and closer.
+type StartPluginFunc func(ctx context.Context, scope *tasks.TaskContext, imageRef string, allowNetwork bool, stderr io.Writer) (api.PluginServiceClient, io.Closer, error)
+
+// StartDockerPlugin launches a plugin container using docker run -i --rm.
+func StartDockerPlugin(ctx context.Context, scope *tasks.TaskContext, imageRef string, allowNetwork bool, stderr io.Writer) (api.PluginServiceClient, io.Closer, error) {
+	dockerPath, err := scope.Tool(ctx, "docker")
+	if err != nil {
+		return nil, nil, fmt.Errorf("plugin requires a container runtime (docker): %w", err)
+	}
+
+	commandArguments := []string{"run", "-i", "--rm"}
+	if !allowNetwork {
+		commandArguments = append(commandArguments, "--network", "none")
+	}
+	commandArguments = append(commandArguments, imageRef)
+
+	command := exec.CommandContext(ctx, dockerPath, commandArguments...)
+	command.Stderr = stderr
+	stdinPipe, err := command.StdinPipe()
+	if err != nil {
+		return nil, nil, fmt.Errorf("creating stdin pipe: %w", err)
+	}
+	stdoutPipe, err := command.StdoutPipe()
+	if err != nil {
+		return nil, nil, fmt.Errorf("creating stdout pipe: %w", err)
+	}
+	if err := command.Start(); err != nil {
+		return nil, nil, fmt.Errorf("starting plugin container (%s): %w", imageRef, err)
+	}
+
+	commandConnection := stdio.NewCommandConn(command, stdinPipe, stdoutPipe)
+	return DialStdioConn(ctx, commandConnection)
+}
+
+// DialStdioConn establishes a gRPC client connection over the given net.Conn.
+func DialStdioConn(ctx context.Context, connection net.Conn) (api.PluginServiceClient, io.Closer, error) {
+	grpcClientConnection, err := grpc.NewClient("passthrough:///stdio",
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+			return connection, nil
+		}),
+	)
+	if err != nil {
+		if closeError := connection.Close(); closeError != nil {
+			scoped.Log(ctx).V(2).Info("failed to close connection on dial error", "error", closeError)
+		}
+		return nil, nil, fmt.Errorf("connecting to plugin stdio: %w", err)
+	}
+
+	client := api.NewPluginServiceClient(grpcClientConnection)
+	closer := closerFunc(func() error {
+		return errors.Join(grpcClientConnection.Close(), connection.Close())
+	})
+	return client, closer, nil
+}
+
+type closerFunc func() error
+
+func (f closerFunc) Close() error {
+	return f()
+}
 
 func buildPluginImage(ctx context.Context, scope *tasks.TaskContext, pluginName, dockerfilePath, buildkitHost string) (string, error) {
 	naming := images.ImageNaming{
@@ -89,28 +154,53 @@ func inspectImageID(ctx context.Context, dockerBin, fullImageName string) (strin
 	return imageID, nil
 }
 
-// DescribeContainer runs `<image> describe` in a container on cold runs and caches the manifest.
-func DescribeContainer(ctx context.Context, scope *tasks.TaskContext, cacheDirectory, pluginName, imageRef string) (*PluginManifest, error) {
+// DescribeContainer runs Describe RPC on the plugin container on cold runs and caches the manifest.
+func DescribeContainer(ctx context.Context, scope *tasks.TaskContext, cacheDirectory, pluginName, imageRef string, starter StartPluginFunc) (*PluginManifest, error) {
 	key := CacheKey(imageRef)
 	manifest, err := LoadCachedManifest(cacheDirectory, key)
 	if err == nil {
 		return manifest, nil
 	}
 
-	dockerPath, err := scope.Tool(ctx, "docker")
+	var stderrBuffer bytes.Buffer
+	client, closer, err := starter(ctx, scope, imageRef, false, &stderrBuffer)
 	if err != nil {
-		return nil, fmt.Errorf("plugin %q requires a container runtime (docker): %w", pluginName, err)
+		return nil, fmt.Errorf("starting plugin %q for describe: %w", pluginName, err)
+	}
+	defer func() {
+		if closeError := closer.Close(); closeError != nil {
+			scoped.Log(ctx).V(2).Info("failed to close plugin client during describe", "error", closeError)
+		}
+	}()
+
+	response, err := client.Describe(ctx, &api.DescribeRequest{})
+	if err != nil {
+		stderrOutput := strings.TrimSpace(stderrBuffer.String())
+		if stderrOutput != "" {
+			return nil, fmt.Errorf("running describe for plugin %q: %w (%s)", pluginName, err, stderrOutput)
+		}
+		return nil, fmt.Errorf("running describe for plugin %q: %w", pluginName, err)
 	}
 
-	command := exec.CommandContext(ctx, dockerPath, "run", "--rm", "--network", "none", imageRef, "describe")
-	output, err := command.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("running describe for plugin %q: %w (%s)", pluginName, err, strings.TrimSpace(string(output)))
+	parsedManifest := &PluginManifest{
+		APIVersion: "ap.plugin/v1alpha1",
+		Name:       response.Name,
+		Activation: response.Activation,
+		Network:    response.Network,
+		Tasks:      make([]TaskMetadata, len(response.Tasks)),
+	}
+	for index, taskMetadata := range response.Tasks {
+		parsedManifest.Tasks[index] = TaskMetadata{
+			Name:        taskMetadata.Name,
+			Verb:        taskMetadata.Verb,
+			Description: taskMetadata.Description,
+			Outputs:     taskMetadata.Outputs,
+		}
 	}
 
-	var parsedManifest PluginManifest
-	if err := json.Unmarshal(output, &parsedManifest); err != nil {
-		return nil, fmt.Errorf("parsing plugin %q manifest: %w", pluginName, err)
+	output, err := json.MarshalIndent(parsedManifest, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshaling plugin %q manifest: %w", pluginName, err)
 	}
 
 	sanitizedKey := strings.ReplaceAll(strings.ReplaceAll(key, ":", "-"), "/", "-")
@@ -128,7 +218,7 @@ func DescribeContainer(ctx context.Context, scope *tasks.TaskContext, cacheDirec
 		return nil, fmt.Errorf("saving cached manifest %s: %w", manifestPath, err)
 	}
 
-	return &parsedManifest, nil
+	return parsedManifest, nil
 }
 
 // ContainerPlugin implements Plugin for container-based plugins.
@@ -138,6 +228,7 @@ type ContainerPlugin struct {
 	ImageRef    string
 	Manifest    *PluginManifest
 	RepoRoot    string
+	Starter     StartPluginFunc
 }
 
 // Describe returns the manifest describing the container plugin.
@@ -170,6 +261,7 @@ func (plugin *ContainerPlugin) DiscoverTasks(ctx context.Context, directory stri
 				Dir:               activatedDirectory,
 				RelativeDirectory: relativeDirectory,
 				RepoRoot:          plugin.RepoRoot,
+				Starter:           plugin.Starter,
 			}
 			discoveredTasks = append(discoveredTasks, PluginTask{
 				Plugin:       plugin.Name,
@@ -182,7 +274,7 @@ func (plugin *ContainerPlugin) DiscoverTasks(ctx context.Context, directory stri
 }
 
 // LoadContainerPlugins loads all enabled container plugins configured in .ap/plugins.yaml.
-func LoadContainerPlugins(ctx context.Context, scope *tasks.TaskContext, cacheDirectory, buildkitHost string) ([]Plugin, error) {
+func LoadContainerPlugins(ctx context.Context, scope *tasks.TaskContext, cacheDirectory, buildkitHost string, starter StartPluginFunc) ([]Plugin, error) {
 	pluginsConfig, err := config.LoadPluginsConfig(scope.RepoRoot())
 	if err != nil {
 		return nil, err
@@ -205,13 +297,13 @@ func LoadContainerPlugins(ctx context.Context, scope *tasks.TaskContext, cacheDi
 		}
 		imageRef := declaration.Image
 		if declaration.Dockerfile != "" {
-			var err error
-			imageRef, err = buildPluginImage(ctx, scope, name, declaration.Dockerfile, buildkitHost)
-			if err != nil {
-				return nil, err
+			var buildError error
+			imageRef, buildError = buildPluginImage(ctx, scope, name, declaration.Dockerfile, buildkitHost)
+			if buildError != nil {
+				return nil, buildError
 			}
 		}
-		manifest, err := DescribeContainer(ctx, scope, cacheDirectory, name, imageRef)
+		manifest, err := DescribeContainer(ctx, scope, cacheDirectory, name, imageRef, starter)
 		if err != nil {
 			return nil, err
 		}
@@ -221,6 +313,7 @@ func LoadContainerPlugins(ctx context.Context, scope *tasks.TaskContext, cacheDi
 			ImageRef:    imageRef,
 			Manifest:    manifest,
 			RepoRoot:    scope.RepoRoot(),
+			Starter:     starter,
 		})
 	}
 	return result, nil
@@ -236,6 +329,7 @@ type ContainerTask struct {
 	Dir               string
 	RelativeDirectory string
 	RepoRoot          string
+	Starter           StartPluginFunc
 }
 
 var (
@@ -275,79 +369,37 @@ func (task *ContainerTask) Outputs() []string {
 	return absolutePaths
 }
 
-// Run executes the task in a container sandbox.
+// Run executes the task in a container sandbox via gRPC over stdio.
 func (task *ContainerTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
+	if err := task.run(ctx, scope); err != nil {
+		return fmt.Errorf("plugin %q task %q in %s: %w", task.PluginName, task.TaskMetadata.Name, task.Dir, err)
+	}
+	return nil
+}
+
+func (task *ContainerTask) run(ctx context.Context, scope *tasks.TaskContext) error {
 	if task.Manifest.Network && !task.Declaration.Network {
-		return fmt.Errorf("plugin %q requires network access, but network is not authorized in .ap/plugins.yaml", task.PluginName)
+		return fmt.Errorf("requires network access, but network is not authorized in .ap/plugins.yaml")
 	}
 
-	dockerPath, err := scope.Tool(ctx, "docker")
+	allowNetwork := task.Manifest.Network && task.Declaration.Network
+
+	client, closer, err := task.Starter(ctx, scope, task.ImageRef, allowNetwork, scope.Stderr())
 	if err != nil {
-		return fmt.Errorf("plugin %q in %s requires a container runtime (docker): %w", task.PluginName, task.Dir, err)
+		return err
 	}
-
-	relativeDirectory := task.RelativeDirectory
-	if relativeDirectory == "" {
-		relativeDirectory = "."
-	}
-
-	var createArguments []string
-	createArguments = append(createArguments, "create")
-	if !task.Manifest.Network || !task.Declaration.Network {
-		createArguments = append(createArguments, "--network", "none")
-	}
-	createArguments = append(createArguments, task.ImageRef, "run", task.TaskMetadata.Name, "--src", "/src", "--dir", relativeDirectory, "--out", "/out")
-
-	createCommand := exec.CommandContext(ctx, dockerPath, createArguments...)
-	createOutput, err := createCommand.Output()
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return fmt.Errorf("creating container for plugin %q: %w (%s)", task.PluginName, err, strings.TrimSpace(string(exitErr.Stderr)))
-		}
-		return fmt.Errorf("creating container for plugin %q: %w", task.PluginName, err)
-	}
-	containerID := strings.TrimSpace(string(createOutput))
-
 	defer func() {
-		cleanupContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if output, removeErr := exec.CommandContext(cleanupContext, dockerPath, "rm", "-f", containerID).CombinedOutput(); removeErr != nil {
-			scoped.Log(ctx).V(2).Info("failed to remove plugin container", "container", containerID, "error", removeErr, "output", strings.TrimSpace(string(output)))
+		if closeError := closer.Close(); closeError != nil {
+			scoped.Log(ctx).V(2).Info("failed to close plugin client", "error", closeError)
 		}
 	}()
 
-	pipeReader, pipeWriter := io.Pipe()
-	copyInCommand := exec.CommandContext(ctx, dockerPath, "cp", "-", containerID+":/")
-	copyInCommand.Stdin = pipeReader
+	streamContext, cancelStream := context.WithCancel(ctx)
+	defer cancelStream()
 
-	tarErrorChannel := make(chan error, 1)
-	go func() {
-		tarError := writeTarStream(scope.SourceTree().RepoTree(), scope.RepoRoot(), pipeWriter)
-		_ = pipeWriter.CloseWithError(tarError)
-		tarErrorChannel <- tarError
-	}()
-
-	copyInOutput, copyInErr := copyInCommand.CombinedOutput()
-	_ = pipeReader.CloseWithError(copyInErr)
-
-	tarError := <-tarErrorChannel
-	if copyInErr != nil {
-		return fmt.Errorf("copying source into plugin container %s: %w (%s)", containerID, copyInErr, strings.TrimSpace(string(copyInOutput)))
-	}
-	if tarError != nil && !errors.Is(tarError, io.ErrClosedPipe) {
-		return fmt.Errorf("creating source archive for plugin %q: %w", task.PluginName, tarError)
-	}
-
-	startCommand := exec.CommandContext(ctx, dockerPath, "start", "-a", containerID)
-	startCommand.Stdout = scope.Stdout()
-	startCommand.Stderr = scope.Stderr()
-	if err := startCommand.Run(); err != nil {
-		return fmt.Errorf("plugin %q task %q failed: %w", task.PluginName, task.TaskMetadata.Name, err)
-	}
-
-	if len(task.TaskMetadata.Outputs) == 0 {
-		return nil
+	stream, err := client.RunTask(streamContext)
+	if err != nil {
+		return fmt.Errorf("opening task stream: %w", err)
 	}
 
 	stagingDirectory, err := os.MkdirTemp("", "ap-plugin-stage-*")
@@ -360,9 +412,29 @@ func (task *ContainerTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 		}
 	}()
 
-	copyOutCommand := exec.CommandContext(ctx, dockerPath, "cp", containerID+":/out/.", stagingDirectory)
-	if copyOutOutput, err := copyOutCommand.CombinedOutput(); err != nil {
-		return fmt.Errorf("copying output from container %s: %w (%s)", containerID, err, strings.TrimSpace(string(copyOutOutput)))
+	stagingRoot, err := fileutils.OpenUntrustedRoot(stagingDirectory)
+	if err != nil {
+		return fmt.Errorf("opening staging root %s: %w", stagingDirectory, err)
+	}
+	defer func() {
+		if closeError := stagingRoot.Close(); closeError != nil {
+			scoped.Log(ctx).V(2).Info("failed to close staging root", "error", closeError)
+		}
+	}()
+
+	receiveDone := make(chan error, 1)
+	go func() {
+		receiveDone <- task.receiveOutputs(stream, stagingRoot, scope)
+	}()
+
+	if sendError := task.sendInputs(streamContext, stream, scope); sendError != nil {
+		cancelStream()
+		<-receiveDone
+		return sendError
+	}
+
+	if receiveError := <-receiveDone; receiveError != nil {
+		return receiveError
 	}
 
 	if scope.Verify() {
@@ -372,71 +444,217 @@ func (task *ContainerTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 	return placeStagedOutputs(task.Dir, stagingDirectory, task.TaskMetadata.Outputs, scope.SourceTree())
 }
 
-func writeTarStream(tree *sourcetree.SourceTree, repositoryRoot string, outputWriter io.Writer) (returnError error) {
-	tarWriter := tar.NewWriter(outputWriter)
+func (task *ContainerTask) sendInputs(ctx context.Context, stream api.PluginService_RunTaskClient, scope *tasks.TaskContext) error {
+	startRequest := &api.RunTaskRequest{
+		Payload: &api.RunTaskRequest_Start{
+			Start: &api.TaskStart{
+				Task: task.TaskMetadata.Name,
+				Dir:  task.RelativeDirectory,
+			},
+		},
+	}
+	if err := stream.Send(startRequest); err != nil {
+		return fmt.Errorf("sending task start: %w", err)
+	}
+
+	repositoryTree := scope.SourceTree().RepoTree()
+	repositoryRoot, err := os.OpenRoot(task.RepoRoot)
+	if err != nil {
+		return fmt.Errorf("opening repository root %s: %w", task.RepoRoot, err)
+	}
 	defer func() {
-		if closeErr := tarWriter.Close(); closeErr != nil && returnError == nil {
-			returnError = closeErr
+		if closeError := repositoryRoot.Close(); closeError != nil {
+			scoped.Log(ctx).V(2).Info("failed to close repository root", "error", closeError)
 		}
 	}()
 
-	outDirectoryHeader := &tar.Header{
-		Name:     "out/",
-		Mode:     0755,
-		Typeflag: tar.TypeDir,
-	}
-	if err := tarWriter.WriteHeader(outDirectoryHeader); err != nil {
-		return err
+	resolvedRepositoryRoot, err := filepath.EvalSymlinks(task.RepoRoot)
+	if err != nil {
+		return fmt.Errorf("resolving repository root %s: %w", task.RepoRoot, err)
 	}
 
-	for _, file := range tree.Files() {
-		relativeFilePath, err := filepath.Rel(repositoryRoot, file.Path)
+	const maximumChunkSize = 1024 * 1024 // 1 MB
+
+	for _, file := range repositoryTree.Files() {
+		relativeFilePath, err := filepath.Rel(task.RepoRoot, file.Path)
 		if err != nil {
-			return err
+			return fmt.Errorf("calculating relative path for %s: %w", file.Path, err)
 		}
-		fileInfo, err := os.Lstat(file.Path)
+		relativeFilePath = filepath.ToSlash(relativeFilePath)
+
+		lstatInfo, err := repositoryRoot.Lstat(relativeFilePath)
 		if err != nil {
-			return err
+			return fmt.Errorf("stating file %s: %w", relativeFilePath, err)
 		}
 
-		linkTarget := ""
-		if fileInfo.Mode()&os.ModeSymlink != 0 {
-			linkTarget, err = os.Readlink(file.Path)
+		if lstatInfo.Mode()&os.ModeSymlink != 0 {
+			resolvedTarget, err := filepath.EvalSymlinks(file.Path)
 			if err != nil {
-				return err
+				return fmt.Errorf("resolving symlink %s: %w", relativeFilePath, err)
+			}
+			targetRelativePath, err := filepath.Rel(resolvedRepositoryRoot, resolvedTarget)
+			if err != nil || targetRelativePath == ".." || strings.HasPrefix(targetRelativePath, ".."+string(filepath.Separator)) || filepath.IsAbs(targetRelativePath) {
+				return fmt.Errorf("file %s resolves to %s which is outside the repository view or ignored", relativeFilePath, resolvedTarget)
+			}
+			targetInRepositoryView := filepath.Join(task.RepoRoot, targetRelativePath)
+			if targetFile := repositoryTree.File(targetInRepositoryView); targetFile == nil {
+				return fmt.Errorf("file %s resolves to %s which is outside the repository view or ignored", relativeFilePath, resolvedTarget)
 			}
 		}
 
-		header, err := tar.FileInfoHeader(fileInfo, linkTarget)
+		openedFile, err := repositoryRoot.Open(relativeFilePath)
+		if err != nil {
+			return fmt.Errorf("opening file %s: %w", relativeFilePath, err)
+		}
+
+		fileContent, fileMode, err := readFileContentAndMode(openedFile, relativeFilePath)
+		if closeError := openedFile.Close(); closeError != nil {
+			scoped.Log(ctx).V(2).Info("failed to close file", "path", relativeFilePath, "error", closeError)
+		}
 		if err != nil {
 			return err
 		}
-		header.Name = filepath.ToSlash(filepath.Join("src", relativeFilePath))
-		if fileInfo.IsDir() {
-			header.Name += "/"
+
+		if len(fileContent) == 0 {
+			request := &api.RunTaskRequest{
+				Payload: &api.RunTaskRequest_File{
+					File: &api.FileChunk{
+						Path:        relativeFilePath,
+						Mode:        fileMode,
+						Content:     nil,
+						IsLastChunk: true,
+					},
+				},
+			}
+			if err := stream.Send(request); err != nil {
+				return fmt.Errorf("sending file %s: %w", relativeFilePath, err)
+			}
+		} else {
+			for offset := 0; offset < len(fileContent); offset += maximumChunkSize {
+				end := offset + maximumChunkSize
+				isLastChunk := false
+				if end >= len(fileContent) {
+					end = len(fileContent)
+					isLastChunk = true
+				}
+				request := &api.RunTaskRequest{
+					Payload: &api.RunTaskRequest_File{
+						File: &api.FileChunk{
+							Path:        relativeFilePath,
+							Mode:        fileMode,
+							Content:     fileContent[offset:end],
+							IsLastChunk: isLastChunk,
+						},
+					},
+				}
+				if err := stream.Send(request); err != nil {
+					return fmt.Errorf("sending file %s: %w", relativeFilePath, err)
+				}
+			}
+		}
+	}
+
+	if err := stream.CloseSend(); err != nil {
+		return fmt.Errorf("closing send stream: %w", err)
+	}
+	return nil
+}
+
+func readFileContentAndMode(openedFile *os.File, relativeFilePath string) ([]byte, uint32, error) {
+	fileInfo, err := openedFile.Stat()
+	if err != nil {
+		return nil, 0, fmt.Errorf("stating file %s: %w", relativeFilePath, err)
+	}
+
+	if !fileInfo.Mode().IsRegular() {
+		return nil, 0, fmt.Errorf("file %s is not a regular file", relativeFilePath)
+	}
+
+	fileContent, err := io.ReadAll(openedFile)
+	if err != nil {
+		return nil, 0, fmt.Errorf("reading file %s: %w", relativeFilePath, err)
+	}
+
+	return fileContent, uint32(fileInfo.Mode().Perm()), nil
+}
+
+func (task *ContainerTask) receiveOutputs(stream api.PluginService_RunTaskClient, stagingRoot *fileutils.UntrustedRoot, scope *tasks.TaskContext) error {
+	var currentFilePath string
+	var currentFileBuffer bytes.Buffer
+	var currentFileMode uint32
+	var taskResult *api.TaskResult
+	const maximumFileSize = 100 * 1024 * 1024 // 100 MB per file limit
+
+	for {
+		response, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("stream error: %w", err)
 		}
 
-		if err := tarWriter.WriteHeader(header); err != nil {
-			return err
-		}
+		switch payload := response.Payload.(type) {
+		case *api.RunTaskResponse_Log:
+			logLine := payload.Log
+			if logLine.Stream == api.LogLine_STDERR {
+				if _, writeError := scope.Stderr().Write(logLine.Data); writeError != nil {
+					return fmt.Errorf("writing stderr: %w", writeError)
+				}
+			} else {
+				if _, writeError := scope.Stdout().Write(logLine.Data); writeError != nil {
+					return fmt.Errorf("writing stdout: %w", writeError)
+				}
+			}
+		case *api.RunTaskResponse_OutputFile:
+			chunk := payload.OutputFile
+			if currentFilePath == "" {
+				currentFilePath = chunk.Path
+				currentFileMode = chunk.Mode
+				currentFileBuffer.Reset()
+			} else if currentFilePath != chunk.Path {
+				return fmt.Errorf("received chunk for %q before completing %q", chunk.Path, currentFilePath)
+			}
 
-		if fileInfo.Mode().IsRegular() {
-			fileData, err := os.Open(file.Path)
-			if err != nil {
-				return err
+			currentFileBuffer.Write(chunk.Content)
+			if int64(currentFileBuffer.Len()) > maximumFileSize {
+				return fmt.Errorf("output file %q exceeds 100 MB limit", currentFilePath)
 			}
-			_, copyError := io.Copy(tarWriter, fileData)
-			closeError := fileData.Close()
-			if copyError != nil {
-				return copyError
+
+			if chunk.IsLastChunk {
+				fileMode := os.FileMode(currentFileMode).Perm()
+				if writeError := stagingRoot.WriteFile(currentFilePath, currentFileBuffer.Bytes(), fileMode); writeError != nil {
+					return fmt.Errorf("writing output file %s: %w", currentFilePath, writeError)
+				}
+				currentFilePath = ""
+				currentFileBuffer.Reset()
 			}
-			if closeError != nil {
-				return closeError
-			}
+		case *api.RunTaskResponse_Result:
+			taskResult = payload.Result
 		}
+	}
+
+	if currentFilePath != "" {
+		return fmt.Errorf("stream ended with incomplete chunks for %q", currentFilePath)
+	}
+
+	if taskResult == nil {
+		return fmt.Errorf("plugin exited early without returning a result")
+	}
+
+	if taskResult.ExitCode != 0 {
+		errorMessage := strings.TrimSpace(taskResult.ErrorMessage)
+		if errorMessage != "" {
+			return fmt.Errorf("task failed with exit code %d: %s", taskResult.ExitCode, errorMessage)
+		}
+		return fmt.Errorf("task failed with exit code %d", taskResult.ExitCode)
 	}
 
 	return nil
+}
+
+func isCoLocated(outputs []string) bool {
+	return len(outputs) == 1 && (outputs[0] == "." || filepath.Clean(outputs[0]) == ".")
 }
 
 func placeStagedOutputs(targetDirectory, stagingDirectory string, outputs []string, tree *sourcetree.SourceTree) (returnError error) {
@@ -445,8 +663,8 @@ func placeStagedOutputs(targetDirectory, stagingDirectory string, outputs []stri
 		return fmt.Errorf("opening root %s: %w", targetDirectory, err)
 	}
 	defer func() {
-		if closeErr := untrustedRoot.Close(); closeErr != nil && returnError == nil {
-			returnError = closeErr
+		if closeError := untrustedRoot.Close(); closeError != nil && returnError == nil {
+			returnError = closeError
 		}
 	}()
 
@@ -458,10 +676,6 @@ func placeStagedOutputs(targetDirectory, stagingDirectory string, outputs []stri
 		return fmt.Errorf("invalidating source tree: %w", invalidateErr)
 	}
 	return nil
-}
-
-func isCoLocated(outputs []string) bool {
-	return len(outputs) == 1 && (outputs[0] == "." || filepath.Clean(outputs[0]) == ".")
 }
 
 func verifyStagedOutputs(ctx context.Context, targetDirectory, stagingDirectory string, outputs []string, task *ContainerTask, outputWriter io.Writer) error {
