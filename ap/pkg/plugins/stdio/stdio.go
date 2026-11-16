@@ -251,16 +251,16 @@ func (commandConnection *CommandConn) Write(buffer []byte) (int, error) {
 	return bytesWritten, nil
 }
 
-// Close closes the child process's stdin and stdout pipes and waits a bounded
-// duration for the child process to exit. If the child process does not exit
-// within the grace period, Close forcefully terminates it and returns an error
-// indicating that the child was killed.
+// Close closes the child process's stdin pipe, waits a bounded duration
+// for the child process to exit (killing it if it does not exit promptly),
+// and then closes the stdout pipe.
 func (commandConnection *CommandConn) Close() error {
 	commandConnection.closed.Store(true)
 	commandConnection.closeOnce.Do(func() {
 		var closeErrors []error
-		closeErrors = append(closeErrors, commandConnection.stdinPipe.Close())
-		closeErrors = append(closeErrors, commandConnection.stdoutPipe.Close())
+		if err := commandConnection.stdinPipe.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+			closeErrors = append(closeErrors, err)
+		}
 
 		go commandConnection.startWait()
 
@@ -275,6 +275,9 @@ func (commandConnection *CommandConn) Close() error {
 			} else {
 				closeErrors = append(closeErrors, fmt.Errorf("child process did not exit within %v and was killed: %w", closeGracePeriod, commandConnection.waitError))
 			}
+		}
+		if err := commandConnection.stdoutPipe.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+			closeErrors = append(closeErrors, err)
 		}
 		commandConnection.closeError = errors.Join(closeErrors...)
 	})
