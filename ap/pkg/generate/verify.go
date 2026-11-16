@@ -31,9 +31,9 @@ import (
 	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
-	"k8s.io/klog/v2"
 )
 
 type perturbedFile struct {
@@ -210,6 +210,8 @@ func Undo(data []byte, marker string, isBinary bool, wasEmpty bool) ([]byte, boo
 // RunVerify executes generator verification by perturbing all detected generated files,
 // running generation tasks, and asserting that all perturbed files are restored byte-identically.
 func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext, allTasks []tasks.Task, dryRun bool) error {
+	log := scoped.Log(ctx)
+
 	var r *sourcetree.SourceTree
 	if len(scopes) > 0 {
 		r = scopes[0].SourceTree()
@@ -240,7 +242,7 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext
 	// Capture initial git status
 	initialGitStatus, gitErr := getGitStatus(ctx, repoRoot)
 	if gitErr != nil {
-		klog.V(2).Infof("failed to get initial git status: %v", gitErr)
+		log.V(2).Info("failed to get initial git status", "error", gitErr)
 	}
 
 	// Generate nonce for this run
@@ -320,11 +322,11 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext
 			undone, ok := Undo(currentData, pf.marker, pf.isBinary, pf.wasEmpty)
 			if ok {
 				if err := r.WriteFile(pf.path, undone, pf.mode); err != nil {
-					klog.Errorf("failed to restore file %s: %v", pf.path, err)
+					log.Error(err, "failed to restore file", "path", pf.path)
 				}
 			}
 			if err := os.Chtimes(pf.path, pf.modTime, pf.modTime); err != nil {
-				klog.V(2).Infof("failed to restore mtime for %s: %v", pf.path, err)
+				log.V(2).Info("failed to restore mtime", "path", pf.path, "error", err)
 			}
 		}
 	}
@@ -363,7 +365,7 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext
 		if currentHash == pf.hash {
 			// File is byte-identical! Restore mtime.
 			if err := os.Chtimes(pf.path, pf.modTime, pf.modTime); err != nil {
-				klog.V(2).Infof("failed to restore mtime for %s: %v", pf.path, err)
+				log.V(2).Info("failed to restore mtime", "path", pf.path, "error", err)
 			}
 		} else {
 			currentContent, readErr := os.ReadFile(pf.path)
@@ -404,7 +406,7 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext
 	}
 
 	success = true
-	klog.Infof("Generator verification passed: %d generated files verified", len(perturbedFiles))
+	log.Info("generator verification passed", "files", len(perturbedFiles))
 	return nil
 }
 
