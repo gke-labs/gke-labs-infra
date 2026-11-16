@@ -54,7 +54,7 @@ When making changes to an AP-managed project, coding agents should follow this v
 -   **Cluster**: Use `--cluster=kind://<name>` to target a specific kind cluster or `--cluster=<context>` to target a kubeconfig context.
 -   **Namespace**: Passing `-n <namespace>` retargets namespaced objects to the target namespace while logging changes and applying cluster-scoped objects as-is.
 -   **ApplySet**: Pass `--applyset=[RESOURCE[.GROUP]/]NAME` to track deployments with KEP-3659 ApplySet labels and maintain parent metadata.
--   **BuildKit**: Configure remote BuildKit using `--buildkit-host` or `BUILDKIT_HOST` (e.g. `k8s://namespace/service`); the `k8s` shorthand expands to `k8s://autodeploy-system/buildkit`.
+-   **BuildKit**: Configure remote BuildKit using `--buildkit-host` or `BUILDKIT_HOST` (e.g. `k8s://namespace/service`); the `k8s` shorthand expands to `k8s://autodeploy-system/buildkit`. Reaching an in-cluster BuildKit uses a private unix socket and opens no local port.
 -   **Buildctl**: The buildkit path uses the pinned `buildctl`.
 -   **Registry Prefix**: `IMAGE_PREFIX` defaults to `images.local`, assuming an in-cluster image registry and its node agent.
 -   **Skip Push**: Use `--skip-push` to skip pushing built images to the registry.

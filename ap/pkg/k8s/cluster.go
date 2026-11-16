@@ -14,6 +14,11 @@
 
 package k8s
 
+import (
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+)
+
 // KubeCluster identifies the cluster a deploy talks to. Today that is a
 // kubeconfig context; later it can carry a rest.Config or a tunnelled transport.
 type KubeCluster struct {
@@ -74,4 +79,14 @@ func (c KubeCluster) KindClusterName() string {
 // String returns a string representation for cache keys and task names.
 func (c KubeCluster) String() string {
 	return c.kubeconfigContext
+}
+
+// ClientConfig returns a client-go *rest.Config for this cluster.
+func (c KubeCluster) ClientConfig() (*rest.Config, error) {
+	rules := clientcmd.NewDefaultClientConfigLoadingRules()
+	overrides := &clientcmd.ConfigOverrides{}
+	if c.kubeconfigContext != "" {
+		overrides.CurrentContext = c.kubeconfigContext
+	}
+	return clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, overrides).ClientConfig()
 }

@@ -16,7 +16,6 @@ package images
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -880,106 +879,6 @@ func TestFormatDuration(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("formatDuration(%v) = %q, want %q", tt.duration, got, tt.want)
 		}
-	}
-}
-
-func TestBuildTasks_ParallelK8sBuildkitHost(t *testing.T) {
-	t.Setenv("KUBERNETES_SERVICE_HOST", "")
-	t.Setenv("ARTIFACTS", t.TempDir())
-	tmpDir := t.TempDir()
-	for _, name := range []string{"img1", "img2"} {
-		if err := os.MkdirAll(filepath.Join(tmpDir, "images", name), 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(tmpDir, "images", name, "Dockerfile"), []byte("FROM scratch"), 0644); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	r, err := sourcetree.Open(tmpDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// mock-kubectl prints "Forwarding from 127.0.0.1:<port> -> 2375" and waits to be killed.
-	mockKubectl := filepath.Join(tmpDir, "mock-kubectl")
-	kubectlScript := `#!/bin/sh
-for arg in "$@"; do
-	case "$arg" in
-		*:2375)
-			port="${arg%:2375}"
-			echo "Forwarding from 127.0.0.1:$port -> 2375"
-			;;
-	esac
-done
-sleep 60
-`
-	if err := os.WriteFile(mockKubectl, []byte(kubectlScript), 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	hostsDir := filepath.Join(tmpDir, "hosts")
-	if err := os.MkdirAll(hostsDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	// mock-buildctl records BUILDKIT_HOST to a unique file per execution.
-	mockBuildctl := filepath.Join(tmpDir, "mock-buildctl")
-	buildctlScript := fmt.Sprintf(`#!/bin/sh
-echo "$BUILDKIT_HOST" > "%s/host-$$-$(date +%%s%%N)"
-`, hostsDir)
-	if err := os.WriteFile(mockBuildctl, []byte(buildctlScript), 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	origExec := execCommandContext
-	defer func() { execCommandContext = origExec }()
-	execCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		if name == "buildctl" {
-			return exec.CommandContext(ctx, mockBuildctl, args...)
-		}
-		return origExec(ctx, name, args...)
-	}
-
-	scope := tasks.NewTaskContext(tmpDir, tmpDir, r).WithTool("kubectl", mockKubectl)
-	naming := ResolveImageNaming(nil)
-
-	task, err := BuildTasksForImages(r, tmpDir, false, "k8s://autodeploy-system/buildkit", []string{"img1", "img2"}, naming, k8s.CurrentCluster())
-	if err != nil {
-		t.Fatalf("BuildTasksForImages failed: %v", err)
-	}
-
-	if err := task.Run(t.Context(), scope); err != nil {
-		t.Fatalf("parallel build task failed: %v", err)
-	}
-
-	files, err := filepath.Glob(filepath.Join(hostsDir, "host-*"))
-	if err != nil {
-		t.Fatalf("failed to glob host files: %v", err)
-	}
-	if len(files) != 2 {
-		t.Fatalf("expected 2 buildctl executions, found %d", len(files))
-	}
-
-	seenPorts := make(map[string]bool)
-	for _, f := range files {
-		content, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatalf("failed to read %s: %v", f, err)
-		}
-		host := strings.TrimSpace(string(content))
-		if !strings.HasPrefix(host, "tcp://localhost:") {
-			t.Errorf("unexpected BUILDKIT_HOST %q", host)
-			continue
-		}
-		port := strings.TrimPrefix(host, "tcp://localhost:")
-		if port == "2375" {
-			t.Errorf("BUILDKIT_HOST should not be default 2375, got %q", host)
-		}
-		if seenPorts[port] {
-			t.Errorf("duplicate port %q allocated to multiple builds", port)
-		}
-		seenPorts[port] = true
 	}
 }
 
