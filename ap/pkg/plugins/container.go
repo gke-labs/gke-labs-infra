@@ -39,10 +39,7 @@ import (
 func buildPluginImage(ctx context.Context, scope *tasks.TaskContext, pluginName, dockerfilePath string) (string, error) {
 	buildxPath, err := scope.Tool(ctx, "docker-buildx")
 	if err != nil {
-		buildxPath, err = scope.Tool(ctx, "docker")
-		if err != nil {
-			return "", fmt.Errorf("plugin %q requires a container runtime (docker-buildx): %w", pluginName, err)
-		}
+		return "", fmt.Errorf("plugin %q requires a container runtime (docker-buildx): %w", pluginName, err)
 	}
 
 	temporaryDirectory, err := os.MkdirTemp("", "ap-plugin-build-*")
@@ -84,10 +81,7 @@ func buildPluginImage(ctx context.Context, scope *tasks.TaskContext, pluginName,
 }
 
 // DescribeContainer runs `<image> describe` in a container on cold runs and caches the manifest.
-func DescribeContainer(ctx context.Context, scope *tasks.TaskContext, cacheDirectory, pluginName string, declaration config.PluginDeclaration, imageRef string) (*PluginManifest, error) {
-	if imageRef == "" {
-		imageRef = declaration.Image
-	}
+func DescribeContainer(ctx context.Context, scope *tasks.TaskContext, cacheDirectory, pluginName, imageRef string) (*PluginManifest, error) {
 	key := CacheKey(imageRef)
 	manifest, err := LoadCachedManifest(cacheDirectory, key)
 	if err == nil {
@@ -201,7 +195,7 @@ func LoadContainerPlugins(ctx context.Context, scope *tasks.TaskContext, cacheDi
 				return nil, err
 			}
 		}
-		manifest, err := DescribeContainer(ctx, scope, cacheDirectory, name, declaration, imageRef)
+		manifest, err := DescribeContainer(ctx, scope, cacheDirectory, name, imageRef)
 		if err != nil {
 			return nil, err
 		}
@@ -269,11 +263,7 @@ func (task *ContainerTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 	if !task.Manifest.Network || !task.Declaration.Network {
 		createArguments = append(createArguments, "--network", "none")
 	}
-	image := task.ImageRef
-	if image == "" {
-		image = task.Declaration.Image
-	}
-	createArguments = append(createArguments, image, "run", task.TaskMetadata.Name, "--src", "/src", "--dir", relativeDir, "--out", "/out")
+	createArguments = append(createArguments, task.ImageRef, "run", task.TaskMetadata.Name, "--src", "/src", "--dir", relativeDir, "--out", "/out")
 
 	createCommand := exec.CommandContext(ctx, dockerPath, createArguments...)
 	createOutput, err := createCommand.Output()
