@@ -91,7 +91,7 @@ func TestSingleWalkPerInvocation(t *testing.T) {
 	}
 
 	// Step 2: Run DiscoverScopes with the shared repo
-	scopes, err := DiscoverScopes(r, rootOpt.RepoRoot, rootOpt.Dir)
+	scopes, err := DiscoverScopes(t.Context(), r, rootOpt.RepoRoot, rootOpt.Dir)
 	if err != nil {
 		t.Fatalf("DiscoverScopes failed: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestSkipUniformlyInvisibleToAllConsumers(t *testing.T) {
 	ignoredDir := filepath.Join(tempDir, "ignored")
 
 	// 1. DiscoverScopes must not see ignored/.ap
-	scopes, err := DiscoverScopes(r, tempDir, tempDir)
+	scopes, err := DiscoverScopes(t.Context(), r, tempDir, tempDir)
 	if err != nil {
 		t.Fatalf("DiscoverScopes failed: %v", err)
 	}
@@ -318,7 +318,7 @@ func TestDiscoverScopes_ScriptAndGoE2e(t *testing.T) {
 		t.Fatalf("GetSourceTree failed: %v", err)
 	}
 
-	scopes, err := DiscoverScopes(r, rootOpt.RepoRoot, rootOpt.Dir)
+	scopes, err := DiscoverScopes(t.Context(), r, rootOpt.RepoRoot, rootOpt.Dir)
 	if err != nil {
 		t.Fatalf("DiscoverScopes failed: %v", err)
 	}
@@ -354,5 +354,47 @@ func TestDiscoverScopes_ScriptAndGoE2e(t *testing.T) {
 	}
 	if strings.Count(logBuf.String(), expectedLog) != 1 {
 		t.Fatalf("expected log notice to appear once, appeared %d times", strings.Count(logBuf.String(), expectedLog))
+	}
+}
+
+func TestDiscoverScopes_SubdirectoryWithinModule(t *testing.T) {
+	sourcetree.ResetCache()
+	tempDir := t.TempDir()
+
+	files := map[string]string{
+		".git/config":         "",
+		"go.mod":              "module example.com/test\n\ngo 1.27\n",
+		"pkg/sub/foo.go":      "package sub\n\nfunc Foo() {}\n",
+		"pkg/sub/foo_test.go": "package sub\n\nimport \"testing\"\n\nfunc TestFoo(t *testing.T) {}\n",
+	}
+	for rel, content := range files {
+		full := filepath.Join(tempDir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+			t.Fatalf("MkdirAll failed: %v", err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0644); err != nil {
+			t.Fatalf("WriteFile failed: %v", err)
+		}
+	}
+
+	sourceTree, err := sourcetree.Open(tempDir)
+	if err != nil {
+		t.Fatalf("sourcetree.Open failed: %v", err)
+	}
+
+	subDirectory := filepath.Join(tempDir, "pkg")
+	scopes, err := DiscoverScopes(t.Context(), sourceTree, tempDir, subDirectory)
+	if err != nil {
+		t.Fatalf("DiscoverScopes failed: %v", err)
+	}
+	if len(scopes) != 1 {
+		t.Fatalf("expected 1 scope, got %d", len(scopes))
+	}
+
+	if len(scopes[0].TestTasks) == 0 {
+		t.Fatalf("expected TestTasks in module subdirectory %s, got none", subDirectory)
+	}
+	if len(scopes[0].LintTasks) == 0 {
+		t.Fatalf("expected LintTasks in module subdirectory %s, got none", subDirectory)
 	}
 }

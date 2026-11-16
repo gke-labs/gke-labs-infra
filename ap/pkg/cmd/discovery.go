@@ -15,6 +15,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,12 +24,17 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/portability"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/format"
 	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/plugins"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
+var builtInPlugins = []plugins.Plugin{
+	&golang.Plugin{},
+}
+
 // DiscoverScopes discovers all tasks under the given directory subtree.
-func DiscoverScopes(r *sourcetree.SourceTree, repoRoot, dir string) ([]*tasks.TaskContext, error) {
+func DiscoverScopes(ctx context.Context, r *sourcetree.SourceTree, repoRoot, dir string) ([]*tasks.TaskContext, error) {
 	if dir == "" {
 		dir = repoRoot
 	}
@@ -111,22 +117,28 @@ func DiscoverScopes(r *sourcetree.SourceTree, repoRoot, dir string) ([]*tasks.Ta
 		}
 	}
 
-	// Go Test tasks
-	goTestTasks, err := golang.TestTasks(scope.SourceTree(), dir)
+	// Discover plugin tasks (e.g. Go tooling)
+	pluginTasks, err := plugins.DiscoverTasks(ctx, builtInPlugins, scope, dir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to discover test tasks in %s: %w", dir, err)
+		return nil, fmt.Errorf("failed to discover plugin tasks in %s: %w", dir, err)
 	}
-	if goTestTasks != nil {
-		scope.TestTasks = append(scope.TestTasks, goTestTasks)
-	}
-
-	// Go lint tasks
-	goLintTasks, err := golang.LintTasks(scope.SourceTree(), dir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to discover lint tasks in %s: %w", dir, err)
-	}
-	if goLintTasks != nil {
-		scope.LintTasks = append(scope.LintTasks, goLintTasks)
+	for _, pluginTask := range pluginTasks {
+		switch pluginTask.Verb {
+		case "test":
+			scope.TestTasks = append(scope.TestTasks, pluginTask.Task)
+		case "lint":
+			scope.LintTasks = append(scope.LintTasks, pluginTask.Task)
+		case "build":
+			scope.BuildTasks = append(scope.BuildTasks, pluginTask.Task)
+		case "format":
+			scope.FormatTasks = append(scope.FormatTasks, pluginTask.Task)
+		case "generate":
+			scope.GenerateTasks = append(scope.GenerateTasks, pluginTask.Task)
+		case "e2e":
+			scope.E2ETasks = append(scope.E2ETasks, pluginTask.Task)
+		default:
+			return nil, fmt.Errorf("plugin %q task %q has unknown verb %q", pluginTask.Plugin, pluginTask.Name, pluginTask.Verb)
+		}
 	}
 
 	// Portability lint tasks
