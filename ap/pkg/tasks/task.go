@@ -19,8 +19,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 )
 
 // Task is the interface that all tasks must implement.
@@ -51,7 +49,7 @@ func (t *FuncTask) GetChildren() []Task {
 // PrintTree prints the task tree to the specified writer.
 func PrintTree(w io.Writer, t Task, indent int) {
 	if _, err := fmt.Fprintf(w, "%s%s\n", strings.Repeat("  ", indent), t.GetName()); err != nil {
-		scoped.Log(context.Background()).V(2).Info("failed to write task tree", "error", err)
+		defaultLogger.V(2).Info("failed to write task tree", "error", err)
 	}
 	for _, child := range t.GetChildren() {
 		PrintTree(w, child, indent+1)

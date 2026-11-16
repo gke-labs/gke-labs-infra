@@ -24,7 +24,6 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool"
 	"github.com/go-logr/logr"
-	"k8s.io/klog/v2"
 )
 
 type runState struct {
@@ -122,12 +121,14 @@ func (s *TaskContext) Stderr() io.Writer {
 	return os.Stderr
 }
 
+var defaultLogger = NewLogger(nil)
+
 // Log returns the logger configured for this task context, or the default logger if unset.
 func (s *TaskContext) Log() logr.Logger {
 	if s.log.GetSink() != nil {
 		return s.log
 	}
-	return klog.Background()
+	return defaultLogger
 }
 
 // WithLog returns a shallow copy of the task context with the given logger.

@@ -26,6 +26,7 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/gitsource"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool"
 	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
@@ -121,7 +122,7 @@ func BuildRootCommand() *cobra.Command {
 		Short: "ap is a tool for managing gke-labs projects",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
-			cmd.SetContext(scoped.WithLog(cmd.Context(), klog.Background()))
+			cmd.SetContext(scoped.WithLog(cmd.Context(), tasks.NewLogger(nil)))
 			cwd, err := os.Getwd()
 			if err != nil {
 				return err
@@ -164,6 +165,11 @@ func BuildRootCommand() *cobra.Command {
 	cmd.AddCommand(BuildToolCommand(&opt))
 	cmd.AddCommand(BuildBashCommand())
 
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cmd.SetContext(scoped.WithLog(ctx, tasks.NewLogger(nil)))
 	return cmd
 }
 
