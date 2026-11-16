@@ -5,7 +5,7 @@
 `ap` automates development tasks across repositories using convention over configuration. Today, `ap` implements a fixed set of built-in toolchains (Go, protoc, docker, kind). To support additional toolchains without baking foreign runtimes (e.g. Node.js for Astro documentation sites) into the host or `ap` binary, `ap` introduces an extensible **plugin** model.
 
 The design operates within the following established constraints (decisions 2026-11-15):
-- **Declarative Activation**: Plugins declare file patterns (e.g. `astro.config.*`). The directory containing a match is the unit of work.
+- **Declarative Activation**: Plugins declare repository-relative file patterns (e.g. `**/astro.config.*`, `docs/astro.config.*`; a bare name matches only at the top level). The directory containing a match is the unit of work.
 - **Orchestration in `ap`**: `ap` asks an activated plugin for its tasks and runs them. `ap` retains ownership of task ordering, output buffering, logging, retries, and verification.
 - **Directed Outputs**: Plugins write results only to directories designated by `ap`; `ap` places results in the tree or validates them.
 - **Hermetic by Default**: Plugins declare whether network access is required, running with no network when unneeded.
@@ -22,7 +22,7 @@ A plugin communicates its capabilities and tasks through a versioned JSON schema
 {
   "apiVersion": "ap.plugin/v1alpha1",
   "name": "astro",
-  "activation": ["astro.config.*"],
+  "activation": ["docs/astro.config.*"],
   "network": false,
   "tasks": [
     {
@@ -34,7 +34,7 @@ A plugin communicates its capabilities and tasks through a versioned JSON schema
   ]
 }
 ```
-- **Activation**: File match patterns (e.g. `["astro.config.*"]`, `["go.mod"]`) evaluated per directory.
+- **Activation**: File match patterns evaluated against repository-relative paths (e.g. `["docs/astro.config.*"]`, `["**/go.mod"]`). A bare name (e.g. `go.mod`) matches only at the top level, `**/name` matches at any depth, and directory prefixes (e.g. `docs/astro.config.*`) match only in that directory.
 - **Network Declaration & Authorization**: The manifest declares `network: false` (default) or `true`. A plugin declaring `network: true` also requires explicit repository authorization via `network: true` in `.ap/plugins.yaml`. If the repository does not consent, `ap` refuses execution with an error. Both must consent for network access to be enabled.
 - **Caches**: To ensure hermeticity and simplicity in v1alpha1, persistent caches are omitted. Plugins run offline and build deterministically from input trees.
 - **Tasks**: Each task declares:
@@ -129,7 +129,7 @@ type PluginTask struct {
 }
 ```
 - **Container Implementation**: `Describe` loads the cached manifest (running the container and caching under `AP_CACHE_DIR` on first run). `DiscoverTasks` returns `PluginTask` structs wrapping a `tasks.Task` that drives the container runner for the given `dir`.
-- **In-Process Go Implementation**: `Describe` returns static Go metadata (`activation: ["go.mod"]`, tasks for `test`, `lint`, etc.). `DiscoverTasks` wraps `golang.TestTasks` and `golang.LintTasks` for the activated module at `dir`.
+- **In-Process Go Implementation**: `Describe` returns static Go metadata (`activation: ["**/go.mod"]`, tasks for `test`, `lint`, etc.). `DiscoverTasks` wraps `golang.TestTasks` and `golang.LintTasks` for the activated module at `dir`.
 - **Relation to Tasks and Tools**: `tasks.Task` remains the core unit for output buffering and status printing. In-process Go tasks use `ap/pkg/tool` for host binary resolution (`go`, `govulncheck`), whereas container plugins encapsulate their tools entirely inside their images.
 - **Recommendation**: Unified `Plugin` interface with identical metadata shapes for both Go and container implementations.
 - **Alternative Not Taken**: Separate abstractions for built-in vs container tools, which would prevent moving Go out to a plugin in the future.

@@ -75,7 +75,7 @@ When writing Kubernetes manifests, follow these guidelines:
 
 ## Plugin Configuration
 
-Plugins are declared in `.ap/plugins.yaml`. A plugin specifies an immutable digest-pinned image (`image: <repo>@sha256:...`), with optional `network: false` (default) and `enabled: false` (for subtree overrides). Plugins declare their activation file patterns (e.g. `astro.config.*`), which `ap ls` discovers per directory across the repository.
+Plugins are declared in `.ap/plugins.yaml`. A plugin specifies an immutable digest-pinned image (`image: <repo>@sha256:...`), with optional `network: false` (default) and `enabled: false` (for subtree overrides). Plugins declare their activation file patterns as repository-relative paths (e.g. `**/astro.config.*`, `docs/astro.config.*`; a bare name matches only at the top level), which `ap ls` discovers per directory across the repository.
 
 ## Task Output
 

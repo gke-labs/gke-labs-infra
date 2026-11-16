@@ -331,6 +331,8 @@ plugins:
 - `network`: Boolean flag (default `false`). When `true`, authorizes network access for the plugin if the plugin also declares that it requires network access.
 - `enabled`: Optional boolean flag. When `false`, disables the plugin (useful in subtree `.ap/plugins.yaml` overrides).
 
+Plugins declare their activation patterns as repository-relative paths (e.g. `**/astro.config.*`, `docs/astro.config.*`; a bare name matches only at the top level).
+
 ## Usage
 
 Run `go run ap/main.go` or build the binary.
