@@ -492,26 +492,24 @@ plugins:
 }
 
 func TestContainerTask_GetName(t *testing.T) {
-	repoRoot := filepath.Join("home", "user", "repo")
 	tests := []struct {
-		dir  string
-		want string
+		relativeDirectory string
+		want              string
 	}{
-		{dir: repoRoot, want: "astro-build"},
-		{dir: filepath.Join(repoRoot, "docs"), want: "astro-build docs"},
-		{dir: filepath.Join(repoRoot, "blog"), want: "astro-build blog"},
+		{relativeDirectory: ".", want: "astro-build"},
+		{relativeDirectory: "docs", want: "astro-build docs"},
+		{relativeDirectory: "blog", want: "astro-build blog"},
 	}
 	names := make(map[string]bool)
 	for _, tc := range tests {
 		task := &plugins.ContainerTask{
-			PluginName:   "astro",
-			TaskMetadata: plugins.TaskMetadata{Name: "build"},
-			Dir:          tc.dir,
-			RepoRoot:     repoRoot,
+			PluginName:        "astro",
+			TaskMetadata:      plugins.TaskMetadata{Name: "build"},
+			RelativeDirectory: tc.relativeDirectory,
 		}
 		got := task.GetName()
 		if got != tc.want {
-			t.Errorf("task.GetName() for dir %q = %q, want %q", tc.dir, got, tc.want)
+			t.Errorf("task.GetName() for relative directory %q = %q, want %q", tc.relativeDirectory, got, tc.want)
 		}
 		names[got] = true
 	}
