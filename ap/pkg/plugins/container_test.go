@@ -490,3 +490,32 @@ plugins:
 		}
 	})
 }
+
+func TestContainerTask_GetName(t *testing.T) {
+	repoRoot := filepath.Join("home", "user", "repo")
+	tests := []struct {
+		dir  string
+		want string
+	}{
+		{dir: repoRoot, want: "astro-build"},
+		{dir: filepath.Join(repoRoot, "docs"), want: "astro-build docs"},
+		{dir: filepath.Join(repoRoot, "blog"), want: "astro-build blog"},
+	}
+	names := make(map[string]bool)
+	for _, tc := range tests {
+		task := &plugins.ContainerTask{
+			PluginName:   "astro",
+			TaskMetadata: plugins.TaskMetadata{Name: "build"},
+			Dir:          tc.dir,
+			RepoRoot:     repoRoot,
+		}
+		got := task.GetName()
+		if got != tc.want {
+			t.Errorf("task.GetName() for dir %q = %q, want %q", tc.dir, got, tc.want)
+		}
+		names[got] = true
+	}
+	if len(names) != len(tests) {
+		t.Errorf("expected %d distinct names, got %d", len(tests), len(names))
+	}
+}

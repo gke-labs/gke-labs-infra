@@ -143,6 +143,11 @@ func (plugin *ContainerPlugin) DiscoverTasks(ctx context.Context, directory stri
 		return nil, err
 	}
 
+	repoRoot := plugin.RepoRoot
+	if repoRoot == "" && scope != nil {
+		repoRoot = scope.RepoRoot()
+	}
+
 	var discoveredTasks []PluginTask
 	for _, activatedDir := range activatedDirectories {
 		for _, taskMetadata := range plugin.Manifest.Tasks {
@@ -153,7 +158,7 @@ func (plugin *ContainerPlugin) DiscoverTasks(ctx context.Context, directory stri
 				ImageRef:     plugin.ImageRef,
 				Manifest:     plugin.Manifest,
 				Dir:          activatedDir,
-				RepoRoot:     plugin.RepoRoot,
+				RepoRoot:     repoRoot,
 			}
 			discoveredTasks = append(discoveredTasks, PluginTask{
 				Plugin:       plugin.Name,
@@ -226,9 +231,17 @@ var (
 	_ tasks.Sourced = (*ContainerTask)(nil)
 )
 
-// GetName returns the hyphenated task name `<plugin>-<task>`.
+// GetName returns the hyphenated task name `<plugin>-<task>`, suffixed by the activating directory.
 func (task *ContainerTask) GetName() string {
-	return fmt.Sprintf("%s-%s", task.PluginName, task.TaskMetadata.Name)
+	name := fmt.Sprintf("%s-%s", task.PluginName, task.TaskMetadata.Name)
+	if task.RepoRoot == "" || task.Dir == "" {
+		return name
+	}
+	rel, err := filepath.Rel(task.RepoRoot, task.Dir)
+	if err != nil || rel == "." || rel == "" || strings.HasPrefix(rel, "..") {
+		return name
+	}
+	return fmt.Sprintf("%s %s", name, filepath.ToSlash(rel))
 }
 
 // GetChildren returns no children for leaf container tasks.
