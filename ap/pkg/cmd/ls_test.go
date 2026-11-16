@@ -54,7 +54,7 @@ plugins:
 	manifestJSON := `{
   "apiVersion": "ap.plugin/v1alpha1",
   "name": "astro",
-  "activation": ["astro.config.*"],
+  "activation": ["docs/astro.config.*"],
   "network": false,
   "tasks": [
     {

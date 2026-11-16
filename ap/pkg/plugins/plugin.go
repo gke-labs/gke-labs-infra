@@ -106,6 +106,11 @@ func FindActivatedDirs(tree *sourcetree.SourceTree, pluginName string, patterns 
 	if len(patterns) == 0 {
 		return nil, nil
 	}
+	for _, pattern := range patterns {
+		if _, err := sourcetree.MatchPath(pattern, "", false); err != nil {
+			return nil, fmt.Errorf("plugin %q: bad activation pattern %q: %w", pluginName, pattern, err)
+		}
+	}
 	seen := make(map[string]bool)
 	allDirectories := make([]string, 0, len(tree.Dirs())+1)
 	allDirectories = append(allDirectories, tree.Root())
@@ -120,9 +125,13 @@ func FindActivatedDirs(tree *sourcetree.SourceTree, pluginName string, patterns 
 	var activatedDirectories []string
 	for _, directory := range allDirectories {
 		for _, file := range tree.FilesInDir(directory) {
+			relPath, err := filepath.Rel(tree.RepoRoot(), file.Path)
+			if err != nil {
+				return nil, fmt.Errorf("plugin %q: %w", pluginName, err)
+			}
 			matched := false
 			for _, pattern := range patterns {
-				match, err := filepath.Match(pattern, file.Name)
+				match, err := sourcetree.MatchPath(pattern, relPath, false)
 				if err != nil {
 					return nil, fmt.Errorf("plugin %q: bad activation pattern %q: %w", pluginName, pattern, err)
 				}

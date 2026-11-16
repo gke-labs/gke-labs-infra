@@ -18,6 +18,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/plugins"
@@ -99,12 +102,13 @@ func TestTrivialPluginDiscoveryAndRun(t *testing.T) {
 	}
 }
 
-func TestFindActivatedDirs_HonoursSkips(t *testing.T) {
+func TestFindActivatedDirs(t *testing.T) {
 	sourcetree.ResetCache()
 	tempDir := t.TempDir()
 
 	files := map[string]string{
 		".git/config":                 "",
+		"astro.config.mjs":            "export default {}",
 		"docs/astro.config.mjs":       "export default {}",
 		"site/nested/astro.config.ts": "export default {}",
 		"ignored/astro.config.mjs":    "export default {}",
@@ -126,34 +130,41 @@ func TestFindActivatedDirs_HonoursSkips(t *testing.T) {
 		t.Fatalf("sourcetree.Open failed: %v", err)
 	}
 
-	activatedDirectories, err := plugins.FindActivatedDirs(tree, "astro", []string{"astro.config.*"})
+	docsDir := filepath.Join(tempDir, "docs")
+	nestedDir := filepath.Join(tempDir, "site", "nested")
+
+	// 1. A bare name matches only at the top level.
+	bareDirs, err := plugins.FindActivatedDirs(tree, "astro", []string{"astro.config.*"})
 	if err != nil {
 		t.Fatalf("FindActivatedDirs failed: %v", err)
 	}
-
-	docsDir := filepath.Join(tempDir, "docs")
-	nestedDir := filepath.Join(tempDir, "site", "nested")
-	ignoredDir := filepath.Join(tempDir, "ignored")
-	vendorDir := filepath.Join(tempDir, "vendor")
-
-	hasDocs := false
-	hasNested := false
-	for _, directory := range activatedDirectories {
-		if directory == docsDir {
-			hasDocs = true
-		}
-		if directory == nestedDir {
-			hasNested = true
-		}
-		if directory == ignoredDir {
-			t.Errorf("FindActivatedDirs returned skipped directory %s", directory)
-		}
-		if directory == vendorDir {
-			t.Errorf("FindActivatedDirs returned vendor directory %s", directory)
-		}
+	if !reflect.DeepEqual(bareDirs, []string{tempDir}) {
+		t.Errorf("bare name: expected [%s], got %v", tempDir, bareDirs)
 	}
 
-	if !hasDocs || !hasNested || len(activatedDirectories) != 2 {
-		t.Errorf("expected [docs, site/nested], got %v", activatedDirectories)
+	// 2. **/name matches at depth and at the top level (honouring skips and vendor ignores).
+	recursiveDirs, err := plugins.FindActivatedDirs(tree, "astro", []string{"**/astro.config.*"})
+	if err != nil {
+		t.Fatalf("FindActivatedDirs failed: %v", err)
+	}
+	expectedRecursive := []string{tempDir, docsDir, nestedDir}
+	sort.Strings(expectedRecursive)
+	if !reflect.DeepEqual(recursiveDirs, expectedRecursive) {
+		t.Errorf("**/name: expected %v, got %v", expectedRecursive, recursiveDirs)
+	}
+
+	// 3. A directory-prefixed pattern matches only there.
+	prefixedDirs, err := plugins.FindActivatedDirs(tree, "astro", []string{"docs/astro.config.*"})
+	if err != nil {
+		t.Fatalf("FindActivatedDirs failed: %v", err)
+	}
+	if !reflect.DeepEqual(prefixedDirs, []string{docsDir}) {
+		t.Errorf("directory-prefixed: expected [%s], got %v", docsDir, prefixedDirs)
+	}
+
+	// 4. A pattern the matcher cannot parse is an error naming the plugin and the pattern.
+	_, err = plugins.FindActivatedDirs(tree, "astro", []string{"[a-"})
+	if err == nil || !strings.Contains(err.Error(), `"astro"`) || !strings.Contains(err.Error(), `"[a-"`) {
+		t.Errorf("bad pattern: expected error naming plugin and pattern, got %v", err)
 	}
 }

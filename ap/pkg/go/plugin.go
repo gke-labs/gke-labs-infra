@@ -43,7 +43,7 @@ func (plugin *Plugin) Describe(ctx context.Context) (*plugins.PluginManifest, er
 	return &plugins.PluginManifest{
 		APIVersion: "ap.plugin/v1alpha1",
 		Name:       "go",
-		Activation: []string{"go.mod"},
+		Activation: []string{"**/go.mod"},
 		Tasks: []plugins.TaskMetadata{
 			taskMetadataTest,
 			taskMetadataLint,

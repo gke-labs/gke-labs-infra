@@ -112,16 +112,21 @@ type IgnoreList struct {
 func NewIgnoreList(patterns []string) *IgnoreList {
 	var matchers []*pathMatcher
 	for _, p := range patterns {
-		matchers = append(matchers, parsePattern(p))
+		m, err := parsePattern(p, false)
+		if err != nil {
+			klog.Errorf("invalid ignore pattern %q: %v", p, err)
+			continue
+		}
+		matchers = append(matchers, m)
 	}
 	return &IgnoreList{matchers: matchers}
 }
 
-func parsePattern(pattern string) *pathMatcher {
+func parsePattern(pattern string, anchored bool) (*pathMatcher, error) {
 	mustBeDir := strings.HasSuffix(pattern, "/")
-	cleanPattern := strings.TrimSuffix(pattern, "/")
+	cleanPattern := strings.TrimPrefix(strings.TrimSuffix(pattern, "/"), "/")
 
-	isAnchored := strings.Contains(cleanPattern, "/")
+	isAnchored := anchored || strings.Contains(cleanPattern, "/")
 
 	parts := strings.Split(cleanPattern, "/")
 	var segments []segmentMatcher
@@ -130,7 +135,7 @@ func parsePattern(pattern string) *pathMatcher {
 			segments = append(segments, doubleStarMatcher{})
 		} else if strings.Contains(part, "*") || strings.Contains(part, "?") || strings.Contains(part, "[") {
 			if _, err := filepath.Match(part, ""); err != nil {
-				klog.Errorf("invalid glob pattern segment %q in %q: %v", part, pattern, err)
+				return nil, err
 			}
 			segments = append(segments, globMatcher(part))
 		} else {
@@ -142,7 +147,7 @@ func parsePattern(pattern string) *pathMatcher {
 		segments:          segments,
 		mustBeDir:         mustBeDir,
 		matchBasenameOnly: !isAnchored,
-	}
+	}, nil
 }
 
 // ShouldIgnore returns true if the path should be ignored.
@@ -171,9 +176,15 @@ func (l *IgnoreList) ShouldIgnore(path string, isDir bool) bool {
 }
 
 // MatchPath reports whether path matches the given pattern.
-func MatchPath(pattern, path string, isDir bool) bool {
-	matcher := parsePattern(pattern)
-	path = filepath.ToSlash(path)
+func MatchPath(pattern, path string, isDir bool) (bool, error) {
+	matcher, err := parsePattern(pattern, true)
+	if err != nil {
+		return false, err
+	}
+	path = strings.TrimPrefix(filepath.ToSlash(path), "/")
+	if path == "" {
+		return matcher.Matches(nil, isDir), nil
+	}
 	pathSegments := strings.Split(path, "/")
-	return matcher.Matches(pathSegments, isDir)
+	return matcher.Matches(pathSegments, isDir), nil
 }

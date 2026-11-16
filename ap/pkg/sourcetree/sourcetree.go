@@ -944,7 +944,11 @@ func (r *SourceTree) Glob(pattern string) ([]string, error) {
 		relSlash := filepath.ToSlash(relToView)
 
 		if strings.Contains(pattern, "/") {
-			if MatchPath(pattern, relSlash, false) {
+			matched, err := MatchPath(pattern, relSlash, false)
+			if err != nil {
+				return nil, fmt.Errorf("invalid glob pattern %q: %w", pattern, err)
+			}
+			if matched {
 				matches = append(matches, f.Path)
 			}
 		} else {
