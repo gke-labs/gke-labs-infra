@@ -287,7 +287,7 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.TaskContext) error
 		}
 
 		mode := string(t.Enabled[a.Name])
-		_, err := baseline.Apply(findings, baseline.ApplyOptions{
+		_, err := baseline.Apply(ctx, findings, baseline.ApplyOptions{
 			Name:            a.Name,
 			RepoRoot:        t.RepoRoot,
 			Dir:             t.Dir,

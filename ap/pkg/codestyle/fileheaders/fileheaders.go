@@ -26,8 +26,8 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
-	"k8s.io/klog/v2"
 )
 
 func hasK8sStyleBlockHeader(buf []byte) bool {
@@ -192,11 +192,11 @@ func Run(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files [
 	var opt FileHeadersOptions
 	opt.InitDefaults()
 
-	log := klog.FromContext(ctx)
+	log := scoped.Log(ctx)
 
 	configFile := filepath.Join(repoRoot, ".ap/headers.yaml")
 	if _, err := os.Stat(configFile); os.IsNotExist(err) {
-		klog.V(2).Info("No .ap/headers.yaml found, skipping file headers")
+		log.V(2).Info("no .ap/headers.yaml found, skipping file headers")
 		return nil
 	}
 
@@ -206,7 +206,7 @@ func Run(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files [
 	}
 
 	if config.License == "" || config.License == "none" {
-		klog.V(2).Info("License is empty or 'none', skipping file headers")
+		log.V(2).Info("license is empty or 'none', skipping file headers")
 		return nil
 	}
 	if config.License != "apache-2.0" {
@@ -230,13 +230,13 @@ func Run(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files [
 	for _, absPath := range expandedFiles {
 		relPath, err := filepath.Rel(repoRoot, absPath)
 		if err != nil {
-			log.Error(err, "Skipping file outside repo root", "file", absPath)
+			log.Error(err, "skipping file outside repo root", "file", absPath)
 			errs = append(errs, fmt.Errorf("skipping file outside repo root %s: %w", absPath, err))
 			continue
 		}
 
 		if err := processor.processFile(ctx, absPath, relPath); err != nil {
-			log.Error(err, "Error processing file", "file", absPath)
+			log.Error(err, "error processing file", "file", absPath)
 			errs = append(errs, fmt.Errorf("error processing %s: %w", absPath, err))
 		}
 	}
@@ -244,7 +244,7 @@ func Run(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files [
 }
 
 func (p *processor) processFile(ctx context.Context, absPath, relPath string) error {
-	log := klog.FromContext(ctx)
+	log := scoped.Log(ctx)
 
 	if p.shouldIgnoreFile(relPath, false) {
 		return nil
@@ -331,7 +331,7 @@ func (p *processor) processFile(ctx context.Context, absPath, relPath string) er
 		return nil
 	}
 
-	log.Info("Updating or adding file header", "file", relPath)
+	log.Info("updating or adding file header", "file", relPath)
 
 	header, err := GenerateHeader(p.config, commentStyle)
 	if err != nil {

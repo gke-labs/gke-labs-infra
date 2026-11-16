@@ -15,6 +15,7 @@
 package cache
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"os"
@@ -22,25 +23,27 @@ import (
 	"sync"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
-	"k8s.io/klog/v2"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
+	"github.com/go-logr/logr"
 )
 
 type Manager struct {
 	dir  string
 	done *DoneIndex
+	log  logr.Logger
 	mu   sync.Mutex
 }
 
-func NewManager() (*Manager, error) {
+func NewManager(ctx context.Context) (*Manager, error) {
 	cacheDir, err := fileutils.CacheDir()
 	if err != nil {
 		return nil, err
 	}
 	dir := filepath.Join(cacheDir, "codestyle")
-	return NewManagerWithDir(dir)
+	return NewManagerWithDir(ctx, dir)
 }
 
-func NewManagerWithDir(dir string) (*Manager, error) {
+func NewManagerWithDir(ctx context.Context, dir string) (*Manager, error) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, err
 	}
@@ -48,16 +51,17 @@ func NewManagerWithDir(dir string) (*Manager, error) {
 	m := &Manager{
 		dir:  dir,
 		done: NewDoneIndex(),
+		log:  scoped.Log(ctx),
 	}
 	if err := m.load(); err != nil {
-		klog.Warningf("falling back to empty codestyle cache: %v", err)
+		m.log.Info("falling back to empty codestyle cache", "level", "warning", "error", err)
 	}
 	return m, nil
 }
 
-func removeLegacyFile(path string) {
+func (m *Manager) removeLegacyFile(path string) {
 	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		klog.V(2).Infof("failed to remove legacy cache file %s: %v", path, err)
+		m.log.V(2).Info("failed to remove legacy cache file", "path", path, "error", err)
 	}
 }
 
@@ -65,18 +69,18 @@ func (m *Manager) load() error {
 	var errs []error
 
 	// Ignore and delete legacy JSON caches
-	removeLegacyFile(filepath.Join(m.dir, "metadata.json"))
-	removeLegacyFile(filepath.Join(m.dir, "done.json"))
-	removeLegacyFile(filepath.Join(m.dir, "gofmt.json"))
+	m.removeLegacyFile(filepath.Join(m.dir, "metadata.json"))
+	m.removeLegacyFile(filepath.Join(m.dir, "done.json"))
+	m.removeLegacyFile(filepath.Join(m.dir, "gofmt.json"))
 
 	doneBinPath := filepath.Join(m.dir, "done.bin")
 	if data, err := os.ReadFile(doneBinPath); err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
-			klog.V(2).Infof("failed to read done cache %s: %v, starting with empty cache", doneBinPath, err)
+			m.log.V(2).Info("failed to read done cache, starting with empty cache", "path", doneBinPath, "error", err)
 		}
 		m.done = NewDoneIndex()
 	} else if idx, err := LoadDone(data); err != nil {
-		klog.V(2).Infof("invalid done cache %s: %v, starting with empty cache", doneBinPath, err)
+		m.log.V(2).Info("invalid done cache, starting with empty cache", "path", doneBinPath, "error", err)
 		m.done = NewDoneIndex()
 	} else {
 		m.done = idx
@@ -90,9 +94,9 @@ func (m *Manager) Save() error {
 	defer m.mu.Unlock()
 
 	// Clean up legacy JSON caches
-	removeLegacyFile(filepath.Join(m.dir, "metadata.json"))
-	removeLegacyFile(filepath.Join(m.dir, "done.json"))
-	removeLegacyFile(filepath.Join(m.dir, "gofmt.json"))
+	m.removeLegacyFile(filepath.Join(m.dir, "metadata.json"))
+	m.removeLegacyFile(filepath.Join(m.dir, "done.json"))
+	m.removeLegacyFile(filepath.Join(m.dir, "gofmt.json"))
 
 	doneBinPath := filepath.Join(m.dir, "done.bin")
 	if err := m.done.Save(doneBinPath); err != nil {
@@ -117,6 +121,6 @@ func (m *Manager) MarkDone(step Step, hash string) {
 		m.done = NewDoneIndex()
 	}
 	if err := m.done.MarkDone(step, hash); err != nil {
-		klog.V(2).Infof("failed to mark done for step %d: %v", step, err)
+		m.log.V(2).Info("failed to mark done", "step", int(step), "error", err)
 	}
 }
