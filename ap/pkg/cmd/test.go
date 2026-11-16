@@ -38,11 +38,9 @@ func BuildTestCommand(rootOpt *RootOptions) *cobra.Command {
 	}
 
 	cmd := &cobra.Command{
-		Use:           "test [path...]",
-		Short:         "Run tests",
-		Args:          cobra.ArbitraryArgs,
-		SilenceUsage:  true,
-		SilenceErrors: true,
+		Use:   "test [path...]",
+		Short: "Run tests",
+		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := opt.Resolve(cmd, args); err != nil {
 				return err
@@ -61,7 +59,7 @@ func (opt *TestOptions) Resolve(cmd *cobra.Command, args []string) error {
 	if err := opt.RootOptions.Resolve(args); err != nil {
 		return err
 	}
-	if cmd != nil && cmd.Flags().Changed("test.race") {
+	if cmd.Flags().Changed("test.race") {
 		return nil
 	}
 	cfg, err := config.LoadAPConfig(opt.RepoRoot)

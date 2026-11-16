@@ -86,8 +86,8 @@ type raceSetter interface {
 
 // SetRace recursively sets Race on any task supporting it in the task tree.
 func SetRace(t tasks.Task, race bool) {
-	if rs, ok := t.(raceSetter); ok {
-		rs.SetRace(race)
+	if setter, ok := t.(raceSetter); ok {
+		setter.SetRace(race)
 	}
 	for _, child := range t.GetChildren() {
 		SetRace(child, race)
