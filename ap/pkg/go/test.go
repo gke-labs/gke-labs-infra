@@ -70,11 +70,29 @@ func (t *GoTestTask) GetChildren() []tasks.Task {
 	return nil
 }
 
+func (t *GoTestTask) SetRace(race bool) {
+	t.Race = race
+}
+
 func (t *GoTestTask) SourcePath() string {
 	return t.Dir
 }
 
 var _ tasks.Sourced = (*GoTestTask)(nil)
+
+type raceSetter interface {
+	SetRace(bool)
+}
+
+// SetRace recursively sets Race on any task supporting it in the task tree.
+func SetRace(t tasks.Task, race bool) {
+	if rs, ok := t.(raceSetter); ok {
+		rs.SetRace(race)
+	}
+	for _, child := range t.GetChildren() {
+		SetRace(child, race)
+	}
+}
 
 // GoE2eTask represents a task to run go e2e tests.
 type GoE2eTask struct {

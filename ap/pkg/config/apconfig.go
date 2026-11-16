@@ -45,7 +45,7 @@ type APConfig struct {
 	ImagePrefix string           `json:"imagePrefix"`
 	Presubmits  *PresubmitConfig `json:"presubmits"`
 	Generate    *GenerateConfig  `json:"generate"`
-	Test        *TestConfig      `json:"test"`
+	Test        TestConfig       `json:"test"`
 }
 
 // LoadAPConfig loads the configuration from .ap/ap.yaml using strict unmarshaling.

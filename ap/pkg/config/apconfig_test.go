@@ -231,9 +231,6 @@ test:
 	if cfg == nil {
 		t.Fatalf("expected non-nil config")
 	}
-	if cfg.Test == nil {
-		t.Fatalf("expected non-nil Test config")
-	}
 	if !cfg.Test.Race {
 		t.Errorf("expected Test.Race to be true, got false")
 	}

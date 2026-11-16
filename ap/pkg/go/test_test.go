@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
 func TestHasGoTests(t *testing.T) {
@@ -114,5 +115,20 @@ func TestHasGoTests(t *testing.T) {
 	}
 	if !hasTests {
 		t.Errorf("expected true for nested test files, got false")
+	}
+}
+
+func TestSetRace(t *testing.T) {
+	task := &GoTestTask{}
+	group := &tasks.Group{
+		Tasks: []tasks.Task{task},
+	}
+	SetRace(group, true)
+	if !task.Race {
+		t.Errorf("expected task.Race to be true after SetRace")
+	}
+	SetRace(group, false)
+	if task.Race {
+		t.Errorf("expected task.Race to be false after SetRace(false)")
 	}
 }

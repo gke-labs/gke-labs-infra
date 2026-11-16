@@ -22,137 +22,65 @@ import (
 
 func setupRaceTestRepo(t *testing.T, apYAML string) string {
 	t.Helper()
-	tempDir := t.TempDir()
-
-	if err := os.MkdirAll(filepath.Join(tempDir, ".git"), 0755); err != nil {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".ap"), 0755); err != nil {
 		t.Fatal(err)
 	}
-
-	apDir := filepath.Join(tempDir, ".ap")
-	if err := os.MkdirAll(apDir, 0755); err != nil {
+	if apYAML != "" {
+		if err := os.WriteFile(filepath.Join(dir, ".ap", "ap.yaml"), []byte(apYAML), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/race\n\ngo 1.27\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-
-	if apYAML == "" {
-		apYAML = "version: latest\n"
-	}
-	if err := os.WriteFile(filepath.Join(apDir, "ap.yaml"), []byte(apYAML), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	goModContent := "module example.com/racetest\n\ngo 1.27\n"
-	if err := os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goModContent), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Deliberate data race: two goroutines write to the same variable without synchronization.
-	raceTestCode := `package racetest
+	code := `package race
 
 import (
 	"sync"
 	"testing"
 )
 
-func TestDataRace(t *testing.T) {
-	var count int
+func TestRace(t *testing.T) {
+	var n int
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		count = 1
-	}()
-	go func() {
-		defer wg.Done()
-		count = 2
-	}()
+	go func() { defer wg.Done(); n = 1 }()
+	go func() { defer wg.Done(); n = 2 }()
 	wg.Wait()
-	_ = count
+	_ = n
 }
 `
-	if err := os.WriteFile(filepath.Join(tempDir, "race_test.go"), []byte(raceTestCode), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "race_test.go"), []byte(code), 0644); err != nil {
 		t.Fatal(err)
 	}
-
-	return tempDir
+	return dir
 }
 
-func TestRunTest_RaceDetector_Flag(t *testing.T) {
+func TestRunTest_Race(t *testing.T) {
 	tempDir := setupRaceTestRepo(t, "")
-
-	// 1. Without race detector, test with data race passes
-	optNoRace := TestOptions{
-		RootOptions: &RootOptions{
-			RepoRoot: tempDir,
-			Dir:      tempDir,
-		},
-		Race: false,
-	}
-	if err := RunTest(t.Context(), optNoRace); err != nil {
-		t.Fatalf("expected test without -race to pass, got: %v", err)
-	}
-
-	// 2. With race detector flag enabled, test fails due to data race
-	optRace := TestOptions{
-		RootOptions: &RootOptions{
-			RepoRoot: tempDir,
-			Dir:      tempDir,
-		},
-		Race: true,
-	}
-	if err := RunTest(t.Context(), optRace); err == nil {
-		t.Fatal("expected test with -race to fail due to data race, but it passed")
-	}
-}
-
-func TestRunTest_RaceDetector_Config(t *testing.T) {
-	apYAML := `version: latest
-test:
-  race: true
-`
-	tempDir := setupRaceTestRepo(t, apYAML)
-
-	// In a repo configured with test.race: true, RunTest defaults to running with -race
 	opt := TestOptions{
-		RootOptions: &RootOptions{
-			RepoRoot: tempDir,
-			Dir:      tempDir,
-		},
+		RootOptions: &RootOptions{RepoRoot: tempDir, Dir: tempDir},
+		Race:        true,
 	}
 	if err := RunTest(t.Context(), opt); err == nil {
-		t.Fatal("expected test to fail under race detector configured in ap.yaml, but it passed")
+		t.Fatal("expected test with race detector to fail, but it passed")
 	}
 }
 
-func TestRunTest_RaceDetector_FlagOverridesConfig(t *testing.T) {
-	apYAML := `version: latest
-test:
-  race: true
-`
-	tempDir := setupRaceTestRepo(t, apYAML)
-
-	// Explicit --race=false overrides ap.yaml configuration
-	opt := TestOptions{
-		RootOptions: &RootOptions{
-			RepoRoot: tempDir,
-			Dir:      tempDir,
-		},
-		Race:         false,
-		raceExplicit: true,
-	}
-	if err := RunTest(t.Context(), opt); err != nil {
-		t.Fatalf("expected explicit --race=false to bypass race detector and pass, got: %v", err)
+func TestRunTest_ConfigRace(t *testing.T) {
+	tempDir := setupRaceTestRepo(t, "version: latest\ntest:\n  race: true\n")
+	cmd := BuildTestCommand(&RootOptions{RepoRoot: tempDir, Dir: tempDir})
+	if err := cmd.ExecuteContext(t.Context()); err == nil {
+		t.Fatal("expected test to fail under test.race in ap.yaml, but it passed")
 	}
 }
 
-func TestBuildTestCommand_RaceFlag(t *testing.T) {
-	rootOpt := &RootOptions{}
-	cmd := BuildTestCommand(rootOpt)
-
-	flag := cmd.Flags().Lookup("race")
-	if flag == nil {
-		t.Fatal("expected --race flag to exist on test command")
-	}
-	if flag.DefValue != "false" {
-		t.Errorf("expected --race default value to be false, got: %s", flag.DefValue)
+func TestRunTest_FlagOverridesConfig(t *testing.T) {
+	tempDir := setupRaceTestRepo(t, "version: latest\ntest:\n  race: true\n")
+	cmd := BuildTestCommand(&RootOptions{RepoRoot: tempDir, Dir: tempDir})
+	cmd.SetArgs([]string{"--test.race=false"})
+	if err := cmd.ExecuteContext(t.Context()); err != nil {
+		t.Fatalf("expected --test.race=false to override config and pass, got: %v", err)
 	}
 }

@@ -29,8 +29,6 @@ import (
 type TestOptions struct {
 	*RootOptions
 	Race bool
-
-	raceExplicit bool
 }
 
 // BuildTestCommand constructs the cobra command for "test".
@@ -40,37 +38,46 @@ func BuildTestCommand(rootOpt *RootOptions) *cobra.Command {
 	}
 
 	cmd := &cobra.Command{
-		Use:   "test [path...]",
-		Short: "Run tests",
-		Args:  cobra.ArbitraryArgs,
+		Use:           "test [path...]",
+		Short:         "Run tests",
+		Args:          cobra.ArbitraryArgs,
+		SilenceUsage:  true,
+		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := opt.Resolve(args); err != nil {
+			if err := opt.Resolve(cmd, args); err != nil {
 				return err
 			}
-			opt.raceExplicit = cmd.Flags().Changed("race")
 			return RunTest(cmd.Context(), opt)
 		},
 	}
 
-	cmd.Flags().BoolVar(&opt.Race, "race", false, "Run tests under the data race detector")
+	cmd.Flags().BoolVar(&opt.Race, "test.race", false, "Run tests under the data race detector")
 
 	return cmd
+}
+
+// Resolve resolves arguments and config defaults for TestOptions.
+func (opt *TestOptions) Resolve(cmd *cobra.Command, args []string) error {
+	if err := opt.RootOptions.Resolve(args); err != nil {
+		return err
+	}
+	if cmd != nil && cmd.Flags().Changed("test.race") {
+		return nil
+	}
+	cfg, err := config.LoadAPConfig(opt.RepoRoot)
+	if err != nil {
+		return err
+	}
+	if cfg != nil {
+		opt.Race = cfg.Test.Race
+	}
+	return nil
 }
 
 // RunTest executes the business logic for the "test" command.
 func RunTest(ctx context.Context, opt TestOptions) error {
 	if err := requireRepoRoot(opt.RootOptions); err != nil {
 		return err
-	}
-
-	if !opt.raceExplicit && !opt.Race {
-		cfg, err := config.LoadAPConfig(opt.RepoRoot)
-		if err != nil {
-			return err
-		}
-		if cfg != nil && cfg.Test != nil && cfg.Test.Race {
-			opt.Race = true
-		}
 	}
 
 	r, err := opt.GetSourceTree()
@@ -86,9 +93,6 @@ func RunTest(ctx context.Context, opt TestOptions) error {
 	var allTasks []tasks.Task
 	for _, scope := range scopes {
 		if len(scope.TestTasks) > 0 {
-			if opt.Race {
-				setRace(scope.TestTasks, true)
-			}
 			group := &tasks.Group{
 				Name:            fmt.Sprintf("test-%s", filepath.Base(scope.Dir())),
 				Tasks:           scope.TestTasks,
@@ -98,16 +102,11 @@ func RunTest(ctx context.Context, opt TestOptions) error {
 		}
 	}
 
-	return tasks.Run(ctx, tasks.NewTaskContext(opt.RepoRoot, opt.RepoRoot, r), allTasks, tasks.RunOptions{DryRun: opt.DryRun, ContinueOnError: true})
-}
-
-func setRace(taskList []tasks.Task, race bool) {
-	for _, t := range taskList {
-		switch task := t.(type) {
-		case *golang.GoTestTask:
-			task.Race = race
-		case *tasks.Group:
-			setRace(task.Tasks, race)
+	if opt.Race {
+		for _, task := range allTasks {
+			golang.SetRace(task, true)
 		}
 	}
+
+	return tasks.Run(ctx, tasks.NewTaskContext(opt.RepoRoot, opt.RepoRoot, r), allTasks, tasks.RunOptions{DryRun: opt.DryRun, ContinueOnError: true})
 }
