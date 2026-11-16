@@ -27,12 +27,15 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/go-logr/logr"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/util/httpstream"
-	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/portforward"
 	"k8s.io/client-go/transport/spdy"
 )
@@ -40,15 +43,15 @@ import (
 // BuildkitForwarder forwards connections from a private unix domain socket to
 // port 2375 of an in-cluster BuildKit pod via the Kubernetes port-forward API.
 type BuildkitForwarder struct {
-	ctx              context.Context
-	socketDirectory  string
-	socketPath       string
-	remotePort       int
-	listener         net.Listener
+	logger           logr.Logger
+	socketDirectory string
+	socketPath      string
+	remotePort      int
+	listener        net.Listener
 	streamConnection httpstream.Connection
-	stopChannel      chan struct{}
-	closeOnce        sync.Once
-	requestID        atomic.Uint32
+	stopChannel     chan struct{}
+	closeOnce       sync.Once
+	requestID       atomic.Uint32
 }
 
 // NewBuildkitForwarder resolves a ready pod behind service in namespace on cluster,
@@ -59,17 +62,32 @@ func NewBuildkitForwarder(ctx context.Context, cluster KubeCluster, namespace, s
 		return nil, fmt.Errorf("loading client configuration for cluster %s: %w", cluster, err)
 	}
 
-	client, err := corev1client.NewForConfig(config)
-	if err != nil {
-		return nil, fmt.Errorf("creating kubernetes core client: %w", err)
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("adding core/v1 to scheme: %w", err)
+	}
+	codecs := serializer.NewCodecFactory(scheme)
+
+	restConfig := *config
+	groupVersion := corev1.SchemeGroupVersion
+	restConfig.GroupVersion = &groupVersion
+	restConfig.APIPath = "/api"
+	restConfig.NegotiatedSerializer = codecs.WithoutConversion()
+	if restConfig.UserAgent == "" {
+		restConfig.UserAgent = rest.DefaultKubernetesUserAgent()
 	}
 
-	pod, err := findReadyPod(ctx, client, namespace, service)
+	restClient, err := rest.RESTClientFor(&restConfig)
+	if err != nil {
+		return nil, fmt.Errorf("creating rest client: %w", err)
+	}
+
+	pod, err := findReadyPod(ctx, restClient, namespace, service)
 	if err != nil {
 		return nil, err
 	}
 
-	request := client.RESTClient().Post().
+	request := restClient.Post().
 		Resource("pods").
 		Namespace(namespace).
 		Name(pod.Name).
@@ -81,11 +99,17 @@ func NewBuildkitForwarder(ctx context.Context, cluster KubeCluster, namespace, s
 	}
 
 	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, http.MethodPost, request.URL())
-	return newBuildkitForwarderWithDialer(ctx, dialer, 2375)
+	return newBuildkitForwarderWithDialer(scoped.Log(ctx), dialer, 2375)
 }
 
-func findReadyPod(ctx context.Context, client corev1client.CoreV1Interface, namespace, service string) (*corev1.Pod, error) {
-	serviceObject, err := client.Services(namespace).Get(ctx, service, metav1.GetOptions{})
+func findReadyPod(ctx context.Context, client rest.Interface, namespace, service string) (*corev1.Pod, error) {
+	serviceObject := &corev1.Service{}
+	err := client.Get().
+		Resource("services").
+		Namespace(namespace).
+		Name(service).
+		Do(ctx).
+		Into(serviceObject)
 	if err != nil {
 		return nil, fmt.Errorf("getting service %s/%s: %w", namespace, service, err)
 	}
@@ -94,13 +118,19 @@ func findReadyPod(ctx context.Context, client corev1client.CoreV1Interface, name
 	}
 
 	selector := labels.SelectorFromSet(serviceObject.Spec.Selector).String()
-	pods, err := client.Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	podList := &corev1.PodList{}
+	err = client.Get().
+		Resource("pods").
+		Namespace(namespace).
+		VersionedParams(&metav1.ListOptions{LabelSelector: selector}, metav1.ParameterCodec).
+		Do(ctx).
+		Into(podList)
 	if err != nil {
 		return nil, fmt.Errorf("listing pods for service %s/%s: %w", namespace, service, err)
 	}
 
-	for i := range pods.Items {
-		pod := &pods.Items[i]
+	for i := range podList.Items {
+		pod := &podList.Items[i]
 		if pod.DeletionTimestamp != nil || pod.Status.Phase != corev1.PodRunning {
 			continue
 		}
@@ -113,7 +143,7 @@ func findReadyPod(ctx context.Context, client corev1client.CoreV1Interface, name
 	return nil, fmt.Errorf("no ready pod found for service %s/%s", namespace, service)
 }
 
-func newBuildkitForwarderWithDialer(ctx context.Context, dialer httpstream.Dialer, remotePort int) (*BuildkitForwarder, error) {
+func newBuildkitForwarderWithDialer(logger logr.Logger, dialer httpstream.Dialer, remotePort int) (*BuildkitForwarder, error) {
 	streamConnection, protocol, err := dialer.Dial(portforward.PortForwardProtocolV1Name)
 	if err != nil {
 		return nil, fmt.Errorf("dialing port-forward stream: %w", err)
@@ -146,13 +176,13 @@ func newBuildkitForwarderWithDialer(ctx context.Context, dialer httpstream.Diale
 	}
 
 	forwarder := &BuildkitForwarder{
-		ctx:              ctx,
-		socketDirectory:  socketDirectory,
-		socketPath:       socketPath,
-		remotePort:       remotePort,
-		listener:         listener,
+		logger:           logger,
+		socketDirectory: socketDirectory,
+		socketPath:      socketPath,
+		remotePort:      remotePort,
+		listener:        listener,
 		streamConnection: streamConnection,
-		stopChannel:      make(chan struct{}),
+		stopChannel:     make(chan struct{}),
 	}
 	go forwarder.acceptLoop()
 	return forwarder, nil
@@ -192,10 +222,9 @@ func (f *BuildkitForwarder) acceptLoop() {
 }
 
 func (f *BuildkitForwarder) handleConnection(connection net.Conn) {
-	logger := scoped.Log(f.ctx)
 	defer func() {
 		if closeErr := connection.Close(); closeErr != nil {
-			logger.V(4).Info("closing port-forward connection", "error", closeErr)
+			f.logger.V(4).Info("closing port-forward connection", "error", closeErr)
 		}
 	}()
 
@@ -208,11 +237,11 @@ func (f *BuildkitForwarder) handleConnection(connection net.Conn) {
 
 	errorStream, err := f.streamConnection.CreateStream(headers)
 	if err != nil {
-		logger.Info("failed creating error stream for port-forward", "error", err)
+		f.logger.Info("failed creating error stream for port-forward", "error", err)
 		return
 	}
 	if closeErr := errorStream.Close(); closeErr != nil {
-		logger.V(4).Info("closing error stream for port-forward", "error", closeErr)
+		f.logger.V(4).Info("closing error stream for port-forward", "error", closeErr)
 		return
 	}
 	defer f.streamConnection.RemoveStreams(errorStream)
@@ -222,18 +251,18 @@ func (f *BuildkitForwarder) handleConnection(connection net.Conn) {
 		defer close(errorChannel)
 		message, readErr := io.ReadAll(errorStream)
 		if readErr != nil {
-			logger.Info("failed reading port-forward error stream", "error", readErr)
+			f.logger.Info("failed reading port-forward error stream", "error", readErr)
 			return
 		}
 		if len(message) > 0 {
-			logger.Info("port-forward error from pod", "message", string(message))
+			f.logger.Info("port-forward error from pod", "message", string(message))
 		}
 	}()
 
 	headers.Set(corev1.StreamType, corev1.StreamTypeData)
 	dataStream, err := f.streamConnection.CreateStream(headers)
 	if err != nil {
-		logger.Info("failed creating data stream for port-forward", "error", err)
+		f.logger.Info("failed creating data stream for port-forward", "error", err)
 		return
 	}
 	defer f.streamConnection.RemoveStreams(dataStream)
@@ -244,14 +273,14 @@ func (f *BuildkitForwarder) handleConnection(connection net.Conn) {
 	go func() {
 		defer close(remoteDone)
 		if _, copyErr := io.Copy(connection, dataStream); copyErr != nil {
-			logger.V(4).Info("copying from remote data stream to unix connection", "error", copyErr)
+			f.logger.V(4).Info("copying from remote data stream to unix connection", "error", copyErr)
 		}
 	}()
 
 	go func() {
 		defer func() {
 			if closeErr := dataStream.Close(); closeErr != nil {
-				logger.V(4).Info("closing data stream", "error", closeErr)
+				f.logger.V(4).Info("closing data stream", "error", closeErr)
 			}
 		}()
 		if _, copyErr := io.Copy(dataStream, connection); copyErr != nil {
@@ -266,7 +295,7 @@ func (f *BuildkitForwarder) handleConnection(connection net.Conn) {
 	}
 
 	if resetErr := dataStream.Reset(); resetErr != nil {
-		logger.V(4).Info("resetting data stream", "error", resetErr)
+		f.logger.V(4).Info("resetting data stream", "error", resetErr)
 	}
 	<-errorChannel
 }

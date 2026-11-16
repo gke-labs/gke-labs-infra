@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/httpstream"
 	"k8s.io/client-go/tools/portforward"
@@ -95,7 +96,7 @@ func TestBuildkitForwarder(t *testing.T) {
 		},
 	}
 
-	forwarder, err := newBuildkitForwarderWithDialer(t.Context(), dialer, 2375)
+	forwarder, err := newBuildkitForwarderWithDialer(scoped.Log(t.Context()), dialer, 2375)
 	if err != nil {
 		t.Fatalf("newBuildkitForwarderWithDialer failed: %v", err)
 	}
