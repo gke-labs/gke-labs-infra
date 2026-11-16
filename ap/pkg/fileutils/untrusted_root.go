@@ -16,6 +16,7 @@ package fileutils
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,6 +60,89 @@ func (r *UntrustedRoot) WriteFile(relativePath string, content []byte, permissio
 
 	if err := r.root.WriteFile(relativePath, content, permissions); err != nil {
 		return fmt.Errorf("%s: %w", relativePath, err)
+	}
+
+	return nil
+}
+
+// CopyStagedOutputs copies files matching outputs from stagingDirectory into the root.
+// It opens an os.Root on stagingDirectory and reads files only through that root.
+// Symlinks, devices, sockets, and paths escaping the root or containing .git
+// are rejected with an error naming the path.
+func (r *UntrustedRoot) CopyStagedOutputs(stagingDirectory string, outputs []string) (returnError error) {
+	stagingRoot, err := os.OpenRoot(stagingDirectory)
+	if err != nil {
+		return fmt.Errorf("opening staging root %s: %w", stagingDirectory, err)
+	}
+	defer func() {
+		if closeErr := stagingRoot.Close(); closeErr != nil && returnError == nil {
+			returnError = closeErr
+		}
+	}()
+
+	for _, outputEntry := range outputs {
+		cleanEntry := filepath.Clean(outputEntry)
+		if cleanEntry == ".." || strings.HasPrefix(cleanEntry, ".."+string(filepath.Separator)) || filepath.IsAbs(outputEntry) {
+			return fmt.Errorf("%s: escapes staging root", outputEntry)
+		}
+		if hasGitComponent(cleanEntry) {
+			return fmt.Errorf("%s: is under .git", outputEntry)
+		}
+
+		entryInfo, err := stagingRoot.Lstat(cleanEntry)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("%s: %w", cleanEntry, err)
+		}
+
+		if entryInfo.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%s: is a symlink", cleanEntry)
+		}
+		if !entryInfo.Mode().IsRegular() && !entryInfo.IsDir() {
+			return fmt.Errorf("%s: is not a regular file or directory", cleanEntry)
+		}
+
+		if entryInfo.IsDir() {
+			walkErr := fs.WalkDir(stagingRoot.FS(), cleanEntry, func(path string, dirEntry fs.DirEntry, walkError error) error {
+				if walkError != nil {
+					return walkError
+				}
+				if path == "." {
+					return nil
+				}
+				info, err := stagingRoot.Lstat(path)
+				if err != nil {
+					return fmt.Errorf("%s: %w", path, err)
+				}
+				if info.Mode()&os.ModeSymlink != 0 {
+					return fmt.Errorf("%s: is a symlink", path)
+				}
+				if info.IsDir() {
+					return nil
+				}
+				if !info.Mode().IsRegular() {
+					return fmt.Errorf("%s: is not a regular file or directory", path)
+				}
+				content, err := stagingRoot.ReadFile(path)
+				if err != nil {
+					return fmt.Errorf("%s: %w", path, err)
+				}
+				return r.WriteFile(path, content, info.Mode().Perm())
+			})
+			if walkErr != nil {
+				return walkErr
+			}
+		} else {
+			content, err := stagingRoot.ReadFile(cleanEntry)
+			if err != nil {
+				return fmt.Errorf("%s: %w", cleanEntry, err)
+			}
+			if err := r.WriteFile(cleanEntry, content, entryInfo.Mode().Perm()); err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil

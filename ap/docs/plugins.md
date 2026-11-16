@@ -44,8 +44,8 @@ A plugin communicates its capabilities and tasks through a versioned JSON schema
   - `outputs`: Relative destination paths in the workspace. Each entry is a path relative to the activated directory; the plugin writes that entry under `/out/<entry>`, and `ap` places it at `<target>/<entry>`. When `outputs` is `["."]`, the plugin writes directly to `/out`, and `ap` mirrors the hierarchy into `<target>`, enabling generator plugins to produce co-located files alongside source files.
 
 **Runner-Neutral Execution Protocol**:
-- Filesystem: Input tree arrives read-only at `/src`. Output directory is provided at `/out`. Temporary scratch space is at `/tmp`.
-- Subcommands: `<entrypoint> describe` outputs the JSON manifest to stdout; `<entrypoint> run <task> --src /src --out /out` executes the task, exiting 0 on success or non-zero on error.
+- Filesystem: Entire repository input tree arrives read-only at `/src`. Output directory is provided at `/out`. Temporary scratch space is at `/tmp`.
+- Subcommands: `<entrypoint> describe` outputs the JSON manifest to stdout; `<entrypoint> run <task> --src /src --dir <path relative to /src> --out /out` executes the task, exiting 0 on success or non-zero on error.
 - Discovery Caching: On cold runs, `ap` executes `describe` and caches the JSON manifest under `${AP_CACHE_DIR:-$HOME/.cache/ap}/plugins/describe/<digest-or-id>.json`. For pulled images, the key is the image digest (`sha256:...`). For `dockerfile:` plugins, the image is built before discovery and keyed by the built image ID. Subsequent commands (`ap ls`, `ap test`, Go runs) read the cached file with sub-millisecond overhead without starting containers. If no container runtime exists on cold discovery, `ap` fails with an explicit error naming the missing runtime.
 - **Recommendation**: CLI protocol (`describe` producing JSON, `run <task>`), cached under `AP_CACHE_DIR`, with two-key network authorization.
 - **Alternative Not Taken**: OCI image labels (e.g. `LABEL dev.ap.plugin.activation=...`) or static files in image layers. While labels avoid running containers on cold caches, they limit dynamic task generation and require specialized registry inspection tools.
@@ -54,12 +54,12 @@ A plugin communicates its capabilities and tasks through a versioned JSON schema
 
 ## 3. File Tree Transfer & Staging
 
-1. **Input File Tree**: The plugin receives the files in the activated directory according to `ap`'s existing `sourcetree.SourceTree` view, which automatically respects `.gitignore` and `ap` ignore patterns. No separate exclude mechanism is introduced. In v1alpha1, the unit of work is self-contained within the activated directory; files outside (such as root lockfiles) are not copied in. A plugin needing repo-wide context must activate at the repo root.
+1. **Input File Tree**: The plugin receives the files in the repository according to `ap`'s existing `sourcetree.SourceTree` view of the repository root, which automatically respects `.gitignore` and `ap` ignore patterns. No separate exclude mechanism is introduced. The plugin is instructed where to operate via `--dir <relative path>` relative to `/src`.
 2. **Container Runner Mechanics**:
-   - `ap` packs the `SourceTree` view of the activated directory into a tar stream and copies it into `/src` (e.g. `docker cp - <container>:/`).
-   - The container runs with `--network none` (unless network is declared and authorized) and writes results to `/out`.
+   - `ap` packs the `SourceTree` view of the repository into a tar stream and copies it into `/src` (e.g. `docker cp - <container>:/`).
+   - The container runs with `--network none` (unless network is declared and authorized), runs `run <task> --src /src --dir <relDir> --out /out`, and writes results to `/out`.
    - `ap` copies `/out` into a staging directory on the host (`docker cp <container>:/out/. <staging>`). Because `docker cp` extracts files as the invoking user, correct host file ownership is guaranteed even if the container executed as root.
-   - `ap` validates staged files and synchronizes them to workspace target paths. Moving to `gke-labs/clix` will replace `docker cp` calls with sandbox mounts without altering this contract.
+   - `ap` validates staged files and synchronizes them to the activated directory target paths in the workspace. Moving to `gke-labs/clix` will replace `docker cp` calls with sandbox mounts without altering this contract.
 - **Recommendation**: Tar streaming of `SourceTree` into `/src` and staging copy-out from `/out`.
 - **Alternative Not Taken**: Direct bind mounts (`-v $(pwd):/src`). Read-write bind mounts allow plugins to mutate untracked files behind `ap`'s back, create root-owned files on Linux hosts, and break atomic staging.
 

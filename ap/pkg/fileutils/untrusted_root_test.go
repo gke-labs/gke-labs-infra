@@ -146,3 +146,42 @@ func TestUntrustedRoot_WriteFile(t *testing.T) {
 		t.Errorf("expected outsideDir to be empty, found %d entries", len(entries))
 	}
 }
+
+func TestUntrustedRoot_CopyStagedOutputs_RejectsSymlink(t *testing.T) {
+	destinationDir := t.TempDir()
+	stagingDir := t.TempDir()
+	outsideDir := t.TempDir()
+
+	secretFile := filepath.Join(outsideDir, "secret.txt")
+	if err := os.WriteFile(secretFile, []byte("super secret"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	distDir := filepath.Join(stagingDir, "dist")
+	if err := os.MkdirAll(distDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	symlinkPath := filepath.Join(distDir, "leak.txt")
+	if err := os.Symlink(secretFile, symlinkPath); err != nil {
+		t.Fatal(err)
+	}
+
+	root, err := OpenUntrustedRoot(destinationDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+
+	err = root.CopyStagedOutputs(stagingDir, []string{"dist"})
+	if err == nil {
+		t.Fatal("expected error copying staged output containing symlink, got nil")
+	}
+	if !strings.Contains(err.Error(), "symlink") || !strings.Contains(err.Error(), "dist/leak.txt") {
+		t.Errorf("expected error naming path and symlink, got: %v", err)
+	}
+
+	destLeak := filepath.Join(destinationDir, "dist", "leak.txt")
+	if _, err := os.Stat(destLeak); !os.IsNotExist(err) {
+		t.Errorf("expected file %s to not exist in destination", destLeak)
+	}
+}

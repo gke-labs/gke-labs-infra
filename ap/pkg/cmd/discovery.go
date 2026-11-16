@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/portability"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/format"
 	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/plugins"
@@ -117,8 +118,21 @@ func DiscoverScopes(ctx context.Context, r *sourcetree.SourceTree, repoRoot, dir
 		}
 	}
 
-	// Discover plugin tasks (e.g. Go tooling)
-	pluginTasks, err := plugins.DiscoverTasks(ctx, builtInPlugins, scope, dir)
+	// Discover plugin tasks (e.g. Go tooling, container plugins)
+	availablePlugins := make([]plugins.Plugin, 0, len(builtInPlugins))
+	availablePlugins = append(availablePlugins, builtInPlugins...)
+
+	cacheDir, err := fileutils.CacheDir()
+	if err != nil {
+		return nil, fmt.Errorf("resolving cache directory: %w", err)
+	}
+	containerPlugins, err := plugins.LoadContainerPlugins(ctx, scope, cacheDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load plugins in %s: %w", repoRoot, err)
+	}
+	availablePlugins = append(availablePlugins, containerPlugins...)
+
+	pluginTasks, err := plugins.DiscoverTasks(ctx, availablePlugins, scope, dir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to discover plugin tasks in %s: %w", dir, err)
 	}

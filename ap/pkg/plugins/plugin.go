@@ -185,9 +185,15 @@ func ActivatedTasks(tree *sourcetree.SourceTree, repositoryRoot, targetDirectory
 				tasksByDirectory[directory] = make(map[string][]tasks.Task)
 			}
 			for _, task := range manifest.Tasks {
-				taskName := fmt.Sprintf("%s-%s", pluginName, task.Name)
 				groupName := task.Verb + "-tasks"
-				tasksByDirectory[directory][groupName] = append(tasksByDirectory[directory][groupName], &tasks.FuncTask{Name: taskName})
+				tasksByDirectory[directory][groupName] = append(tasksByDirectory[directory][groupName], &ContainerTask{
+					PluginName:   pluginName,
+					TaskMetadata: task,
+					Declaration:  declaration,
+					Manifest:     manifest,
+					Dir:          directory,
+					RepoRoot:     repositoryRoot,
+				})
 			}
 		}
 	}
