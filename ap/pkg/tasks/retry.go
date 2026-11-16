@@ -190,9 +190,12 @@ func newBufferLogger(writer io.Writer, parent logr.Logger) logr.Logger {
 }
 
 func sanitizeLogTaskName(name string) string {
-	name = strings.ReplaceAll(name, "/", "_")
-	name = strings.ReplaceAll(name, "\\", "_")
-	return name
+	return strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '-' || r == '_' {
+			return r
+		}
+		return '_'
+	}, name)
 }
 
 func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {

@@ -858,11 +858,18 @@ func TestTaskOutputArtifacts(t *testing.T) {
 			return nil
 		},
 	}
+	buildkitTask := &FuncTask{
+		Name: "docker-build-img1 (buildkit: k8s://autodeploy-system/buildkit)",
+		RunFn: func(ctx context.Context, s *TaskContext) error {
+			fmt.Fprintln(s.Stdout(), "buildkit task output")
+			return nil
+		},
+	}
 
 	grp := &Group{
 		Name:            "artifact-test-group",
 		ContinueOnError: true,
-		Tasks:           []Task{pass, fail, slashTask},
+		Tasks:           []Task{pass, fail, slashTask, buildkitTask},
 	}
 
 	_ = grp.Run(t.Context(), scope)
@@ -893,6 +900,15 @@ func TestTaskOutputArtifacts(t *testing.T) {
 	}
 	if !strings.Contains(string(slashContent), "slash task output") {
 		t.Errorf("expected slash task log to contain 'slash task output', got: %q", string(slashContent))
+	}
+
+	buildkitLogPath := filepath.Join(tasksDir, "docker-build-img1__buildkit__k8s___autodeploy-system_buildkit_.log")
+	buildkitContent, err := os.ReadFile(buildkitLogPath)
+	if err != nil {
+		t.Fatalf("failed to read sanitized buildkit task log %s: %v", buildkitLogPath, err)
+	}
+	if !strings.Contains(string(buildkitContent), "buildkit task output") {
+		t.Errorf("expected buildkit task log to contain 'buildkit task output', got: %q", string(buildkitContent))
 	}
 }
 
