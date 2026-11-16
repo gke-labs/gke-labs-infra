@@ -38,10 +38,10 @@ func NewConcurrentMap[K comparable, V any]() ConcurrentMap[K, V] {
 func (m *concurrentMap[K, V]) LookupOrCreate(key K, create func() V) V {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	if val, ok := m.entries[key]; ok {
-		return val
+	if value, ok := m.entries[key]; ok {
+		return value
 	}
-	val := create()
-	m.entries[key] = val
-	return val
+	value := create()
+	m.entries[key] = value
+	return value
 }

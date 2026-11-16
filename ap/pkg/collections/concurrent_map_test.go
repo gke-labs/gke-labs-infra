@@ -37,8 +37,8 @@ func TestConcurrentMap(t *testing.T) {
 			key := idx % keys
 			results[idx] = m.LookupOrCreate(key, func() *int {
 				creates[key].Add(1)
-				val := key
-				return &val
+				value := key
+				return &value
 			})
 		}(i)
 	}
