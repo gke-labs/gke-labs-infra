@@ -39,11 +39,20 @@ const maxChunkSize = 1024 * 1024 // 1 MB
 
 // TaskContext provides the filesystem locations and log writers for a task.
 type TaskContext struct {
-	RootDir   string
-	Dir       string
+	// RootDir is the temporary directory containing the streamed repository files.
+	RootDir string
+
+	// Dir is the activated directory within RootDir where the task executes.
+	Dir string
+
+	// OutputDir is the temporary directory where the task writes its generated files.
 	OutputDir string
-	Stdout    io.Writer
-	Stderr    io.Writer
+
+	// Stdout receives standard output log lines to stream back to ap.
+	Stdout io.Writer
+
+	// Stderr receives standard error log lines to stream back to ap.
+	Stderr io.Writer
 }
 
 // TaskFunc is the function signature for a task implementation.
@@ -51,36 +60,47 @@ type TaskFunc func(ctx context.Context, task TaskContext) error
 
 // Task describes a single task supported by a plugin.
 type Task struct {
-	Name        string
-	Verb        string
+	// Name is the task identifier (e.g. "build").
+	Name string
+
+	// Verb is the ap verb this task maps to (e.g. "build", "generate", "test", "lint").
+	Verb string
+
+	// Description is a human-readable explanation of what the task does.
 	Description string
-	Outputs     []string
-	Run         TaskFunc
+
+	// Outputs lists output files or directory patterns produced by the task, relative to the activated directory.
+	Outputs []string
+
+	// Run is the function that executes the task logic.
+	Run TaskFunc
 }
 
 // Plugin describes a plugin and its capabilities.
 type Plugin struct {
-	Name       string
+	// Name is the identifier of the plugin (e.g. "astro").
+	Name string
+
+	// Activation holds repository-relative glob patterns that trigger this plugin.
 	Activation []string
-	Network    bool
-	Tasks      []Task
+
+	// Network indicates whether the plugin requires network access during task execution.
+	Network bool
+
+	// Tasks lists the tasks provided by this plugin.
+	Tasks []Task
 }
 
 // ServeStdio serves the plugin over stdin and stdout using the gRPC stdio transport.
 func ServeStdio(plugin Plugin) error {
 	listener := stdio.NewListener(os.Stdin, os.Stdout)
-	if err := Serve(listener, plugin); err != nil {
-		fmt.Fprintf(os.Stderr, "plugin %s: %v\n", plugin.Name, err)
-		return err
-	}
-	return nil
+	return serve(listener, plugin)
 }
 
-// Serve serves the plugin over the provided net.Listener.
-func Serve(listener net.Listener, plugin Plugin) error {
-	server := grpc.NewServer()
-	api.RegisterPluginServiceServer(server, newServer(plugin))
-	if err := server.Serve(listener); err != nil && !errors.Is(err, net.ErrClosed) {
+func serve(listener net.Listener, plugin Plugin) error {
+	grpcServer := grpc.NewServer()
+	api.RegisterPluginServiceServer(grpcServer, newServer(plugin))
+	if err := grpcServer.Serve(listener); err != nil && !errors.Is(err, net.ErrClosed) {
 		return err
 	}
 	return nil
@@ -103,10 +123,10 @@ func newServer(plugin Plugin) *server {
 	}
 }
 
-func (s *server) Describe(_ context.Context, _ *api.DescribeRequest) (*api.DescribeResponse, error) {
-	var taskMeta []*api.TaskMetadata
-	for _, task := range s.plugin.Tasks {
-		taskMeta = append(taskMeta, &api.TaskMetadata{
+func (pluginServer *server) Describe(_ context.Context, _ *api.DescribeRequest) (*api.DescribeResponse, error) {
+	var tasksMetadata []*api.TaskMetadata
+	for _, task := range pluginServer.plugin.Tasks {
+		tasksMetadata = append(tasksMetadata, &api.TaskMetadata{
 			Name:        task.Name,
 			Verb:        task.Verb,
 			Description: task.Description,
@@ -114,24 +134,24 @@ func (s *server) Describe(_ context.Context, _ *api.DescribeRequest) (*api.Descr
 		})
 	}
 	return &api.DescribeResponse{
-		Name:       s.plugin.Name,
-		Activation: s.plugin.Activation,
-		Network:    s.plugin.Network,
-		Tasks:      taskMeta,
+		Name:       pluginServer.plugin.Name,
+		Activation: pluginServer.plugin.Activation,
+		Network:    pluginServer.plugin.Network,
+		Tasks:      tasksMetadata,
 	}, nil
 }
 
-func (s *server) RunTask(stream api.PluginService_RunTaskServer) error {
-	firstReq, err := stream.Recv()
+func (pluginServer *server) RunTask(stream api.PluginService_RunTaskServer) error {
+	firstRequest, err := stream.Recv()
 	if err != nil {
 		return status.Errorf(codes.InvalidArgument, "receiving task start: %v", err)
 	}
-	start := firstReq.GetStart()
+	start := firstRequest.GetStart()
 	if start == nil {
 		return status.Errorf(codes.InvalidArgument, "first message must be TaskStart")
 	}
 
-	task, ok := s.tasks[start.Task]
+	task, ok := pluginServer.tasks[start.Task]
 	if !ok {
 		return status.Errorf(codes.NotFound, "unknown task %q", start.Task)
 	}
@@ -171,14 +191,14 @@ func (s *server) RunTask(stream api.PluginService_RunTaskServer) error {
 	}()
 
 	for {
-		req, err := stream.Recv()
+		request, err := stream.Recv()
 		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
 			return status.Errorf(codes.Internal, "receiving file chunk: %v", err)
 		}
-		chunk := req.GetFile()
+		chunk := request.GetFile()
 		if chunk == nil {
 			return status.Errorf(codes.InvalidArgument, "unexpected message, expected FileChunk")
 		}
@@ -197,29 +217,26 @@ func (s *server) RunTask(stream api.PluginService_RunTaskServer) error {
 			}
 		}
 
-		info, err := root.Lstat(cleanPath)
+		fileInfo, err := root.Lstat(cleanPath)
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return status.Errorf(codes.Internal, "stat file %q: %v", chunk.Path, err)
 		}
-		if err == nil && !info.Mode().IsRegular() {
+		if err == nil && !fileInfo.Mode().IsRegular() {
 			return status.Errorf(codes.InvalidArgument, "file path %q is not a regular file", chunk.Path)
 		}
 
 		mode := os.FileMode(chunk.Mode).Perm()
-		if mode == 0 {
-			mode = 0644
-		}
 
-		f, err := root.OpenFile(cleanPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, mode)
+		file, err := root.OpenFile(cleanPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, mode)
 		if err != nil {
 			return status.Errorf(codes.Internal, "opening file %q: %v", chunk.Path, err)
 		}
 		if len(chunk.Content) > 0 {
-			if _, err := f.Write(chunk.Content); err != nil {
-				return status.Errorf(codes.Internal, "writing file %q: %v", chunk.Path, errors.Join(err, f.Close()))
+			if _, err := file.Write(chunk.Content); err != nil {
+				return status.Errorf(codes.Internal, "writing file %q: %v", chunk.Path, errors.Join(err, file.Close()))
 			}
 		}
-		if err := f.Close(); err != nil {
+		if err := file.Close(); err != nil {
 			return status.Errorf(codes.Internal, "closing file %q: %v", chunk.Path, err)
 		}
 	}
@@ -236,16 +253,16 @@ func (s *server) RunTask(stream api.PluginService_RunTaskServer) error {
 	}
 
 	var sendMutex sync.Mutex
-	sendResponse := func(resp *api.RunTaskResponse) error {
+	sendResponse := func(response *api.RunTaskResponse) error {
 		sendMutex.Lock()
 		defer sendMutex.Unlock()
-		return stream.Send(resp)
+		return stream.Send(response)
 	}
 
 	stdoutWriter := &logWriter{streamType: api.LogLine_STDOUT, send: sendResponse}
 	stderrWriter := &logWriter{streamType: api.LogLine_STDERR, send: sendResponse}
 
-	taskCtx := TaskContext{
+	taskContext := TaskContext{
 		RootDir:   rootDir,
 		Dir:       activatedDir,
 		OutputDir: outputDir,
@@ -253,46 +270,46 @@ func (s *server) RunTask(stream api.PluginService_RunTaskServer) error {
 		Stderr:    stderrWriter,
 	}
 
-	taskErr := task.Run(stream.Context(), taskCtx)
-	if taskErr != nil {
+	taskError := task.Run(stream.Context(), taskContext)
+	if taskError != nil {
 		exitCode := int32(1)
-		var exitErr *exec.ExitError
-		if errors.As(taskErr, &exitErr) && exitErr.ExitCode() != 0 {
-			exitCode = int32(exitErr.ExitCode())
+		var exitError *exec.ExitError
+		if errors.As(taskError, &exitError) && exitError.ExitCode() != 0 {
+			exitCode = int32(exitError.ExitCode())
 		}
 		return sendResponse(&api.RunTaskResponse{
 			Payload: &api.RunTaskResponse_Result{
 				Result: &api.TaskResult{
 					ExitCode:     exitCode,
-					ErrorMessage: taskErr.Error(),
+					ErrorMessage: taskError.Error(),
 				},
 			},
 		})
 	}
 
-	err = filepath.WalkDir(outputDir, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if d.IsDir() {
-			return nil
-		}
-		info, err := d.Info()
+	walkError := filepath.WalkDir(outputDir, func(path string, dirEntry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if !info.Mode().IsRegular() {
+		if dirEntry.IsDir() {
 			return nil
 		}
-		relPath, err := filepath.Rel(outputDir, path)
+		fileInfo, err := dirEntry.Info()
 		if err != nil {
 			return err
 		}
-		slashPath := filepath.ToSlash(relPath)
-		return sendOutputFile(path, slashPath, uint32(info.Mode().Perm()), sendResponse)
+		if !fileInfo.Mode().IsRegular() {
+			return nil
+		}
+		relativePath, err := filepath.Rel(outputDir, path)
+		if err != nil {
+			return err
+		}
+		slashPath := filepath.ToSlash(relativePath)
+		return sendOutputFile(path, slashPath, uint32(fileInfo.Mode().Perm()), sendResponse)
 	})
-	if err != nil {
-		return status.Errorf(codes.Internal, "streaming output files: %v", err)
+	if walkError != nil {
+		return status.Errorf(codes.Internal, "streaming output files: %v", walkError)
 	}
 
 	return sendResponse(&api.RunTaskResponse{
@@ -309,42 +326,42 @@ type logWriter struct {
 	send       func(*api.RunTaskResponse) error
 }
 
-func (w *logWriter) Write(p []byte) (int, error) {
-	if len(p) == 0 {
+func (writer *logWriter) Write(data []byte) (int, error) {
+	if len(data) == 0 {
 		return 0, nil
 	}
-	err := w.send(&api.RunTaskResponse{
+	err := writer.send(&api.RunTaskResponse{
 		Payload: &api.RunTaskResponse_Log{
 			Log: &api.LogLine{
-				Stream: w.streamType,
-				Data:   bytes.Clone(p),
+				Stream: writer.streamType,
+				Data:   bytes.Clone(data),
 			},
 		},
 	})
 	if err != nil {
 		return 0, err
 	}
-	return len(p), nil
+	return len(data), nil
 }
 
-func sendOutputFile(localPath, relPath string, mode uint32, send func(*api.RunTaskResponse) error) error {
-	f, err := os.Open(localPath)
+func sendOutputFile(localPath, relativePath string, mode uint32, send func(*api.RunTaskResponse) error) error {
+	file, err := os.Open(localPath)
 	if err != nil {
 		return err
 	}
 	defer func() {
-		if closeErr := f.Close(); closeErr != nil {
+		if closeErr := file.Close(); closeErr != nil {
 			fmt.Fprintf(os.Stderr, "failed to close %s: %v\n", localPath, closeErr)
 		}
 	}()
 
-	buf := make([]byte, maxChunkSize)
-	n, err := io.ReadFull(f, buf)
+	buffer := make([]byte, maxChunkSize)
+	bytesRead, err := io.ReadFull(file, buffer)
 	if errors.Is(err, io.EOF) {
 		return send(&api.RunTaskResponse{
 			Payload: &api.RunTaskResponse_OutputFile{
 				OutputFile: &api.FileChunk{
-					Path:        relPath,
+					Path:        relativePath,
 					Mode:        mode,
 					Content:     nil,
 					IsLastChunk: true,
@@ -356,16 +373,16 @@ func sendOutputFile(localPath, relPath string, mode uint32, send func(*api.RunTa
 		return err
 	}
 
-	currentContent := bytes.Clone(buf[:n])
-	nextBuf := make([]byte, maxChunkSize)
+	currentContent := bytes.Clone(buffer[:bytesRead])
+	nextBuffer := make([]byte, maxChunkSize)
 
 	for {
-		nextN, nextErr := io.ReadFull(f, nextBuf)
+		nextBytesRead, nextErr := io.ReadFull(file, nextBuffer)
 		if errors.Is(nextErr, io.EOF) {
 			return send(&api.RunTaskResponse{
 				Payload: &api.RunTaskResponse_OutputFile{
 					OutputFile: &api.FileChunk{
-						Path:        relPath,
+						Path:        relativePath,
 						Mode:        mode,
 						Content:     currentContent,
 						IsLastChunk: true,
@@ -380,7 +397,7 @@ func sendOutputFile(localPath, relPath string, mode uint32, send func(*api.RunTa
 		if err := send(&api.RunTaskResponse{
 			Payload: &api.RunTaskResponse_OutputFile{
 				OutputFile: &api.FileChunk{
-					Path:        relPath,
+					Path:        relativePath,
 					Mode:        mode,
 					Content:     currentContent,
 					IsLastChunk: false,
@@ -390,14 +407,14 @@ func sendOutputFile(localPath, relPath string, mode uint32, send func(*api.RunTa
 			return err
 		}
 
-		currentContent = bytes.Clone(nextBuf[:nextN])
+		currentContent = bytes.Clone(nextBuffer[:nextBytesRead])
 	}
 }
 
-func isPathEscape(p string) bool {
-	if filepath.IsAbs(p) || strings.HasPrefix(p, "/") || strings.HasPrefix(p, "\\") {
+func isPathEscape(path string) bool {
+	if filepath.IsAbs(path) || strings.HasPrefix(path, "/") || strings.HasPrefix(path, "\\") {
 		return true
 	}
-	clean := filepath.Clean(filepath.FromSlash(p))
-	return clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || strings.HasPrefix(clean, "../")
+	cleanPath := filepath.Clean(filepath.FromSlash(path))
+	return cleanPath == ".." || strings.HasPrefix(cleanPath, ".."+string(filepath.Separator)) || strings.HasPrefix(cleanPath, "../")
 }

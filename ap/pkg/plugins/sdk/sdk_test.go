@@ -36,39 +36,107 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func setupTestClient(t *testing.T, plugin Plugin) (api.PluginServiceClient, func()) {
+type taskExecutionOutput struct {
+	result      *api.TaskResult
+	outputFiles []*api.FileChunk
+	stdout      string
+	stderr      string
+}
+
+func setupTestClient(t *testing.T, plugin Plugin) api.PluginServiceClient {
 	t.Helper()
 	serverReader, clientWriter := io.Pipe()
 	clientReader, serverWriter := io.Pipe()
 
 	serverListener := stdio.NewListener(serverReader, serverWriter)
-	clientConn := stdio.NewConn(clientReader, clientWriter)
+	clientConnection := stdio.NewConn(clientReader, clientWriter)
 
 	serverDone := make(chan error, 1)
 	go func() {
-		serverDone <- Serve(serverListener, plugin)
+		serverDone <- serve(serverListener, plugin)
 	}()
 
-	grpcClientConn, err := grpc.NewClient("passthrough:///stdio",
+	grpcClientConnection, err := grpc.NewClient("passthrough:///stdio",
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
-			return clientConn, nil
+			return clientConnection, nil
 		}),
 	)
 	if err != nil {
 		t.Fatalf("grpc.NewClient: %v", err)
 	}
 
-	cleanup := func() {
-		_ = grpcClientConn.Close()
+	t.Cleanup(func() {
+		_ = grpcClientConnection.Close()
 		_ = serverListener.Close()
-		_ = clientConn.Close()
+		_ = clientConnection.Close()
 		if err := <-serverDone; err != nil {
-			t.Errorf("Serve error: %v", err)
+			t.Errorf("serve error: %v", err)
 		}
+	})
+
+	return api.NewPluginServiceClient(grpcClientConnection)
+}
+
+func executeTask(t *testing.T, client api.PluginServiceClient, start *api.TaskStart, files ...*api.FileChunk) (*taskExecutionOutput, error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	stream, err := client.RunTask(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("RunTask: %w", err)
 	}
 
-	return api.NewPluginServiceClient(grpcClientConn), cleanup
+	if err := stream.Send(&api.RunTaskRequest{
+		Payload: &api.RunTaskRequest_Start{Start: start},
+	}); err != nil {
+		return nil, fmt.Errorf("send TaskStart: %w", err)
+	}
+
+	for _, file := range files {
+		if err := stream.Send(&api.RunTaskRequest{
+			Payload: &api.RunTaskRequest_File{File: file},
+		}); err != nil {
+			return nil, fmt.Errorf("send file %s: %w", file.Path, err)
+		}
+	}
+	if err := stream.CloseSend(); err != nil {
+		return nil, fmt.Errorf("CloseSend: %w", err)
+	}
+
+	output := &taskExecutionOutput{}
+	for {
+		response, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if output.result != nil {
+			t.Fatalf("received message after TaskResult: %+v", response)
+		}
+
+		switch payload := response.Payload.(type) {
+		case *api.RunTaskResponse_Log:
+			if len(output.outputFiles) > 0 {
+				t.Errorf("log line received after output files")
+			}
+			if payload.Log.Stream == api.LogLine_STDOUT {
+				output.stdout += string(payload.Log.Data)
+			} else {
+				output.stderr += string(payload.Log.Data)
+			}
+		case *api.RunTaskResponse_OutputFile:
+			output.outputFiles = append(output.outputFiles, payload.OutputFile)
+		case *api.RunTaskResponse_Result:
+			output.result = payload.Result
+		default:
+			t.Fatalf("unexpected response payload: %+v", response)
+		}
+	}
+	return output, nil
 }
 
 func TestDescribe(t *testing.T) {
@@ -91,37 +159,36 @@ func TestDescribe(t *testing.T) {
 			},
 		},
 	}
-	client, cleanup := setupTestClient(t, plugin)
-	defer cleanup()
+	client := setupTestClient(t, plugin)
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
-	resp, err := client.Describe(ctx, &api.DescribeRequest{})
+	response, err := client.Describe(ctx, &api.DescribeRequest{})
 	if err != nil {
 		t.Fatalf("Describe: %v", err)
 	}
-	if resp.Name != "test-plugin" {
-		t.Errorf("expected name 'test-plugin', got %q", resp.Name)
+	if response.Name != "test-plugin" {
+		t.Errorf("expected name 'test-plugin', got %q", response.Name)
 	}
-	if !resp.Network {
+	if !response.Network {
 		t.Errorf("expected network true, got false")
 	}
 	expectedActivation := []string{"*.foo", "dir/*.bar"}
-	if !reflect.DeepEqual(resp.Activation, expectedActivation) {
-		t.Errorf("expected activation %v, got %v", expectedActivation, resp.Activation)
+	if !reflect.DeepEqual(response.Activation, expectedActivation) {
+		t.Errorf("expected activation %v, got %v", expectedActivation, response.Activation)
 	}
-	if len(resp.Tasks) != 2 {
-		t.Fatalf("expected 2 tasks, got %d", len(resp.Tasks))
+	if len(response.Tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(response.Tasks))
 	}
-	if resp.Tasks[0].Name != "task1" || resp.Tasks[0].Verb != "build" || resp.Tasks[0].Description != "Build task" {
-		t.Errorf("unexpected task 0: %+v", resp.Tasks[0])
+	if response.Tasks[0].Name != "task1" || response.Tasks[0].Verb != "build" || response.Tasks[0].Description != "Build task" {
+		t.Errorf("unexpected task 0: %+v", response.Tasks[0])
 	}
-	if !reflect.DeepEqual(resp.Tasks[0].Outputs, []string{"out1.txt"}) {
-		t.Errorf("unexpected task 0 outputs: %v", resp.Tasks[0].Outputs)
+	if !reflect.DeepEqual(response.Tasks[0].Outputs, []string{"out1.txt"}) {
+		t.Errorf("unexpected task 0 outputs: %v", response.Tasks[0].Outputs)
 	}
-	if resp.Tasks[1].Name != "task2" || resp.Tasks[1].Verb != "lint" || resp.Tasks[1].Description != "Lint task" {
-		t.Errorf("unexpected task 1: %+v", resp.Tasks[1])
+	if response.Tasks[1].Name != "task2" || response.Tasks[1].Verb != "lint" || response.Tasks[1].Description != "Lint task" {
+		t.Errorf("unexpected task 1: %+v", response.Tasks[1])
 	}
 }
 
@@ -135,7 +202,6 @@ func TestRunTask_Success(t *testing.T) {
 				Verb: "build",
 				Run: func(ctx context.Context, task TaskContext) error {
 					taskExecuted = true
-					// Verify input file in activated dir
 					inputData, err := os.ReadFile(filepath.Join(task.Dir, "hello.txt"))
 					if err != nil {
 						return fmt.Errorf("reading hello.txt: %w", err)
@@ -143,7 +209,6 @@ func TestRunTask_Success(t *testing.T) {
 					if string(inputData) != "world" {
 						return fmt.Errorf("unexpected hello.txt content: %q", string(inputData))
 					}
-					// Verify input file in root dir
 					rootData, err := os.ReadFile(filepath.Join(task.RootDir, "root.txt"))
 					if err != nil {
 						return fmt.Errorf("reading root.txt: %w", err)
@@ -152,7 +217,6 @@ func TestRunTask_Success(t *testing.T) {
 						return fmt.Errorf("unexpected root.txt content: %q", string(rootData))
 					}
 
-					// Stream logs
 					if _, err := fmt.Fprint(task.Stdout, "building output\n"); err != nil {
 						return err
 					}
@@ -160,7 +224,6 @@ func TestRunTask_Success(t *testing.T) {
 						return err
 					}
 
-					// Generate output file
 					outputPath := filepath.Join(task.OutputDir, "sub", "output.txt")
 					if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
 						return err
@@ -171,126 +234,45 @@ func TestRunTask_Success(t *testing.T) {
 		},
 	}
 
-	client, cleanup := setupTestClient(t, plugin)
-	defer cleanup()
+	client := setupTestClient(t, plugin)
+	start := &api.TaskStart{Task: "build", Dir: "activated"}
+	helloFile := &api.FileChunk{Path: "activated/hello.txt", Mode: 0644, Content: []byte("world"), IsLastChunk: true}
+	rootFile := &api.FileChunk{Path: "root.txt", Mode: 0644, Content: []byte("root-file"), IsLastChunk: true}
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-
-	stream, err := client.RunTask(ctx)
+	output, err := executeTask(t, client, start, helloFile, rootFile)
 	if err != nil {
-		t.Fatalf("RunTask: %v", err)
-	}
-
-	// 1. Send TaskStart
-	if err := stream.Send(&api.RunTaskRequest{
-		Payload: &api.RunTaskRequest_Start{
-			Start: &api.TaskStart{
-				Task: "build",
-				Dir:  "activated",
-			},
-		},
-	}); err != nil {
-		t.Fatalf("sending TaskStart: %v", err)
-	}
-
-	// 2. Stream input files
-	if err := stream.Send(&api.RunTaskRequest{
-		Payload: &api.RunTaskRequest_File{
-			File: &api.FileChunk{
-				Path:        "activated/hello.txt",
-				Mode:        0644,
-				Content:     []byte("world"),
-				IsLastChunk: true,
-			},
-		},
-	}); err != nil {
-		t.Fatalf("sending hello.txt: %v", err)
-	}
-	if err := stream.Send(&api.RunTaskRequest{
-		Payload: &api.RunTaskRequest_File{
-			File: &api.FileChunk{
-				Path:        "root.txt",
-				Mode:        0644,
-				Content:     []byte("root-file"),
-				IsLastChunk: true,
-			},
-		},
-	}); err != nil {
-		t.Fatalf("sending root.txt: %v", err)
-	}
-	if err := stream.CloseSend(); err != nil {
-		t.Fatalf("CloseSend: %v", err)
-	}
-
-	// 3. Receive responses and verify ordering
-	var logStdout string
-	var logStderr string
-	var outputFiles []*api.FileChunk
-	var result *api.TaskResult
-	seenResult := false
-
-	for {
-		resp, err := stream.Recv()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			t.Fatalf("stream.Recv: %v", err)
-		}
-		if seenResult {
-			t.Fatalf("received message after TaskResult: %+v", resp)
-		}
-
-		switch payload := resp.Payload.(type) {
-		case *api.RunTaskResponse_Log:
-			if len(outputFiles) > 0 {
-				t.Errorf("log line received after output files")
-			}
-			if payload.Log.Stream == api.LogLine_STDOUT {
-				logStdout += string(payload.Log.Data)
-			} else {
-				logStderr += string(payload.Log.Data)
-			}
-		case *api.RunTaskResponse_OutputFile:
-			outputFiles = append(outputFiles, payload.OutputFile)
-		case *api.RunTaskResponse_Result:
-			result = payload.Result
-			seenResult = true
-		default:
-			t.Fatalf("unexpected response payload: %+v", resp)
-		}
+		t.Fatalf("executeTask: %v", err)
 	}
 
 	if !taskExecuted {
 		t.Fatalf("task was not executed")
 	}
-	if logStdout != "building output\n" {
-		t.Errorf("expected stdout 'building output\\n', got %q", logStdout)
+	if output.stdout != "building output\n" {
+		t.Errorf("expected stdout 'building output\\n', got %q", output.stdout)
 	}
-	if logStderr != "diagnostics line\n" {
-		t.Errorf("expected stderr 'diagnostics line\\n', got %q", logStderr)
+	if output.stderr != "diagnostics line\n" {
+		t.Errorf("expected stderr 'diagnostics line\\n', got %q", output.stderr)
 	}
-	if len(outputFiles) != 1 {
-		t.Fatalf("expected 1 output file, got %d", len(outputFiles))
+	if len(output.outputFiles) != 1 {
+		t.Fatalf("expected 1 output file, got %d", len(output.outputFiles))
 	}
-	if outputFiles[0].Path != "sub/output.txt" {
-		t.Errorf("expected output path 'sub/output.txt', got %q", outputFiles[0].Path)
+	if output.outputFiles[0].Path != "sub/output.txt" {
+		t.Errorf("expected output path 'sub/output.txt', got %q", output.outputFiles[0].Path)
 	}
-	if string(outputFiles[0].Content) != "result content" {
-		t.Errorf("expected content 'result content', got %q", string(outputFiles[0].Content))
+	if string(output.outputFiles[0].Content) != "result content" {
+		t.Errorf("expected content 'result content', got %q", string(output.outputFiles[0].Content))
 	}
-	if outputFiles[0].Mode != 0755 {
-		t.Errorf("expected mode 0755, got 0%o", outputFiles[0].Mode)
+	if output.outputFiles[0].Mode != 0755 {
+		t.Errorf("expected mode 0755, got 0%o", output.outputFiles[0].Mode)
 	}
-	if !outputFiles[0].IsLastChunk {
+	if !output.outputFiles[0].IsLastChunk {
 		t.Errorf("expected IsLastChunk true")
 	}
-	if result == nil {
+	if output.result == nil {
 		t.Fatalf("missing TaskResult")
 	}
-	if result.ExitCode != 0 {
-		t.Errorf("expected exit code 0, got %d", result.ExitCode)
+	if output.result.ExitCode != 0 {
+		t.Errorf("expected exit code 0, got %d", output.result.ExitCode)
 	}
 }
 
@@ -307,46 +289,19 @@ func TestRunTask_Failure(t *testing.T) {
 		},
 	}
 
-	client, cleanup := setupTestClient(t, plugin)
-	defer cleanup()
-
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-
-	stream, err := client.RunTask(ctx)
+	client := setupTestClient(t, plugin)
+	output, err := executeTask(t, client, &api.TaskStart{Task: "fail-task"})
 	if err != nil {
-		t.Fatalf("RunTask: %v", err)
+		t.Fatalf("executeTask: %v", err)
 	}
-
-	if err := stream.Send(&api.RunTaskRequest{
-		Payload: &api.RunTaskRequest_Start{
-			Start: &api.TaskStart{Task: "fail-task"},
-		},
-	}); err != nil {
-		t.Fatalf("sending TaskStart: %v", err)
+	if output.result == nil {
+		t.Fatalf("expected TaskResult")
 	}
-	if err := stream.CloseSend(); err != nil {
-		t.Fatalf("CloseSend: %v", err)
-	}
-
-	resp, err := stream.Recv()
-	if err != nil {
-		t.Fatalf("stream.Recv: %v", err)
-	}
-	result := resp.GetResult()
-	if result == nil {
-		t.Fatalf("expected TaskResult, got %+v", resp)
-	}
-	if result.ExitCode == 0 {
+	if output.result.ExitCode == 0 {
 		t.Errorf("expected non-zero exit code")
 	}
-	if result.ErrorMessage != "task execution failed" {
-		t.Errorf("unexpected error message: %q", result.ErrorMessage)
-	}
-
-	// Verify stream ends cleanly
-	if _, err := stream.Recv(); !errors.Is(err, io.EOF) {
-		t.Errorf("expected io.EOF after TaskResult, got %v", err)
+	if output.result.ErrorMessage != "task execution failed" {
+		t.Errorf("unexpected error message: %q", output.result.ErrorMessage)
 	}
 }
 
@@ -363,39 +318,9 @@ func TestRunTask_PathEscapeRejected(t *testing.T) {
 		},
 	}
 
-	client, cleanup := setupTestClient(t, plugin)
-	defer cleanup()
-
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-
-	stream, err := client.RunTask(ctx)
-	if err != nil {
-		t.Fatalf("RunTask: %v", err)
-	}
-
-	if err := stream.Send(&api.RunTaskRequest{
-		Payload: &api.RunTaskRequest_Start{
-			Start: &api.TaskStart{Task: "task"},
-		},
-	}); err != nil {
-		t.Fatalf("sending TaskStart: %v", err)
-	}
-
-	if err := stream.Send(&api.RunTaskRequest{
-		Payload: &api.RunTaskRequest_File{
-			File: &api.FileChunk{
-				Path:        "../outside.txt",
-				Content:     []byte("escape"),
-				IsLastChunk: true,
-			},
-		},
-	}); err != nil {
-		t.Fatalf("sending file: %v", err)
-	}
-	_ = stream.CloseSend()
-
-	_, err = stream.Recv()
+	client := setupTestClient(t, plugin)
+	escapeFile := &api.FileChunk{Path: "../outside.txt", Content: []byte("escape"), IsLastChunk: true}
+	_, err := executeTask(t, client, &api.TaskStart{Task: "task"}, escapeFile)
 	if err == nil {
 		t.Fatalf("expected error for escaping path, got nil")
 	}
@@ -405,123 +330,82 @@ func TestRunTask_PathEscapeRejected(t *testing.T) {
 }
 
 func TestExamplePlugin(t *testing.T) {
-	tempDir := t.TempDir()
-	binPath := filepath.Join(tempDir, "example-plugin")
-	buildCmd := exec.Command("go", "build", "-o", binPath, "./example")
-	buildCmd.Env = os.Environ()
-	out, err := buildCmd.CombinedOutput()
+	temporaryDirectory := t.TempDir()
+	binaryPath := filepath.Join(temporaryDirectory, "example-plugin")
+	buildCommand := exec.Command("go", "build", "-buildvcs=false", "-o", binaryPath, "./example")
+	buildCommand.Env = os.Environ()
+	buildOutput, err := buildCommand.CombinedOutput()
 	if err != nil {
-		t.Fatalf("building example plugin: %v\n%s", err, string(out))
+		t.Fatalf("building example plugin: %v\n%s", err, string(buildOutput))
 	}
 
-	cmd := exec.Command(binPath)
-	stdinPipe, err := cmd.StdinPipe()
+	command := exec.Command(binaryPath)
+	stdinPipe, err := command.StdinPipe()
 	if err != nil {
 		t.Fatalf("StdinPipe: %v", err)
 	}
-	stdoutPipe, err := cmd.StdoutPipe()
+	stdoutPipe, err := command.StdoutPipe()
 	if err != nil {
 		t.Fatalf("StdoutPipe: %v", err)
 	}
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("cmd.Start: %v", err)
+	if err := command.Start(); err != nil {
+		t.Fatalf("command.Start: %v", err)
 	}
-	conn := stdio.NewCommandConn(cmd, stdinPipe, stdoutPipe)
-	defer func() { _ = conn.Close() }()
+	connection := stdio.NewCommandConn(command, stdinPipe, stdoutPipe)
+	defer func() { _ = connection.Close() }()
 
-	grpcClientConn, err := grpc.NewClient("passthrough:///stdio",
+	grpcClientConnection, err := grpc.NewClient("passthrough:///stdio",
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
-			return conn, nil
+			return connection, nil
 		}),
 	)
 	if err != nil {
 		t.Fatalf("grpc.NewClient: %v", err)
 	}
-	defer func() { _ = grpcClientConn.Close() }()
+	defer func() { _ = grpcClientConnection.Close() }()
 
-	client := api.NewPluginServiceClient(grpcClientConn)
+	client := api.NewPluginServiceClient(grpcClientConnection)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
-	// 1. Verify Describe
-	desc, err := client.Describe(ctx, &api.DescribeRequest{})
+	describeResponse, err := client.Describe(ctx, &api.DescribeRequest{})
 	if err != nil {
 		t.Fatalf("Describe: %v", err)
 	}
-	if desc.Name != "example" {
-		t.Errorf("expected name 'example', got %q", desc.Name)
+	if describeResponse.Name != "example" {
+		t.Errorf("expected name 'example', got %q", describeResponse.Name)
 	}
 
-	// 2. Verify RunTask
-	stream, err := client.RunTask(ctx)
+	inputFile := &api.FileChunk{
+		Path:        "docs/input.txt",
+		Content:     []byte("hello world\n"),
+		IsLastChunk: true,
+	}
+	output, err := executeTask(t, client, &api.TaskStart{Task: "append", Dir: "docs"}, inputFile)
 	if err != nil {
-		t.Fatalf("RunTask: %v", err)
+		t.Fatalf("executeTask: %v", err)
 	}
-
-	if err := stream.Send(&api.RunTaskRequest{
-		Payload: &api.RunTaskRequest_Start{
-			Start: &api.TaskStart{
-				Task: "append",
-				Dir:  "docs",
-			},
-		},
-	}); err != nil {
-		t.Fatalf("send TaskStart: %v", err)
+	if output.result == nil || output.result.ExitCode != 0 {
+		t.Fatalf("task failed: %+v", output.result)
 	}
-
-	if err := stream.Send(&api.RunTaskRequest{
-		Payload: &api.RunTaskRequest_File{
-			File: &api.FileChunk{
-				Path:        "docs/input.txt",
-				Content:     []byte("hello world\n"),
-				IsLastChunk: true,
-			},
-		},
-	}); err != nil {
-		t.Fatalf("send FileChunk: %v", err)
+	if output.stdout != "processed input.txt\n" {
+		t.Errorf("expected log 'processed input.txt\\n', got %q", output.stdout)
 	}
-	if err := stream.CloseSend(); err != nil {
-		t.Fatalf("CloseSend: %v", err)
-	}
-
-	var outputContent string
-	var logOutput string
-	for {
-		resp, err := stream.Recv()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			t.Fatalf("Recv: %v", err)
-		}
-		if log := resp.GetLog(); log != nil {
-			logOutput += string(log.Data)
-		}
-		if file := resp.GetOutputFile(); file != nil {
-			outputContent += string(file.Content)
-		}
-		if result := resp.GetResult(); result != nil {
-			if result.ExitCode != 0 {
-				t.Fatalf("task failed with code %d: %s", result.ExitCode, result.ErrorMessage)
-			}
-		}
-	}
-
-	if logOutput != "processed input.txt\n" {
-		t.Errorf("expected log 'processed input.txt\\n', got %q", logOutput)
+	if len(output.outputFiles) != 1 {
+		t.Fatalf("expected 1 output file, got %d", len(output.outputFiles))
 	}
 	expectedContent := "hello world\nappended line\n"
-	if outputContent != expectedContent {
-		t.Errorf("expected output %q, got %q", expectedContent, outputContent)
+	if string(output.outputFiles[0].Content) != expectedContent {
+		t.Errorf("expected output %q, got %q", expectedContent, string(output.outputFiles[0].Content))
 	}
 }
 
 func TestRunTask_MultiChunkFiles(t *testing.T) {
 	largeSize := int(1.5 * 1024 * 1024)
 	largeData := make([]byte, largeSize)
-	for i := range largeData {
-		largeData[i] = byte(i % 251)
+	for index := range largeData {
+		largeData[index] = byte(index % 251)
 	}
 
 	plugin := Plugin{
@@ -530,7 +414,6 @@ func TestRunTask_MultiChunkFiles(t *testing.T) {
 			{
 				Name: "chunk-task",
 				Run: func(ctx context.Context, task TaskContext) error {
-					// Verify multi-chunk input file
 					readData, err := os.ReadFile(filepath.Join(task.Dir, "multi-chunk.bin"))
 					if err != nil {
 						return fmt.Errorf("reading multi-chunk.bin: %w", err)
@@ -539,100 +422,40 @@ func TestRunTask_MultiChunkFiles(t *testing.T) {
 						return fmt.Errorf("unexpected content: %q", string(readData))
 					}
 
-					// Create large output file (1.5 MB)
 					if err := os.WriteFile(filepath.Join(task.OutputDir, "large.bin"), largeData, 0644); err != nil {
 						return err
 					}
-					// Create empty output file (0 bytes)
 					return os.WriteFile(filepath.Join(task.OutputDir, "empty.txt"), nil, 0644)
 				},
 			},
 		},
 	}
 
-	client, cleanup := setupTestClient(t, plugin)
-	defer cleanup()
+	client := setupTestClient(t, plugin)
+	chunk1 := &api.FileChunk{Path: "sub/multi-chunk.bin", Content: []byte("chunk1-"), IsLastChunk: false}
+	chunk2 := &api.FileChunk{Path: "sub/multi-chunk.bin", Content: []byte("chunk2"), IsLastChunk: true}
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-
-	stream, err := client.RunTask(ctx)
+	output, err := executeTask(t, client, &api.TaskStart{Task: "chunk-task", Dir: "sub"}, chunk1, chunk2)
 	if err != nil {
-		t.Fatalf("RunTask: %v", err)
+		t.Fatalf("executeTask: %v", err)
 	}
 
-	if err := stream.Send(&api.RunTaskRequest{
-		Payload: &api.RunTaskRequest_Start{
-			Start: &api.TaskStart{
-				Task: "chunk-task",
-				Dir:  "sub",
-			},
-		},
-	}); err != nil {
-		t.Fatalf("send TaskStart: %v", err)
+	if output.result == nil || output.result.ExitCode != 0 {
+		t.Fatalf("task failed: %+v", output.result)
 	}
-
-	// Send multi-chunk input file: chunk 1
-	if err := stream.Send(&api.RunTaskRequest{
-		Payload: &api.RunTaskRequest_File{
-			File: &api.FileChunk{
-				Path:        "sub/multi-chunk.bin",
-				Content:     []byte("chunk1-"),
-				IsLastChunk: false,
-			},
-		},
-	}); err != nil {
-		t.Fatalf("send FileChunk 1: %v", err)
+	if len(output.outputFiles) != 3 {
+		t.Fatalf("expected 3 output chunks, got %d", len(output.outputFiles))
 	}
-	// chunk 2
-	if err := stream.Send(&api.RunTaskRequest{
-		Payload: &api.RunTaskRequest_File{
-			File: &api.FileChunk{
-				Path:        "sub/multi-chunk.bin",
-				Content:     []byte("chunk2"),
-				IsLastChunk: true,
-			},
-		},
-	}); err != nil {
-		t.Fatalf("send FileChunk 2: %v", err)
+	if output.outputFiles[0].Path != "empty.txt" || len(output.outputFiles[0].Content) != 0 || !output.outputFiles[0].IsLastChunk {
+		t.Errorf("unexpected empty.txt chunk: %+v", output.outputFiles[0])
 	}
-	if err := stream.CloseSend(); err != nil {
-		t.Fatalf("CloseSend: %v", err)
+	if output.outputFiles[1].Path != "large.bin" || len(output.outputFiles[1].Content) != maxChunkSize || output.outputFiles[1].IsLastChunk {
+		t.Errorf("unexpected large.bin chunk 1: len=%d, isLast=%v", len(output.outputFiles[1].Content), output.outputFiles[1].IsLastChunk)
 	}
-
-	var outputChunks []*api.FileChunk
-	for {
-		resp, err := stream.Recv()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			t.Fatalf("Recv: %v", err)
-		}
-		if file := resp.GetOutputFile(); file != nil {
-			outputChunks = append(outputChunks, file)
-		}
-		if res := resp.GetResult(); res != nil {
-			if res.ExitCode != 0 {
-				t.Fatalf("task failed with %d: %s", res.ExitCode, res.ErrorMessage)
-			}
-		}
+	if output.outputFiles[2].Path != "large.bin" || len(output.outputFiles[2].Content) != largeSize-maxChunkSize || !output.outputFiles[2].IsLastChunk {
+		t.Errorf("unexpected large.bin chunk 2: len=%d, isLast=%v", len(output.outputFiles[2].Content), output.outputFiles[2].IsLastChunk)
 	}
-
-	// Expect 3 chunks: empty.txt (1 chunk), large.bin (2 chunks: 1MB not last, 0.5MB is last)
-	if len(outputChunks) != 3 {
-		t.Fatalf("expected 3 output chunks, got %d", len(outputChunks))
-	}
-	if outputChunks[0].Path != "empty.txt" || len(outputChunks[0].Content) != 0 || !outputChunks[0].IsLastChunk {
-		t.Errorf("unexpected empty.txt chunk: %+v", outputChunks[0])
-	}
-	if outputChunks[1].Path != "large.bin" || len(outputChunks[1].Content) != maxChunkSize || outputChunks[1].IsLastChunk {
-		t.Errorf("unexpected large.bin chunk 1: len=%d, isLast=%v", len(outputChunks[1].Content), outputChunks[1].IsLastChunk)
-	}
-	if outputChunks[2].Path != "large.bin" || len(outputChunks[2].Content) != largeSize-maxChunkSize || !outputChunks[2].IsLastChunk {
-		t.Errorf("unexpected large.bin chunk 2: len=%d, isLast=%v", len(outputChunks[2].Content), outputChunks[2].IsLastChunk)
-	}
-	receivedLarge := append(outputChunks[1].Content, outputChunks[2].Content...)
+	receivedLarge := append(output.outputFiles[1].Content, output.outputFiles[2].Content...)
 	if !bytes.Equal(receivedLarge, largeData) {
 		t.Errorf("reconstructed large.bin does not match original data")
 	}
