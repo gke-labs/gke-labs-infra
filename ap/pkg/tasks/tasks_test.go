@@ -1078,3 +1078,171 @@ func TestTaskLog_PerTaskBuffer(t *testing.T) {
 		t.Errorf("expected task B buffer to NOT contain 'hello from task A', got:\n%s", taskBBuf)
 	}
 }
+
+func TestRunCommand(t *testing.T) {
+	// 1. output of a passing command appears in the task log in stdout-then-stderr order
+	t.Run("PassingCommandStdoutThenStderr", func(t *testing.T) {
+		artifactsDirectory := t.TempDir()
+		var outputBuffer syncBuffer
+		scope := newTestScope(t).WithOutput(&outputBuffer, &outputBuffer).WithArtifactsDir(artifactsDirectory)
+		var capturedResult *CommandResult
+		task := &FuncTask{
+			Name: "passing-task",
+			RunFn: func(ctx context.Context, taskScope *TaskContext) error {
+				var err error
+				capturedResult, err = taskScope.RunCommand(ctx, Command{
+					Program: "sh",
+					Args:    []string{"-c", "echo out-line && echo err-line >&2"},
+				})
+				return err
+			},
+		}
+		if err := RunTask(t.Context(), scope, task); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if capturedResult == nil {
+			t.Fatalf("expected non-nil CommandResult")
+		}
+		logContent, err := os.ReadFile(filepath.Join(artifactsDirectory, "tasks", "passing-task.log"))
+		if err != nil {
+			t.Fatalf("failed reading task log file: %v", err)
+		}
+		logOutput := string(logContent)
+		stdoutIndex := strings.Index(logOutput, "--- stdout ---\nout-line")
+		stderrIndex := strings.Index(logOutput, "--- stderr ---\nerr-line")
+		if stdoutIndex == -1 {
+			t.Errorf("expected stdout section in log, got:\n%s", logOutput)
+		}
+		if stderrIndex == -1 {
+			t.Errorf("expected stderr section in log, got:\n%s", logOutput)
+		}
+		if stdoutIndex >= stderrIndex {
+			t.Errorf("expected stdout before stderr, got stdout at %d, stderr at %d", stdoutIndex, stderrIndex)
+		}
+	})
+
+	// 2. a failing command returns the error and its output is in the log
+	t.Run("FailingCommandReturnsErrorAndOutputInLog", func(t *testing.T) {
+		var outputBuffer syncBuffer
+		scope := newTestScope(t).WithOutput(&outputBuffer, &outputBuffer)
+		var commandError error
+		var capturedResult *CommandResult
+		task := &FuncTask{
+			Name: "failing-task",
+			RunFn: func(ctx context.Context, taskScope *TaskContext) error {
+				capturedResult, commandError = taskScope.RunCommand(ctx, Command{
+					Program: "sh",
+					Args:    []string{"-c", "echo failure-detail >&2 && exit 1"},
+				})
+				return commandError
+			},
+		}
+		err := RunTask(t.Context(), scope, task)
+		if err == nil {
+			t.Fatalf("expected error from failing command, got nil")
+		}
+		if commandError == nil {
+			t.Fatalf("expected command error, got nil")
+		}
+		if !strings.Contains(commandError.Error(), "sh") || !strings.Contains(commandError.Error(), "-c") {
+			t.Errorf("expected error to name program and args, got: %v", commandError)
+		}
+		if capturedResult == nil {
+			t.Fatalf("expected non-nil CommandResult even on failure")
+		}
+		logOutput := outputBuffer.String()
+		if !strings.Contains(logOutput, "failure-detail") {
+			t.Errorf("expected failing command output in log, got:\n%s", logOutput)
+		}
+	})
+
+	// 3. the e2e mode streams
+	t.Run("E2EModeStreams", func(t *testing.T) {
+		artifactsDirectory := t.TempDir()
+		var terminalBuffer syncBuffer
+		scope := newTestScope(t).WithOutput(&terminalBuffer, &terminalBuffer).WithPrintOutput(true).WithArtifactsDir(artifactsDirectory)
+		var observedTerminalDuringTask string
+		task := &FuncTask{
+			Name: "streaming-task",
+			RunFn: func(ctx context.Context, taskScope *TaskContext) error {
+				result, err := taskScope.RunCommand(ctx, Command{
+					Program: "sh",
+					Args:    []string{"-c", "echo stream-out && echo stream-err >&2"},
+				})
+				if err != nil {
+					return err
+				}
+				observedTerminalDuringTask = terminalBuffer.String()
+				stdoutBytes, err := os.ReadFile(result.StdoutFile)
+				if err != nil || !strings.Contains(string(stdoutBytes), "stream-out") {
+					t.Errorf("expected captured stdout file to contain stream-out, got: %q, err: %v", string(stdoutBytes), err)
+				}
+				stderrBytes, err := os.ReadFile(result.StderrFile)
+				if err != nil || !strings.Contains(string(stderrBytes), "stream-err") {
+					t.Errorf("expected captured stderr file to contain stream-err, got: %q, err: %v", string(stderrBytes), err)
+				}
+				return nil
+			},
+		}
+		if err := RunTask(t.Context(), scope, task); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(observedTerminalDuringTask, "stream-out") || !strings.Contains(observedTerminalDuringTask, "stream-err") {
+			t.Errorf("expected streamed output in terminal while running, got:\n%s", observedTerminalDuringTask)
+		}
+		terminalOutput := terminalBuffer.String()
+		if strings.Contains(terminalOutput, "--- stdout ---") {
+			t.Errorf("expected streamed output not to have block headers, got:\n%s", terminalOutput)
+		}
+		if strings.Count(terminalOutput, "stream-out") != 1 {
+			t.Errorf("expected stream-out exactly once, got count %d in:\n%s",
+				strings.Count(terminalOutput, "stream-out"), terminalOutput)
+		}
+		logContent, err := os.ReadFile(filepath.Join(artifactsDirectory, "tasks", "streaming-task.log"))
+		if err != nil {
+			t.Fatalf("failed reading task log file: %v", err)
+		}
+		if !strings.Contains(string(logContent), "stream-out") || !strings.Contains(string(logContent), "stream-err") {
+			t.Errorf("expected artifact task log to contain streamed output, got:\n%s", string(logContent))
+		}
+	})
+
+	// 4. machine-readable stdout is omitted from the task log
+	t.Run("MachineReadableStdoutOmittedFromTaskLog", func(t *testing.T) {
+		artifactsDirectory := t.TempDir()
+		var outputBuffer syncBuffer
+		scope := newTestScope(t).WithOutput(&outputBuffer, &outputBuffer).WithArtifactsDir(artifactsDirectory)
+		task := &FuncTask{
+			Name: "json-command-task",
+			RunFn: func(ctx context.Context, taskScope *TaskContext) error {
+				result, err := taskScope.RunCommand(ctx, Command{
+					Program:               "sh",
+					Args:                  []string{"-c", `echo '{"Action":"start"}' && echo warn-detail >&2`},
+					MachineReadableStdout: true,
+				})
+				if err != nil {
+					return err
+				}
+				stdoutBytes, err := os.ReadFile(result.StdoutFile)
+				if err != nil || !strings.Contains(string(stdoutBytes), `{"Action":"start"}`) {
+					t.Errorf("expected captured stdout file to contain json, got: %q, err: %v", string(stdoutBytes), err)
+				}
+				return nil
+			},
+		}
+		if err := RunTask(t.Context(), scope, task); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		logContent, err := os.ReadFile(filepath.Join(artifactsDirectory, "tasks", "json-command-task.log"))
+		if err != nil {
+			t.Fatalf("failed reading task log file: %v", err)
+		}
+		logOutput := string(logContent)
+		if strings.Contains(logOutput, `{"Action":"start"}`) || strings.Contains(logOutput, "--- stdout ---") {
+			t.Errorf("expected machine-readable stdout omitted from task log, got:\n%s", logOutput)
+		}
+		if !strings.Contains(logOutput, "--- stderr ---\nwarn-detail") {
+			t.Errorf("expected stderr in task log, got:\n%s", logOutput)
+		}
+	})
+}

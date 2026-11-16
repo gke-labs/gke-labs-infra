@@ -1279,7 +1279,7 @@ func TestGoTidyTask_UntidyFailsWithDiff(t *testing.T) {
 	var buf bytes.Buffer
 	scope := tasks.NewTaskContext(tmpDir, tmpDir, r).WithOutput(&buf, &buf)
 
-	err = task.Run(t.Context(), scope)
+	err = tasks.RunTask(t.Context(), scope, task)
 	if err == nil {
 		t.Fatalf("expected GoTidyTask to fail on untidy module")
 	}
