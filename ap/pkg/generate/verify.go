@@ -78,6 +78,13 @@ func FindGeneratedFiles(repoRoot string, scopes []*tasks.TaskContext) ([]*source
 		}
 		scopeIgnoreList := sourcetree.NewIgnoreList(scopeIgnorePatterns)
 
+		var pluginOutputDirs []string
+		for _, task := range scope.GenerateTasks {
+			if taskWithOutputs, ok := task.(tasks.Outputs); ok {
+				pluginOutputDirs = append(pluginOutputDirs, taskWithOutputs.Outputs()...)
+			}
+		}
+
 		for _, f := range r.Files() {
 			if seen[f.Path] {
 				continue
@@ -107,6 +114,14 @@ func FindGeneratedFiles(repoRoot string, scopes []*tasks.TaskContext) ([]*source
 			}
 			if !ignored && errScope == nil && scopeIgnoreList.ShouldIgnore(filepath.ToSlash(relToScope), false) {
 				ignored = true
+			}
+			if !ignored {
+				for _, outputDirectory := range pluginOutputDirs {
+					if f.Path == outputDirectory || strings.HasPrefix(f.Path, outputDirectory+string(filepath.Separator)) {
+						ignored = true
+						break
+					}
+				}
 			}
 
 			if !ignored {
@@ -262,7 +277,7 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext
 			}
 			fmt.Printf("  - %s\n", filepath.ToSlash(rel))
 		}
-		return tasks.Run(ctx, tasks.NewTaskContext(repoRoot, repoRoot, r), allTasks, tasks.RunOptions{DryRun: true})
+		return tasks.Run(ctx, tasks.NewTaskContext(repoRoot, repoRoot, r).WithVerify(true), allTasks, tasks.RunOptions{DryRun: true})
 	}
 
 	// Perturb each generated file that exists on disk, recording pre-run hash and mtime
@@ -349,7 +364,7 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext
 	}()
 
 	// Run generation tasks
-	runErr := tasks.Run(ctx, tasks.NewTaskContext(repoRoot, repoRoot, r), allTasks, tasks.RunOptions{DryRun: false})
+	runErr := tasks.Run(ctx, tasks.NewTaskContext(repoRoot, repoRoot, r).WithVerify(true), allTasks, tasks.RunOptions{DryRun: false})
 	if runErr != nil {
 		findings = append(findings, fmt.Sprintf("generation tasks failed: %v", runErr))
 	}

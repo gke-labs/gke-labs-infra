@@ -241,6 +241,7 @@ type ContainerTask struct {
 var (
 	_ tasks.Task    = (*ContainerTask)(nil)
 	_ tasks.Sourced = (*ContainerTask)(nil)
+	_ tasks.Outputs = (*ContainerTask)(nil)
 )
 
 // GetName returns the hyphenated task name `<plugin>-<task>`, suffixed by the activating directory.
@@ -260,6 +261,18 @@ func (task *ContainerTask) GetChildren() []tasks.Task {
 // SourcePath returns the activated directory path for task filtering.
 func (task *ContainerTask) SourcePath() string {
 	return task.Dir
+}
+
+// Outputs returns the paths this task generates as absolute paths.
+// Implements tasks.Outputs.
+func (task *ContainerTask) Outputs() []string {
+	var absolutePaths []string
+	for _, output := range task.TaskMetadata.Outputs {
+		if output != "." && output != "" {
+			absolutePaths = append(absolutePaths, filepath.Clean(filepath.Join(task.Dir, output)))
+		}
+	}
+	return absolutePaths
 }
 
 // Run executes the task in a container sandbox.
@@ -352,6 +365,10 @@ func (task *ContainerTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 		return fmt.Errorf("copying output from container %s: %w (%s)", containerID, err, strings.TrimSpace(string(copyOutOutput)))
 	}
 
+	if scope.Verify() {
+		return verifyStagedOutputs(ctx, task.Dir, stagingDirectory, task.TaskMetadata.Outputs, task, scope.Stderr())
+	}
+
 	return placeStagedOutputs(task.Dir, stagingDirectory, task.TaskMetadata.Outputs, scope.SourceTree())
 }
 
@@ -441,4 +458,97 @@ func placeStagedOutputs(targetDirectory, stagingDirectory string, outputs []stri
 		return fmt.Errorf("invalidating source tree: %w", invalidateErr)
 	}
 	return nil
+}
+
+func isCoLocated(outputs []string) bool {
+	return len(outputs) == 1 && (outputs[0] == "." || filepath.Clean(outputs[0]) == ".")
+}
+
+func verifyStagedOutputs(ctx context.Context, targetDirectory, stagingDirectory string, outputs []string, task *ContainerTask, outputWriter io.Writer) error {
+	var stagedFiles []string
+	if walkError := fileutils.WalkStagedOutputs(stagingDirectory, outputs, func(path string, info os.FileInfo, stagingRoot *os.Root) error {
+		stagedFiles = append(stagedFiles, path)
+		return nil
+	}); walkError != nil {
+		return walkError
+	}
+
+	var diffOutputs [][]byte
+
+	if isCoLocated(outputs) {
+		for _, relativePath := range stagedFiles {
+			checkoutPath := filepath.Join(targetDirectory, relativePath)
+			if _, statError := os.Stat(checkoutPath); os.IsNotExist(statError) {
+				checkoutPath = "/dev/null"
+			}
+			stagedPath := filepath.Join(stagingDirectory, relativePath)
+			diffOutput, hasDiff, err := gitDiff(ctx, checkoutPath, stagedPath)
+			if err != nil {
+				return err
+			}
+			if hasDiff {
+				diffOutputs = append(diffOutputs, diffOutput)
+			}
+		}
+	} else {
+		for _, outputEntry := range outputs {
+			cleanEntry := filepath.Clean(outputEntry)
+			checkoutPath := filepath.Join(targetDirectory, cleanEntry)
+			var cleanupDirectory string
+			if _, statError := os.Stat(checkoutPath); os.IsNotExist(statError) {
+				emptyDirectory, err := os.MkdirTemp("", "ap-empty-*")
+				if err != nil {
+					return fmt.Errorf("creating empty directory for diff: %w", err)
+				}
+				cleanupDirectory = emptyDirectory
+				checkoutPath = emptyDirectory
+			}
+			stagedPath := filepath.Join(stagingDirectory, cleanEntry)
+			diffOutput, hasDiff, err := gitDiff(ctx, checkoutPath, stagedPath)
+			if cleanupDirectory != "" {
+				if removeErr := os.RemoveAll(cleanupDirectory); removeErr != nil && !os.IsNotExist(removeErr) {
+					scoped.Log(ctx).V(2).Info("failed to remove temporary directory", "dir", cleanupDirectory, "error", removeErr)
+				}
+			}
+			if err != nil {
+				return err
+			}
+			if hasDiff {
+				diffOutputs = append(diffOutputs, diffOutput)
+			}
+		}
+	}
+
+	if len(diffOutputs) > 0 {
+		for _, diffOutput := range diffOutputs {
+			if _, writeError := outputWriter.Write(diffOutput); writeError != nil {
+				return fmt.Errorf("writing diff: %w", writeError)
+			}
+		}
+		return fmt.Errorf("plugin %q task %q outputs differ from checkout; run 'ap generate' to update", task.PluginName, task.TaskMetadata.Name)
+	}
+
+	return nil
+}
+
+func gitDiff(ctx context.Context, leftPath, rightPath string) ([]byte, bool, error) {
+	command := exec.CommandContext(ctx, "git", "--no-pager", "diff", "--no-index", "--no-color", leftPath, rightPath)
+	var environment []string
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "GIT_CONFIG_") {
+			environment = append(environment, entry)
+		}
+	}
+	environment = append(environment, "GIT_CONFIG_GLOBAL=", "GIT_CONFIG_NOSYSTEM=1")
+	command.Env = environment
+
+	outputBytes, err := command.CombinedOutput()
+	if err == nil {
+		return nil, false, nil
+	}
+	var exitError *exec.ExitError
+	if errors.As(err, &exitError) && exitError.ExitCode() == 1 {
+		return outputBytes, true, nil
+	}
+	return outputBytes, false, fmt.Errorf("running git diff: %w (%s)", err, strings.TrimSpace(string(outputBytes)))
 }

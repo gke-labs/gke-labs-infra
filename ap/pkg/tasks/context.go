@@ -51,6 +51,7 @@ type TaskContext struct {
 	stdout       io.Writer
 	stderr       io.Writer
 	printOutput  bool
+	verify       bool
 	artifactsDir string
 	taskDir      string
 	taskLogFile  string
@@ -142,6 +143,18 @@ func (s *TaskContext) PrintOutput() bool {
 func (s *TaskContext) WithPrintOutput(printOutput bool) *TaskContext {
 	clone := *s
 	clone.printOutput = printOutput
+	return &clone
+}
+
+// Verify returns whether tasks should execute in verification mode.
+func (s *TaskContext) Verify() bool {
+	return s.verify
+}
+
+// WithVerify returns a shallow copy of the task context with the given verify setting.
+func (s *TaskContext) WithVerify(verify bool) *TaskContext {
+	clone := *s
+	clone.verify = verify
 	return &clone
 }
 
