@@ -31,37 +31,22 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
 func buildPluginImage(ctx context.Context, scope *tasks.TaskContext, pluginName, dockerfilePath string) (string, error) {
-	buildxPath, err := scope.Tool(ctx, "docker-buildx")
-	if err != nil {
-		return "", fmt.Errorf("plugin %q requires a container runtime (docker-buildx): %w", pluginName, err)
+	task := &images.DockerBuildTask{
+		ImageName:  pluginName,
+		Dockerfile: dockerfilePath,
+		Root:       scope.RepoRoot(),
 	}
-
-	temporaryDirectory, err := os.MkdirTemp("", "ap-plugin-build-*")
-	if err != nil {
-		return "", fmt.Errorf("creating temporary directory for plugin %q: %w", pluginName, err)
-	}
-	defer func() {
-		if removeErr := os.RemoveAll(temporaryDirectory); removeErr != nil && !os.IsNotExist(removeErr) {
-			scoped.Log(ctx).V(2).Info("failed to remove temporary directory", "directory", temporaryDirectory, "error", removeErr)
-		}
-	}()
-
-	imageIDFile := filepath.Join(temporaryDirectory, "iid")
-	command := exec.CommandContext(ctx, buildxPath, "build", "--load", "--iidfile", imageIDFile, "-f", dockerfilePath, ".")
-	command.Dir = scope.RepoRoot()
-	command.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(buildxPath))
 
 	var outputBuffer bytes.Buffer
-	command.Stdout = &outputBuffer
-	command.Stderr = &outputBuffer
-
-	if err := command.Run(); err != nil {
+	taskScope := scope.WithOutput(&outputBuffer, &outputBuffer)
+	if err := task.Run(ctx, taskScope); err != nil {
 		buildOutput := strings.TrimSpace(outputBuffer.String())
 		if buildOutput != "" {
 			return "", fmt.Errorf("building plugin %q with Dockerfile %s: %w\n%s", pluginName, dockerfilePath, err, buildOutput)
@@ -69,15 +54,10 @@ func buildPluginImage(ctx context.Context, scope *tasks.TaskContext, pluginName,
 		return "", fmt.Errorf("building plugin %q with Dockerfile %s: %w", pluginName, dockerfilePath, err)
 	}
 
-	imageIDBytes, err := os.ReadFile(imageIDFile)
-	if err != nil {
-		return "", fmt.Errorf("reading image ID for plugin %q (Dockerfile %s): %w", pluginName, dockerfilePath, err)
-	}
-	imageID := strings.TrimSpace(string(imageIDBytes))
-	if imageID == "" {
+	if task.BuiltImageID == "" {
 		return "", fmt.Errorf("empty image ID for plugin %q (Dockerfile %s)", pluginName, dockerfilePath)
 	}
-	return imageID, nil
+	return task.BuiltImageID, nil
 }
 
 // DescribeContainer runs `<image> describe` in a container on cold runs and caches the manifest.

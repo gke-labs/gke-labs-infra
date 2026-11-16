@@ -552,12 +552,16 @@ platforms:
 		t.Fatalf("unexpected error running task: %v", err)
 	}
 
-	if len(calls) != 1 || calls[0].name != "buildctl" {
-		t.Errorf("expected buildctl command, got %v", calls)
+	if len(calls) != 2 || calls[0].name != "buildctl" || calls[1].name != "docker" {
+		t.Errorf("expected buildctl and docker load commands, got %v", calls)
 	} else {
 		argsStr := strings.Join(calls[0].args, " ")
 		if !strings.Contains(argsStr, "--opt platform=linux/amd64") {
 			t.Errorf("expected '--opt platform=linux/amd64' in buildctl args, got: %s", argsStr)
+		}
+		loadArgsStr := strings.Join(calls[1].args, " ")
+		if !strings.Contains(loadArgsStr, "load -i") {
+			t.Errorf("expected 'load -i' in docker args, got: %s", loadArgsStr)
 		}
 	}
 

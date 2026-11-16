@@ -338,7 +338,7 @@ plugins:
 
 - `plugins`: Map of plugin names to declarations.
 - `image`: Remote container image pinned immutably by digest (`<repo>@sha256:...`). Either `image` or `dockerfile` must be specified, but not both.
-- `dockerfile`: Path relative to the repository root to a Dockerfile built automatically before discovery using the repository root as the build context. Either `image` or `dockerfile` must be specified, but not both.
+- `dockerfile`: Path relative to the repository root to a Dockerfile built automatically before discovery using the repository root as the build context. Plugin images built from a Dockerfile follow the same builder settings as other images (local Docker buildx or remote BuildKit via `BUILDKIT_HOST` or `--buildkit-host`). Either `image` or `dockerfile` must be specified, but not both.
 - `network`: Boolean flag (default `false`). When `true`, authorizes network access for the plugin if the plugin also declares that it requires network access.
 - `enabled`: Optional boolean flag. When `false`, disables the plugin (useful in subtree `.ap/plugins.yaml` overrides).
 
