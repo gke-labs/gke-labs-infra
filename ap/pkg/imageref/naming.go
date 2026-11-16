@@ -14,7 +14,10 @@
 
 package imageref
 
-import "strings"
+import (
+	"strings"
+	"sync"
+)
 
 // ImageRef represents a reference to an image with prefix, name, tag, and optional digest.
 // Tag is never empty ("latest" when unset).
@@ -68,7 +71,30 @@ type ImageNaming struct {
 	Tag       string
 	InCluster bool
 	KindMode  bool
-	refs      map[string]*ImageRef
+	refs      *imageReferences
+}
+
+type imageReferences struct {
+	mutex sync.Mutex
+	refs  map[string]*ImageRef
+}
+
+func (r *imageReferences) lookupOrCreate(name, prefix, tag string) *ImageRef {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	if ref, ok := r.refs[name]; ok {
+		return ref
+	}
+	if tag == "" {
+		tag = "latest"
+	}
+	ref := &ImageRef{
+		Prefix: prefix,
+		Name:   name,
+		Tag:    tag,
+	}
+	r.refs[name] = ref
+	return ref
 }
 
 // NewImageNaming creates an ImageNaming value with an initialized references map.
@@ -83,14 +109,18 @@ func NewImageNaming(prefix, tag string, inCluster bool) ImageNaming {
 		Prefix:    prefix,
 		Tag:       tag,
 		InCluster: inCluster,
-		refs:      make(map[string]*ImageRef),
+		refs: &imageReferences{
+			refs: make(map[string]*ImageRef),
+		},
 	}
 }
 
 // WithRefs returns a copy of ImageNaming with an initialized references map.
 func (n ImageNaming) WithRefs() ImageNaming {
 	if n.refs == nil {
-		n.refs = make(map[string]*ImageRef)
+		n.refs = &imageReferences{
+			refs: make(map[string]*ImageRef),
+		}
 	}
 	return n
 }
@@ -98,23 +128,17 @@ func (n ImageNaming) WithRefs() ImageNaming {
 // Ref returns an ImageRef for the given image name.
 func (n ImageNaming) Ref(name string) *ImageRef {
 	if n.refs != nil {
-		if ref, ok := n.refs[name]; ok {
-			return ref
-		}
+		return n.refs.lookupOrCreate(name, n.Prefix, n.Tag)
 	}
 	tag := n.Tag
 	if tag == "" {
 		tag = "latest"
 	}
-	ref := &ImageRef{
+	return &ImageRef{
 		Prefix: n.Prefix,
 		Name:   name,
 		Tag:    tag,
 	}
-	if n.refs != nil {
-		n.refs[name] = ref
-	}
-	return ref
 }
 
 // PushPrefix returns the registry prefix to use when pushing images.

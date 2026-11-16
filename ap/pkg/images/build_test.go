@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -980,4 +981,72 @@ echo "$BUILDKIT_HOST" > "%s/host-$$-$(date +%%s%%N)"
 		}
 		seenPorts[port] = true
 	}
+}
+
+func TestDockerBuildTask_ConcurrentRef(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	origExec := execCommandContext
+	defer func() { execCommandContext = origExec }()
+
+	barrier := make(chan struct{})
+	var entered sync.WaitGroup
+	entered.Add(2)
+
+	execCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		for i, arg := range args {
+			if arg == "--metadata-file" && i+1 < len(args) {
+				metaFile := args[i+1]
+				_ = os.WriteFile(metaFile, []byte(`{"containerimage.digest":"sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}`), 0644)
+			}
+		}
+		entered.Done()
+		<-barrier
+		return exec.CommandContext(ctx, "true")
+	}
+
+	naming := ResolveImageNaming(nil)
+
+	task1 := &DockerBuildTask{
+		ImageName:  "img-1",
+		Dockerfile: "images/img-1/Dockerfile",
+		Root:       tmpDir,
+		Naming:     naming,
+		BuildxBin:  "/mock/bin/docker-buildx",
+		DockerBin:  "/mock/bin/docker",
+	}
+
+	task2 := &DockerBuildTask{
+		ImageName:  "img-2",
+		Dockerfile: "images/img-2/Dockerfile",
+		Root:       tmpDir,
+		Naming:     naming,
+		BuildxBin:  "/mock/bin/docker-buildx",
+		DockerBin:  "/mock/bin/docker",
+	}
+
+	r, err := sourcetree.Open(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := tasks.NewTaskContext(tmpDir, tmpDir, r)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		if err := task1.Run(t.Context(), scope); err != nil {
+			t.Errorf("task1 failed: %v", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if err := task2.Run(t.Context(), scope); err != nil {
+			t.Errorf("task2 failed: %v", err)
+		}
+	}()
+
+	entered.Wait()
+	close(barrier)
+	wg.Wait()
 }
