@@ -86,7 +86,7 @@ message TaskResult {
 ```
 
 - **File Transmission Limits & Semantics**: `FileChunk` carries only regular file content.
-  - *Symlinks*: Symlinks in the repository view cannot be represented directly as symlinks in `FileChunk`; their target files are dereferenced and transmitted as regular file content. Output files cannot be symlinks (attempted symlinks in output streams are rejected by `fileutils.UntrustedRoot`).
+  - *Symlinks*: Symlinks cannot be represented directly as symlinks in `FileChunk`. Resolution happens through an `os.Root` on the repository, as output placement does. A symlink whose target resolves to a file inside the repository view is sent as that file's content; a symlink that resolves outside the view, or to a path the view ignores, or that is dangling, is not followed, and `ap` fails the task with an error naming the link. Output files produced by the plugin cannot be symlinks (attempted symlinks in output streams are rejected by `fileutils.UntrustedRoot`).
   - *Empty Directories*: Empty directories are not transmitted; directories are created implicitly on the receiving side from file path hierarchies.
   - *File Modes*: When writing output files, `ap` applies only the permission bits of `mode` (`os.FileMode(mode).Perm()`), preserving executable flags (`0755` vs `0644`) while discarding setuid/setgid/sticky bits.
 - **Two Failure Modes**:
