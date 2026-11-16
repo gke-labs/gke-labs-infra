@@ -348,7 +348,7 @@ Plugins declare their activation patterns as repository-relative paths (e.g. `**
 
 #### Astro Plugin
 
-The Astro plugin builds static documentation sites (including Astro with Starlight) in an isolated container without requiring Node.js on the host. It activates automatically in each directory containing an Astro config matching `**/astro.config.*` and runs during `ap build`, outputting the built site to `dist/` under that directory.
+The Astro plugin builds static documentation sites (including Astro with Starlight) in an isolated container without requiring Node.js on the host. It activates automatically in each directory containing an Astro config matching `**/astro.config.*` and runs during `ap build`, outputting the built site to `dist/` under that directory. Note: The Astro plugin has not been moved to the gRPC contract yet.
 
 Example `.ap/plugins.yaml`:
 ```yaml

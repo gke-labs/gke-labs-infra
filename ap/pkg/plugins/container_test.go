@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/plugins"
@@ -647,6 +648,167 @@ func TestSymlinkRuleInRepositoryView(t *testing.T) {
 	}
 	if len(receivedFiles) != 1 {
 		t.Fatalf("expected 1 received file through symlink, got %d", len(receivedFiles))
+	}
+}
+
+func TestRunTask_DanglingSymlink(t *testing.T) {
+	repoRoot := t.TempDir()
+
+	realFile := filepath.Join(repoRoot, "real.txt")
+	if err := os.WriteFile(realFile, []byte("real content\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	danglingLink := filepath.Join(repoRoot, "dangling.txt")
+	if err := os.Symlink("missing.txt", danglingLink); err != nil {
+		t.Fatal(err)
+	}
+
+	tree, err := sourcetree.Open(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	scope := tasks.NewTaskContext(repoRoot, repoRoot, tree)
+
+	testPlugin := sdk.Plugin{
+		Name: "linkplugin",
+		Tasks: []sdk.Task{
+			{
+				Name: "check-link",
+				Verb: "test",
+				Run: func(ctx context.Context, taskContext sdk.TaskContext) error {
+					return nil
+				},
+			},
+		},
+	}
+
+	starter := setupTestPluginStarter(t, testPlugin)
+
+	declaration := config.PluginDeclaration{Image: "example.com/mock@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}
+	manifest := &plugins.PluginManifest{
+		Name:  "linkplugin",
+		Tasks: []plugins.TaskMetadata{{Name: "check-link", Verb: "test"}},
+	}
+
+	task := &plugins.ContainerTask{
+		PluginName:        "linkplugin",
+		TaskMetadata:      manifest.Tasks[0],
+		Declaration:       declaration,
+		ImageRef:          declaration.Image,
+		Manifest:          manifest,
+		Dir:               repoRoot,
+		RelativeDirectory: ".",
+		RepoRoot:          repoRoot,
+		Starter:           starter,
+	}
+
+	testContext, cancelTest := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancelTest()
+
+	err = task.Run(testContext, scope)
+	if err == nil {
+		t.Fatal("expected error for dangling symlink, got nil")
+	}
+	if !strings.Contains(err.Error(), "dangling.txt") {
+		t.Errorf("expected error naming 'dangling.txt', got: %v", err)
+	}
+}
+
+func TestRunTask_SymlinkedRepoRoot(t *testing.T) {
+	tempBaseDirectory := t.TempDir()
+	actualParentDirectory := filepath.Join(tempBaseDirectory, "actual-parent")
+	if err := os.MkdirAll(actualParentDirectory, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	symlinkedParentDirectory := filepath.Join(tempBaseDirectory, "symlink-parent")
+	if err := os.Symlink(actualParentDirectory, symlinkedParentDirectory); err != nil {
+		t.Fatal(err)
+	}
+
+	repoRoot := filepath.Join(symlinkedParentDirectory, "repo")
+	if err := os.MkdirAll(repoRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	realFile := filepath.Join(repoRoot, "hello.txt")
+	if err := os.WriteFile(realFile, []byte("hello from actual\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	validLink := filepath.Join(repoRoot, "link.txt")
+	if err := os.Symlink("hello.txt", validLink); err != nil {
+		t.Fatal(err)
+	}
+
+	tree, err := sourcetree.Open(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	scope := tasks.NewTaskContext(repoRoot, repoRoot, tree)
+
+	var receivedFiles []string
+	testPlugin := sdk.Plugin{
+		Name: "symlink-root-plugin",
+		Tasks: []sdk.Task{
+			{
+				Name:    "read-files",
+				Verb:    "build",
+				Outputs: []string{"output.txt"},
+				Run: func(ctx context.Context, taskContext sdk.TaskContext) error {
+					firstData, readError := os.ReadFile(filepath.Join(taskContext.Dir, "hello.txt"))
+					if readError != nil {
+						return readError
+					}
+					secondData, readError := os.ReadFile(filepath.Join(taskContext.Dir, "link.txt"))
+					if readError != nil {
+						return readError
+					}
+					if string(firstData) != "hello from actual\n" || string(secondData) != "hello from actual\n" {
+						return fmt.Errorf("unexpected content: %q, %q", string(firstData), string(secondData))
+					}
+					receivedFiles = append(receivedFiles, "hello.txt", "link.txt")
+					return os.WriteFile(filepath.Join(taskContext.OutputDir, "output.txt"), []byte("success"), 0644)
+				},
+			},
+		},
+	}
+
+	starter := setupTestPluginStarter(t, testPlugin)
+
+	declaration := config.PluginDeclaration{Image: "example.com/mock@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}
+	manifest := &plugins.PluginManifest{
+		Name:  "symlink-root-plugin",
+		Tasks: []plugins.TaskMetadata{{Name: "read-files", Verb: "build", Outputs: []string{"output.txt"}}},
+	}
+
+	task := &plugins.ContainerTask{
+		PluginName:        "symlink-root-plugin",
+		TaskMetadata:      manifest.Tasks[0],
+		Declaration:       declaration,
+		ImageRef:          declaration.Image,
+		Manifest:          manifest,
+		Dir:               repoRoot,
+		RelativeDirectory: ".",
+		RepoRoot:          repoRoot,
+		Starter:           starter,
+	}
+
+	if err := task.Run(t.Context(), scope); err != nil {
+		t.Fatalf("task.Run failed: %v", err)
+	}
+	if len(receivedFiles) != 2 {
+		t.Fatalf("expected 2 received files, got %d", len(receivedFiles))
+	}
+	outputContent, err := os.ReadFile(filepath.Join(repoRoot, "output.txt"))
+	if err != nil {
+		t.Fatalf("reading output: %v", err)
+	}
+	if string(outputContent) != "success" {
+		t.Errorf("output = %q, want 'success'", string(outputContent))
 	}
 }
 

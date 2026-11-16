@@ -394,7 +394,10 @@ func (task *ContainerTask) run(ctx context.Context, scope *tasks.TaskContext) er
 		}
 	}()
 
-	stream, err := client.RunTask(ctx)
+	streamContext, cancelStream := context.WithCancel(ctx)
+	defer cancelStream()
+
+	stream, err := client.RunTask(streamContext)
 	if err != nil {
 		return fmt.Errorf("opening task stream: %w", err)
 	}
@@ -419,14 +422,15 @@ func (task *ContainerTask) run(ctx context.Context, scope *tasks.TaskContext) er
 		}
 	}()
 
-	var taskResult *api.TaskResult
 	receiveDone := make(chan error, 1)
 	go func() {
-		receiveDone <- task.receiveOutputs(stream, stagingRoot, scope, &taskResult)
+		receiveDone <- task.receiveOutputs(stream, stagingRoot, scope)
 	}()
 
-	if sendError := task.sendInputs(ctx, stream, scope); sendError != nil {
-		return errors.Join(sendError, <-receiveDone)
+	if sendError := task.sendInputs(streamContext, stream, scope); sendError != nil {
+		cancelStream()
+		<-receiveDone
+		return sendError
 	}
 
 	if receiveError := <-receiveDone; receiveError != nil {
@@ -464,6 +468,11 @@ func (task *ContainerTask) sendInputs(ctx context.Context, stream api.PluginServ
 		}
 	}()
 
+	resolvedRepositoryRoot, err := filepath.EvalSymlinks(task.RepoRoot)
+	if err != nil {
+		return fmt.Errorf("resolving repository root %s: %w", task.RepoRoot, err)
+	}
+
 	const maximumChunkSize = 1024 * 1024 // 1 MB
 
 	for _, file := range repositoryTree.Files() {
@@ -473,12 +482,32 @@ func (task *ContainerTask) sendInputs(ctx context.Context, stream api.PluginServ
 		}
 		relativeFilePath = filepath.ToSlash(relativeFilePath)
 
+		lstatInfo, err := repositoryRoot.Lstat(relativeFilePath)
+		if err != nil {
+			return fmt.Errorf("stating file %s: %w", relativeFilePath, err)
+		}
+
+		if lstatInfo.Mode()&os.ModeSymlink != 0 {
+			resolvedTarget, err := filepath.EvalSymlinks(file.Path)
+			if err != nil {
+				return fmt.Errorf("resolving symlink %s: %w", relativeFilePath, err)
+			}
+			targetRelativePath, err := filepath.Rel(resolvedRepositoryRoot, resolvedTarget)
+			if err != nil || targetRelativePath == ".." || strings.HasPrefix(targetRelativePath, ".."+string(filepath.Separator)) || filepath.IsAbs(targetRelativePath) {
+				return fmt.Errorf("file %s resolves to %s which is outside the repository view or ignored", relativeFilePath, resolvedTarget)
+			}
+			targetInRepositoryView := filepath.Join(task.RepoRoot, targetRelativePath)
+			if targetFile := repositoryTree.File(targetInRepositoryView); targetFile == nil {
+				return fmt.Errorf("file %s resolves to %s which is outside the repository view or ignored", relativeFilePath, resolvedTarget)
+			}
+		}
+
 		openedFile, err := repositoryRoot.Open(relativeFilePath)
 		if err != nil {
 			return fmt.Errorf("opening file %s: %w", relativeFilePath, err)
 		}
 
-		fileContent, fileMode, err := readFileContentAndMode(openedFile, repositoryTree, file.Path, relativeFilePath)
+		fileContent, fileMode, err := readFileContentAndMode(openedFile, relativeFilePath)
 		if closeError := openedFile.Close(); closeError != nil {
 			scoped.Log(ctx).V(2).Info("failed to close file", "path", relativeFilePath, "error", closeError)
 		}
@@ -531,7 +560,7 @@ func (task *ContainerTask) sendInputs(ctx context.Context, stream api.PluginServ
 	return nil
 }
 
-func readFileContentAndMode(openedFile *os.File, repositoryTree *sourcetree.SourceTree, absoluteFilePath, relativeFilePath string) ([]byte, uint32, error) {
+func readFileContentAndMode(openedFile *os.File, relativeFilePath string) ([]byte, uint32, error) {
 	fileInfo, err := openedFile.Stat()
 	if err != nil {
 		return nil, 0, fmt.Errorf("stating file %s: %w", relativeFilePath, err)
@@ -539,15 +568,6 @@ func readFileContentAndMode(openedFile *os.File, repositoryTree *sourcetree.Sour
 
 	if !fileInfo.Mode().IsRegular() {
 		return nil, 0, fmt.Errorf("file %s is not a regular file", relativeFilePath)
-	}
-
-	resolvedTarget, err := filepath.EvalSymlinks(absoluteFilePath)
-	if err != nil {
-		return nil, 0, fmt.Errorf("resolving symlink %s: %w", relativeFilePath, err)
-	}
-
-	if targetFile := repositoryTree.File(resolvedTarget); targetFile == nil {
-		return nil, 0, fmt.Errorf("file %s resolves to %s which is outside the repository view or ignored", relativeFilePath, resolvedTarget)
 	}
 
 	fileContent, err := io.ReadAll(openedFile)
@@ -558,10 +578,11 @@ func readFileContentAndMode(openedFile *os.File, repositoryTree *sourcetree.Sour
 	return fileContent, uint32(fileInfo.Mode().Perm()), nil
 }
 
-func (task *ContainerTask) receiveOutputs(stream api.PluginService_RunTaskClient, stagingRoot *fileutils.UntrustedRoot, scope *tasks.TaskContext, taskResultOut **api.TaskResult) error {
+func (task *ContainerTask) receiveOutputs(stream api.PluginService_RunTaskClient, stagingRoot *fileutils.UntrustedRoot, scope *tasks.TaskContext) error {
 	var currentFilePath string
 	var currentFileBuffer bytes.Buffer
 	var currentFileMode uint32
+	var taskResult *api.TaskResult
 	const maximumFileSize = 100 * 1024 * 1024 // 100 MB per file limit
 
 	for {
@@ -609,7 +630,7 @@ func (task *ContainerTask) receiveOutputs(stream api.PluginService_RunTaskClient
 				currentFileBuffer.Reset()
 			}
 		case *api.RunTaskResponse_Result:
-			*taskResultOut = payload.Result
+			taskResult = payload.Result
 		}
 	}
 
@@ -617,7 +638,6 @@ func (task *ContainerTask) receiveOutputs(stream api.PluginService_RunTaskClient
 		return fmt.Errorf("stream ended with incomplete chunks for %q", currentFilePath)
 	}
 
-	taskResult := *taskResultOut
 	if taskResult == nil {
 		return fmt.Errorf("plugin exited early without returning a result")
 	}
