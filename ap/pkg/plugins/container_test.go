@@ -253,6 +253,44 @@ func TestOutputPlacement_UntrustedRoot(t *testing.T) {
 			t.Fatal("expected task.Run to fail on escaping output path, got nil")
 		}
 	})
+
+	t.Run("rejects symlink pointing outside staging", func(t *testing.T) {
+		outsideFile := filepath.Join(t.TempDir(), "leak.txt")
+		if err := os.WriteFile(outsideFile, []byte("secret"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		mockOut := filepath.Join(stateDir, "mock-out")
+		_ = os.RemoveAll(mockOut)
+		if err := os.MkdirAll(filepath.Join(mockOut, "dist"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outsideFile, filepath.Join(mockOut, "dist", "leak.txt")); err != nil {
+			t.Fatal(err)
+		}
+
+		manifest := &plugins.PluginManifest{
+			Name:  "mockplugin",
+			Tasks: []plugins.TaskMetadata{{Name: "build", Verb: "build", Outputs: []string{"dist"}}},
+		}
+		task := &plugins.ContainerTask{
+			PluginName:   "mockplugin",
+			TaskMetadata: manifest.Tasks[0],
+			Declaration:  declaration,
+			Manifest:     manifest,
+			Dir:          docsDir,
+			RepoRoot:     repoRoot,
+		}
+
+		if err := task.Run(t.Context(), scope); err == nil {
+			t.Fatal("expected task.Run to fail on symlink in staging, got nil")
+		}
+
+		leakedPath := filepath.Join(docsDir, "dist", "leak.txt")
+		if _, err := os.Stat(leakedPath); !os.IsNotExist(err) {
+			t.Errorf("expected leaked file %s not to exist in checkout", leakedPath)
+		}
+	})
 }
 
 func TestNetworkAuthorization(t *testing.T) {

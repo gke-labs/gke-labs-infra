@@ -338,6 +338,7 @@ func newSourceTree(root, repoRoot string, files []*File, dirs, modules []string,
 		hashIndex:    hashIndex,
 		hashPath:     hashPath,
 	}
+	r.rootTree = r
 	for _, f := range files {
 		f.tree = r
 	}
@@ -385,10 +386,7 @@ func (r *SourceTree) RepoRoot() string {
 
 // RepoTree returns the root view of the repository.
 func (r *SourceTree) RepoTree() *SourceTree {
-	if r.rootTree != nil {
-		return r.rootTree
-	}
-	return r
+	return r.rootTree
 }
 
 // Files returns all files matching the given filters.
@@ -932,11 +930,7 @@ func (r *SourceTree) Under(dir string) *SourceTree {
 	}
 
 	sub := newSourceTree(cleanDir, r.repoRoot, subFiles, subDirs, subModules, r.ignoreList, r.hashIndex, r.hashPath)
-	if r.rootTree != nil {
-		sub.rootTree = r.rootTree
-	} else {
-		sub.rootTree = r
-	}
+	sub.rootTree = r.rootTree
 	return sub
 }
 
