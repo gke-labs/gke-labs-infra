@@ -67,13 +67,6 @@ func (r *RetryableTask) SourcePath() string {
 	return ""
 }
 
-func (r *RetryableTask) TaskDir() string {
-	if d, ok := r.Task.(interface{ TaskDir() string }); ok {
-		return d.TaskDir()
-	}
-	return ""
-}
-
 func (r *RetryableTask) WithChildren(children []Task) Task {
 	if p, ok := r.Task.(Parent); ok {
 		return &RetryableTask{
@@ -197,79 +190,36 @@ func newBufferLogger(writer io.Writer, parent logr.Logger) logr.Logger {
 }
 
 func sanitizePathComponent(name string) string {
-	return strings.Map(func(r rune) rune {
+	s := strings.Map(func(r rune) rune {
 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '-' || r == '_' {
 			return r
 		}
 		return '_'
 	}, name)
+	if s == ".." || s == "" {
+		return "_"
+	}
+	return s
 }
 
 func deriveTaskLogPath(scope *TaskContext, task Task) string {
-	taskDir := ""
-	if d, ok := task.(interface{ TaskDir() string }); ok && d.TaskDir() != "" {
-		taskDir = d.TaskDir()
-	} else if d, ok := task.(interface{ Dir() string }); ok && d.Dir() != "" {
-		taskDir = d.Dir()
-	} else if s, ok := task.(Sourced); ok && s.SourcePath() != "" {
-		taskDir = s.SourcePath()
-		if fi, err := os.Stat(taskDir); err == nil && !fi.IsDir() {
-			taskDir = filepath.Dir(taskDir)
-		}
-	} else if scope != nil {
-		taskDir = scope.Dir()
+	components := []string{scope.artifactsDir, "tasks"}
+	for _, parent := range scope.parents {
+		components = append(components, sanitizePathComponent(parent))
 	}
-
-	root := ""
-	if scope != nil {
-		root = scope.RepoRoot()
-	}
-	if root != "" && filepath.IsAbs(taskDir) {
-		rel, err := filepath.Rel(root, taskDir)
-		if err != nil || strings.HasPrefix(rel, "..") {
-			taskDir = ""
-		} else {
-			taskDir = rel
-		}
-	}
-
-	subdirs := []string{scope.ArtifactsDir(), "tasks"}
-	if taskDir != "" && taskDir != "." {
-		for _, part := range strings.Split(filepath.ToSlash(taskDir), "/") {
-			if part == "" || part == "." {
-				continue
-			}
-			s := sanitizePathComponent(part)
-			if s == ".." {
-				s = "_"
-			}
-			if s != "" {
-				subdirs = append(subdirs, s)
-			}
-		}
-	}
-
-	dir := filepath.Join(subdirs...)
+	dir := filepath.Join(components...)
 	baseName := sanitizePathComponent(task.GetName())
-	if baseName == "" {
-		baseName = "_"
-	}
 
-	state := scope.getRunState()
-	if state == nil {
-		return filepath.Join(dir, baseName+".log")
-	}
-
-	state.mu.Lock()
-	defer state.mu.Unlock()
+	scope.runState.mutex.Lock()
+	defer scope.runState.mutex.Unlock()
 
 	for i := 1; ; i++ {
 		candidate := filepath.Join(dir, baseName+".log")
 		if i > 1 {
 			candidate = filepath.Join(dir, fmt.Sprintf("%s-%d.log", baseName, i))
 		}
-		if !state.usedPaths[candidate] {
-			state.usedPaths[candidate] = true
+		if !scope.runState.usedPaths[candidate] {
+			scope.runState.usedPaths[candidate] = true
 			return candidate
 		}
 	}

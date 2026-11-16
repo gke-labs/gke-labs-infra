@@ -66,6 +66,9 @@ type Group struct {
 }
 
 func (g *Group) Run(ctx context.Context, scope *TaskContext) error {
+	if g.Name != "" {
+		scope = scope.withParent(g.Name)
+	}
 	if !g.Parallel {
 		return g.runSequential(ctx, scope)
 	}

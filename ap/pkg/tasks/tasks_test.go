@@ -874,7 +874,7 @@ func TestTaskOutputArtifacts(t *testing.T) {
 
 	_ = grp.Run(t.Context(), scope)
 
-	tasksDir := filepath.Join(artifactsDir, "tasks")
+	tasksDir := filepath.Join(artifactsDir, "tasks", "artifact-test-group")
 	passLogPath := filepath.Join(tasksDir, "task-pass-leaf.log")
 	passContent, err := os.ReadFile(passLogPath)
 	if err != nil {
@@ -948,65 +948,71 @@ func TestTaskOutputArtifacts_UniquePathsAndHumanName(t *testing.T) {
 	var outBuf syncBuffer
 	scope := NewTaskContext(repoRoot, repoRoot, tree).WithOutput(&outBuf, &outBuf).WithArtifactsDir(artifactsDir)
 
-	taskDiffDir1 := &FuncTask{
-		Name: "go-vet",
-		Dir:  filepath.Join(repoRoot, "ap"),
-		RunFn: func(ctx context.Context, s *TaskContext) error {
-			fmt.Fprintln(s.Stdout(), "output ap")
-			return nil
-		},
+	parentA := &Group{
+		Name: "parent-a",
+		Tasks: []Task{&FuncTask{
+			Name: "go-vet",
+			RunFn: func(ctx context.Context, s *TaskContext) error {
+				fmt.Fprintln(s.Stdout(), "output a")
+				return nil
+			},
+		}},
 	}
-	taskDiffDir2 := &FuncTask{
-		Name: "go-vet",
-		Dir:  filepath.Join(repoRoot, "autodeploy"),
-		RunFn: func(ctx context.Context, s *TaskContext) error {
-			fmt.Fprintln(s.Stdout(), "output autodeploy")
-			return nil
-		},
+	parentB := &Group{
+		Name: "parent-b",
+		Tasks: []Task{&FuncTask{
+			Name: "go-vet",
+			RunFn: func(ctx context.Context, s *TaskContext) error {
+				fmt.Fprintln(s.Stdout(), "output b")
+				return nil
+			},
+		}},
 	}
-	taskSameDir1 := &FuncTask{
+
+	sibling1 := &FuncTask{
 		Name: "build-step",
-		Dir:  filepath.Join(repoRoot, "pkg"),
 		RunFn: func(ctx context.Context, s *TaskContext) error {
 			fmt.Fprintln(s.Stdout(), "step 1")
 			return nil
 		},
 	}
-	taskSameDir2 := &FuncTask{
+	sibling2 := &FuncTask{
 		Name: "build-step",
-		Dir:  filepath.Join(repoRoot, "pkg"),
 		RunFn: func(ctx context.Context, s *TaskContext) error {
 			fmt.Fprintln(s.Stdout(), "step 2")
 			return nil
 		},
 	}
+	parentSiblings := &Group{
+		Name:  "pkg",
+		Tasks: []Task{sibling1, sibling2},
+	}
 
 	grp := &Group{
-		Name:  "test-group",
-		Tasks: []Task{taskDiffDir1, taskDiffDir2, taskSameDir1, taskSameDir2},
+		Tasks: []Task{parentA, parentB, parentSiblings},
 	}
 
 	if err := grp.Run(t.Context(), scope); err != nil {
 		t.Fatalf("grp.Run failed: %v", err)
 	}
 
-	// Two tasks with the same name in different directories produce two files.
-	apPath := filepath.Join(artifactsDir, "tasks", "ap", "go-vet.log")
-	autodeployPath := filepath.Join(artifactsDir, "tasks", "autodeploy", "go-vet.log")
+	// Two tasks with the same leaf name under two different parents produce two files.
+	aPath := filepath.Join(artifactsDir, "tasks", "parent-a", "go-vet.log")
+	bPath := filepath.Join(artifactsDir, "tasks", "parent-b", "go-vet.log")
 
-	apContent, err := os.ReadFile(apPath)
+	aContent, err := os.ReadFile(aPath)
 	if err != nil {
-		t.Fatalf("expected ap log file %s: %v", apPath, err)
+		t.Fatalf("expected parent-a log file %s: %v", aPath, err)
 	}
 	// The file starts with the human name.
-	if !strings.HasPrefix(string(apContent), "go-vet\n") {
-		t.Errorf("expected log to start with human name 'go-vet\n', got: %q", string(apContent))
+	if !strings.HasPrefix(string(aContent), "go-vet\n") {
+		t.Errorf("expected log to start with human name 'go-vet\n', got: %q", string(aContent))
 	}
-	if _, err := os.ReadFile(autodeployPath); err != nil {
-		t.Fatalf("expected autodeploy log file %s: %v", autodeployPath, err)
+	if _, err := os.ReadFile(bPath); err != nil {
+		t.Fatalf("expected parent-b log file %s: %v", bPath, err)
 	}
 
-	// Two tasks with the same name in the same directory produce two files.
+	// Two siblings with the same name produce two files.
 	step1Path := filepath.Join(artifactsDir, "tasks", "pkg", "build-step.log")
 	step2Path := filepath.Join(artifactsDir, "tasks", "pkg", "build-step-2.log")
 

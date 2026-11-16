@@ -61,10 +61,6 @@ func (t *TaskScript) SourcePath() string {
 	return t.Path
 }
 
-func (t *TaskScript) TaskDir() string {
-	return t.Root
-}
-
 var _ Sourced = (*TaskScript)(nil)
 
 type FindOptions struct {

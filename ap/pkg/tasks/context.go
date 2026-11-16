@@ -28,14 +28,13 @@ import (
 )
 
 type runState struct {
-	mu        sync.Mutex
+	mutex     sync.Mutex
 	usedPaths map[string]bool
 }
 
 var (
 	toolResolveMu      sync.Mutex
 	scriptEnvResolveMu sync.Mutex
-	runStateMu         sync.Mutex
 )
 
 // TaskContext represents the context for an ap root directory.
@@ -53,6 +52,7 @@ type TaskContext struct {
 	printOutput  bool
 	artifactsDir string
 	runState     *runState
+	parents      []string
 
 	// tools holds memoized resolved tool binary paths keyed by tool name.
 	tools map[string]string
@@ -85,16 +85,10 @@ func NewTaskContext(repoRoot, dir string, tree *sourcetree.SourceTree) *TaskCont
 	}
 }
 
-func (s *TaskContext) getRunState() *runState {
-	if s == nil {
-		return nil
-	}
-	runStateMu.Lock()
-	defer runStateMu.Unlock()
-	if s.runState == nil {
-		s.runState = &runState{usedPaths: make(map[string]bool)}
-	}
-	return s.runState
+func (s *TaskContext) withParent(name string) *TaskContext {
+	clone := *s
+	clone.parents = append(append([]string(nil), s.parents...), name)
+	return &clone
 }
 
 // RepoRoot returns the repository root directory.
