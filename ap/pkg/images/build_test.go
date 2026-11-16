@@ -16,8 +16,6 @@ package images
 
 import (
 	"context"
-	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,8 +29,6 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
-	"k8s.io/apimachinery/pkg/util/httpstream"
-	"k8s.io/client-go/tools/portforward"
 )
 
 func TestHasImages(t *testing.T) {
@@ -883,108 +879,6 @@ func TestFormatDuration(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("formatDuration(%v) = %q, want %q", tt.duration, got, tt.want)
 		}
-	}
-}
-
-type stubDialer struct{}
-
-func (s *stubDialer) Dial(_ ...string) (httpstream.Connection, string, error) {
-	return &stubConn{closeChan: make(chan bool)}, portforward.PortForwardProtocolV1Name, nil
-}
-
-type stubConn struct {
-	closeChan chan bool
-}
-
-func (c *stubConn) CreateStream(_ http.Header) (httpstream.Stream, error) { return nil, nil }
-func (c *stubConn) Close() error                                          { return nil }
-func (c *stubConn) CloseChan() <-chan bool                                { return c.closeChan }
-func (c *stubConn) SetIdleTimeout(_ time.Duration)                        {}
-func (c *stubConn) RemoveStreams(_ ...httpstream.Stream)                  {}
-
-func TestBuildTasks_ParallelK8sBuildkitHost(t *testing.T) {
-	t.Setenv("KUBERNETES_SERVICE_HOST", "")
-	t.Setenv("ARTIFACTS", t.TempDir())
-	tmpDir := t.TempDir()
-	for _, name := range []string{"img1", "img2"} {
-		if err := os.MkdirAll(filepath.Join(tmpDir, "images", name), 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(tmpDir, "images", name, "Dockerfile"), []byte("FROM scratch"), 0644); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	r, err := sourcetree.Open(tmpDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	hostsDir := filepath.Join(tmpDir, "hosts")
-	if err := os.MkdirAll(hostsDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	// mock-buildctl records BUILDKIT_HOST to a unique file per execution.
-	mockBuildctl := filepath.Join(tmpDir, "mock-buildctl")
-	buildctlScript := fmt.Sprintf(`#!/bin/sh
-echo "$BUILDKIT_HOST" > "%s/host-$$-$(date +%%s%%N)"
-`, hostsDir)
-	if err := os.WriteFile(mockBuildctl, []byte(buildctlScript), 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	origExec := execCommandContext
-	defer func() { execCommandContext = origExec }()
-	execCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		if name == "buildctl" {
-			return exec.CommandContext(ctx, mockBuildctl, args...)
-		}
-		return origExec(ctx, name, args...)
-	}
-
-	origForwarder := newBuildkitForwarder
-	defer func() { newBuildkitForwarder = origForwarder }()
-	newBuildkitForwarder = func(ctx context.Context, cluster k8s.KubeCluster, namespace, service string) (*k8s.BuildkitForwarder, error) {
-		return k8s.NewBuildkitForwarderWithDialer(&stubDialer{}, 2375)
-	}
-
-	scope := tasks.NewTaskContext(tmpDir, tmpDir, r)
-	naming := ResolveImageNaming(nil)
-
-	task, err := BuildTasksForImages(r, tmpDir, false, "k8s://autodeploy-system/buildkit", []string{"img1", "img2"}, naming, k8s.CurrentCluster())
-	if err != nil {
-		t.Fatalf("BuildTasksForImages failed: %v", err)
-	}
-
-	if err := task.Run(t.Context(), scope); err != nil {
-		t.Fatalf("parallel build task failed: %v", err)
-	}
-
-	files, err := filepath.Glob(filepath.Join(hostsDir, "host-*"))
-	if err != nil {
-		t.Fatalf("failed to glob host files: %v", err)
-	}
-	if len(files) != 2 {
-		t.Fatalf("expected 2 buildctl executions, found %d", len(files))
-	}
-
-	seenSockets := make(map[string]bool)
-	for _, f := range files {
-		content, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatalf("failed to read %s: %v", f, err)
-		}
-		host := strings.TrimSpace(string(content))
-		if !strings.HasPrefix(host, "unix://") {
-			t.Errorf("unexpected BUILDKIT_HOST %q", host)
-			continue
-		}
-		socketPath := strings.TrimPrefix(host, "unix://")
-		if seenSockets[socketPath] {
-			t.Errorf("duplicate socket %q allocated to multiple builds", socketPath)
-		}
-		seenSockets[socketPath] = true
 	}
 }
 

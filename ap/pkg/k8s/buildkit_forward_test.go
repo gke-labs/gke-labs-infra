@@ -95,15 +95,24 @@ func TestBuildkitForwarder(t *testing.T) {
 		},
 	}
 
-	forwarder, err := NewBuildkitForwarderWithDialer(dialer, 2375)
+	forwarder, err := newBuildkitForwarderWithDialer(t.Context(), dialer, 2375)
 	if err != nil {
-		t.Fatalf("NewBuildkitForwarderWithDialer failed: %v", err)
+		t.Fatalf("newBuildkitForwarderWithDialer failed: %v", err)
 	}
 	defer func() {
 		if err := forwarder.Close(); err != nil {
 			t.Errorf("forwarder.Close failed: %v", err)
 		}
 	}()
+
+	socketDirectory := forwarder.socketDirectory
+	info, err := os.Stat(socketDirectory)
+	if err != nil {
+		t.Fatalf("failed to stat socket directory: %v", err)
+	}
+	if info.Mode().Perm() != 0700 {
+		t.Errorf("expected socket directory mode 0700, got %04o", info.Mode().Perm())
+	}
 
 	clientConn, err := net.Dial("unix", forwarder.SocketPath())
 	if err != nil {
@@ -137,7 +146,6 @@ func TestBuildkitForwarder(t *testing.T) {
 		t.Fatalf("got %q, want %q", receivedReply, wantReply)
 	}
 
-	socketDirectory := forwarder.socketDirectory
 	if err := clientConn.Close(); err != nil {
 		t.Fatalf("client close failed: %v", err)
 	}

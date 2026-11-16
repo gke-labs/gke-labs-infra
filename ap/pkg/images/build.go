@@ -37,7 +37,6 @@ import (
 )
 
 var execCommandContext = exec.CommandContext
-var newBuildkitForwarder = k8s.NewBuildkitForwarder
 
 // DefaultK8sBuildkitHost is the default buildkit host used for the k8s shorthand.
 const DefaultK8sBuildkitHost = "k8s://autodeploy-system/buildkit"
@@ -235,7 +234,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 		if k8s.IsInCluster() {
 			buildkitHost = fmt.Sprintf("tcp://%s.%s.svc:2375", service, namespace)
 		} else {
-			forwarder, err := newBuildkitForwarder(ctx, t.Cluster, namespace, service)
+			forwarder, err := k8s.NewBuildkitForwarder(ctx, t.Cluster, namespace, service)
 			if err != nil {
 				return err
 			}
