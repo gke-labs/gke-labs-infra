@@ -64,17 +64,18 @@ case "$1" in
       exit 42
     fi
     echo "$*" > "$STATE_DIR/build-args"
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        --iidfile)
-          echo "sha256:fake-built-image-1234" > "$2"
-          shift 2
-          ;;
-        *)
-          shift
-          ;;
-      esac
-    done
+    ;;
+  load)
+    echo "$*" > "$STATE_DIR/load-args"
+    ;;
+  image)
+    if [ "$2" = "inspect" ]; then
+      if [ -f "$STATE_DIR/buildctl-args" ]; then
+        echo "sha256:fake-buildctl-image-5678"
+      else
+        echo "sha256:fake-built-image-1234"
+      fi
+    fi
     ;;
   rm)
     touch "$STATE_DIR/container-removed"
@@ -101,6 +102,37 @@ esac
 	}
 	fakeBuildxPath := filepath.Join(fakeBinDir, "docker-buildx")
 	if err := os.WriteFile(fakeBuildxPath, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	buildctlScript := fmt.Sprintf(`#!/bin/sh
+STATE_DIR=%q
+
+if [ -f "$STATE_DIR/fail-buildctl" ]; then
+  echo "simulated buildctl failure" >&2
+  exit 42
+fi
+
+echo "$*" > "$STATE_DIR/buildctl-args"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --metadata-file)
+      cat > "$2" <<'EOF'
+{
+  "containerimage.digest": "sha256:fake-buildctl-image-5678"
+}
+EOF
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+`, stateDir)
+
+	fakeBuildctlPath := filepath.Join(fakeBinDir, "buildctl")
+	if err := os.WriteFile(fakeBuildctlPath, []byte(buildctlScript), 0755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -424,7 +456,7 @@ plugins:
 	scope := tasks.NewTaskContext(repoRoot, repoRoot, tree).WithTool("docker", fakeDockerPath).WithTool("docker-buildx", fakeBuildxPath)
 
 	t.Run("build invoked with expected arguments and image ID becomes cache key", func(t *testing.T) {
-		loadedPlugins, err := plugins.LoadContainerPlugins(t.Context(), scope, cacheDirectory)
+		loadedPlugins, err := plugins.LoadContainerPlugins(t.Context(), scope, cacheDirectory, "")
 		if err != nil {
 			t.Fatalf("LoadContainerPlugins failed: %v", err)
 		}
@@ -454,11 +486,11 @@ plugins:
 		if !strings.Contains(buildArgs, "-f images/mock/Dockerfile") {
 			t.Errorf("expected -f images/mock/Dockerfile in args, got: %s", buildArgs)
 		}
+		if !strings.Contains(buildArgs, "-t ap-plugin/mockplugin:latest") {
+			t.Errorf("expected -t ap-plugin/mockplugin:latest in args, got: %s", buildArgs)
+		}
 		if !strings.Contains(buildArgs, "--load") {
 			t.Errorf("expected --load in args, got: %s", buildArgs)
-		}
-		if !strings.Contains(buildArgs, "--iidfile") {
-			t.Errorf("expected --iidfile in args, got: %s", buildArgs)
 		}
 		if !strings.HasSuffix(strings.TrimSpace(buildArgs), ".") {
 			t.Errorf("expected build context . at end of args, got: %s", buildArgs)
@@ -470,12 +502,60 @@ plugins:
 		}
 	})
 
+	t.Run("with buildkit host set build goes to buildctl and result is loaded", func(t *testing.T) {
+		buildkitCacheDirectory := t.TempDir()
+		loadedPlugins, err := plugins.LoadContainerPlugins(t.Context(), scope, buildkitCacheDirectory, "tcp://127.0.0.1:2375")
+		if err != nil {
+			t.Fatalf("LoadContainerPlugins failed: %v", err)
+		}
+		if len(loadedPlugins) != 1 {
+			t.Fatalf("expected 1 plugin, got %d", len(loadedPlugins))
+		}
+
+		containerPlugin, ok := loadedPlugins[0].(*plugins.ContainerPlugin)
+		if !ok {
+			t.Fatalf("expected *plugins.ContainerPlugin, got %T", loadedPlugins[0])
+		}
+		if containerPlugin.ImageRef != "sha256:fake-buildctl-image-5678" {
+			t.Errorf("expected ImageRef %q, got %q", "sha256:fake-buildctl-image-5678", containerPlugin.ImageRef)
+		}
+
+		buildctlArgsData, err := os.ReadFile(filepath.Join(stateDir, "buildctl-args"))
+		if err != nil {
+			t.Fatalf("reading buildctl args: %v", err)
+		}
+		buildctlArgs := string(buildctlArgsData)
+		if !strings.HasPrefix(buildctlArgs, "build ") {
+			t.Errorf("expected buildctl build command, got: %s", buildctlArgs)
+		}
+		if !strings.Contains(buildctlArgs, "--opt filename=images/mock/Dockerfile") {
+			t.Errorf("expected filename=images/mock/Dockerfile in args, got: %s", buildctlArgs)
+		}
+		if !strings.Contains(buildctlArgs, "--output type=docker,name=ap-plugin/mockplugin:latest,dest=") {
+			t.Errorf("expected type=docker output in args, got: %s", buildctlArgs)
+		}
+
+		loadArgsData, err := os.ReadFile(filepath.Join(stateDir, "load-args"))
+		if err != nil {
+			t.Fatalf("reading load args: %v", err)
+		}
+		loadArgs := string(loadArgsData)
+		if !strings.Contains(loadArgs, "load -i") {
+			t.Errorf("expected load -i in args, got: %s", loadArgs)
+		}
+
+		cachedFile := filepath.Join(buildkitCacheDirectory, "plugins", "describe", "sha256-fake-buildctl-image-5678.json")
+		if _, err := os.Stat(cachedFile); err != nil {
+			t.Errorf("expected cached manifest at %s: %v", cachedFile, err)
+		}
+	})
+
 	t.Run("failing build is reported", func(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(stateDir, "fail-build"), []byte("fail"), 0644); err != nil {
 			t.Fatal(err)
 		}
 		emptyCacheDirectory := t.TempDir()
-		_, err := plugins.LoadContainerPlugins(t.Context(), scope, emptyCacheDirectory)
+		_, err := plugins.LoadContainerPlugins(t.Context(), scope, emptyCacheDirectory, "")
 		if err == nil {
 			t.Fatal("expected LoadContainerPlugins to fail when build fails")
 		}

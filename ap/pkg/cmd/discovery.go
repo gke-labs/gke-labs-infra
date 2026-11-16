@@ -35,7 +35,7 @@ var builtInPlugins = []plugins.Plugin{
 }
 
 // DiscoverScopes discovers all tasks under the given directory subtree.
-func DiscoverScopes(ctx context.Context, r *sourcetree.SourceTree, repoRoot, dir string) ([]*tasks.TaskContext, error) {
+func DiscoverScopes(ctx context.Context, r *sourcetree.SourceTree, repoRoot, dir, buildkitHost string) ([]*tasks.TaskContext, error) {
 	if dir == "" {
 		dir = repoRoot
 	}
@@ -126,7 +126,7 @@ func DiscoverScopes(ctx context.Context, r *sourcetree.SourceTree, repoRoot, dir
 	if err != nil {
 		return nil, fmt.Errorf("resolving cache directory: %w", err)
 	}
-	containerPlugins, err := plugins.LoadContainerPlugins(ctx, scope, cacheDir)
+	containerPlugins, err := plugins.LoadContainerPlugins(ctx, scope, cacheDir, buildkitHost)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load plugins in %s: %w", repoRoot, err)
 	}

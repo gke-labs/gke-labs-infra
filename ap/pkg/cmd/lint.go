@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 
 	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
 )
@@ -67,7 +68,12 @@ func RunLint(ctx context.Context, opt LintOptions) error {
 		return err
 	}
 
-	scopes, err := DiscoverScopes(ctx, r, opt.RepoRoot, opt.Dir)
+	buildkitHost, err := images.ResolveBuildkitHost("")
+	if err != nil {
+		return err
+	}
+
+	scopes, err := DiscoverScopes(ctx, r, opt.RepoRoot, opt.Dir, buildkitHost)
 	if err != nil {
 		return err
 	}

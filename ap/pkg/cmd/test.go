@@ -21,6 +21,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
 )
@@ -83,7 +84,12 @@ func RunTest(ctx context.Context, opt TestOptions) error {
 		return err
 	}
 
-	scopes, err := DiscoverScopes(ctx, r, opt.RepoRoot, opt.Dir)
+	buildkitHost, err := images.ResolveBuildkitHost("")
+	if err != nil {
+		return err
+	}
+
+	scopes, err := DiscoverScopes(ctx, r, opt.RepoRoot, opt.Dir, buildkitHost)
 	if err != nil {
 		return err
 	}

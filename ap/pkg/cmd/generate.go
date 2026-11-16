@@ -19,6 +19,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/format"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/generate"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
 )
@@ -89,9 +90,14 @@ func RunGenerate(ctx context.Context, opt GenerateOptions) error {
 		return err
 	}
 
+	buildkitHost, err := images.ResolveBuildkitHost("")
+	if err != nil {
+		return err
+	}
+
 	var allTasks []tasks.Task
 
-	scopes, err := DiscoverScopes(ctx, r, opt.RepoRoot, opt.Dir)
+	scopes, err := DiscoverScopes(ctx, r, opt.RepoRoot, opt.Dir, buildkitHost)
 	if err != nil {
 		return err
 	}

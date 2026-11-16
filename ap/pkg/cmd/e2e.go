@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
@@ -63,7 +64,12 @@ func RunE2e(ctx context.Context, opt E2eOptions) error {
 		return err
 	}
 
-	scopes, err := DiscoverScopes(ctx, r, opt.RepoRoot, opt.Dir)
+	buildkitHost, err := images.ResolveBuildkitHost("")
+	if err != nil {
+		return err
+	}
+
+	scopes, err := DiscoverScopes(ctx, r, opt.RepoRoot, opt.Dir, buildkitHost)
 	if err != nil {
 		return err
 	}
