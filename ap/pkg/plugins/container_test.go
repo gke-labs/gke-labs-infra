@@ -1334,7 +1334,7 @@ func TestDescribeContainer_Deadline(t *testing.T) {
 	if !strings.Contains(errorString, imageRef) {
 		t.Errorf("expected error to contain image ref %q, got: %s", imageRef, errorString)
 	}
-	if !strings.Contains(errorString, "did not answer Describe within 30 seconds") {
+	if !strings.Contains(errorString, "did not answer Describe within 30s") {
 		t.Errorf("expected error to state deadline exceeded, got: %s", errorString)
 	}
 }
