@@ -94,7 +94,7 @@ func TestLoadPluginsConfig_Validation(t *testing.T) {
 		},
 		{
 			name: "valid git url dockerfile",
-			yaml: "plugins:\n  testplugin:\n    dockerfile: https://github.com/gke-labs/gke-labs-infra/blob/main/ap/images/ap-astro/Dockerfile\n",
+			yaml: "plugins:\n  testplugin:\n    dockerfile: https://github.com/gke-labs/gke-labs-infra/blob/main/ap/images/ap-plugin-astro/Dockerfile\n",
 		},
 	}
 	for _, tc := range tests {

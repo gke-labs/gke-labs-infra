@@ -1102,7 +1102,7 @@ func TestBenchmarkHashingRepoRoot(t *testing.T) {
 	}
 
 	start := time.Now()
-	key, err := plugins.DockerfilePluginCacheKey(tree, "ap/images/ap-astro/Dockerfile", "")
+	key, err := plugins.DockerfilePluginCacheKey(tree, "ap/images/ap-plugin-astro/Dockerfile", "")
 	if err != nil {
 		t.Fatalf("DockerfilePluginCacheKey failed on repo root: %v", err)
 	}

@@ -23,12 +23,12 @@ COPY ap/ ap/
 
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /usr/local/bin/ap-plugin-astro ./ap/images/ap-astro
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /usr/local/bin/ap-plugin-astro ./ap/images/ap-plugin-astro
 
 FROM node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
 
 WORKDIR /app
-COPY ap/images/ap-astro/package.json ap/images/ap-astro/package-lock.json ./
+COPY ap/images/ap-plugin-astro/package.json ap/images/ap-plugin-astro/package-lock.json ./
 RUN npm ci
 
 # Point TMPDIR to /app/work so the Go plugin SDK unpacks the streamed repository files
