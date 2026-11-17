@@ -273,8 +273,18 @@ func (plugin *ContainerPlugin) DiscoverTasks(ctx context.Context, directory stri
 	return discoveredTasks, nil
 }
 
-// LoadContainerPlugins loads all enabled container plugins configured in .ap/plugins.yaml.
-func LoadContainerPlugins(ctx context.Context, scope *tasks.TaskContext, cacheDirectory, buildkitHost string, starter StartPluginFunc) ([]Plugin, error) {
+// ContainerPluginOptions configures container plugin loading.
+type ContainerPluginOptions struct {
+	CacheDirectory string
+	BuildkitHost   string
+	Starter        StartPluginFunc
+	BuildImage     BuildPluginImageFunc
+	ImageLookup    ImageLookupFunc
+}
+
+// LoadContainerPluginsWithOptions loads all enabled container plugins configured in .ap/plugins.yaml
+// using the provided options.
+func LoadContainerPluginsWithOptions(ctx context.Context, scope *tasks.TaskContext, opts ContainerPluginOptions) ([]Plugin, error) {
 	pluginsConfig, err := config.LoadPluginsConfig(scope.RepoRoot())
 	if err != nil {
 		return nil, err
@@ -298,12 +308,12 @@ func LoadContainerPlugins(ctx context.Context, scope *tasks.TaskContext, cacheDi
 		imageRef := declaration.Image
 		if declaration.Dockerfile != "" {
 			var buildError error
-			imageRef, buildError = buildPluginImage(ctx, scope, name, declaration.Dockerfile, buildkitHost)
+			imageRef, buildError = EnsureDockerfilePluginImage(ctx, scope, opts.CacheDirectory, name, declaration.Dockerfile, opts.BuildkitHost, opts.BuildImage, opts.ImageLookup)
 			if buildError != nil {
 				return nil, buildError
 			}
 		}
-		manifest, err := DescribeContainer(ctx, scope, cacheDirectory, name, imageRef, starter)
+		manifest, err := DescribeContainer(ctx, scope, opts.CacheDirectory, name, imageRef, opts.Starter)
 		if err != nil {
 			return nil, err
 		}
@@ -313,10 +323,19 @@ func LoadContainerPlugins(ctx context.Context, scope *tasks.TaskContext, cacheDi
 			ImageRef:    imageRef,
 			Manifest:    manifest,
 			RepoRoot:    scope.RepoRoot(),
-			Starter:     starter,
+			Starter:     opts.Starter,
 		})
 	}
 	return result, nil
+}
+
+// LoadContainerPlugins loads all enabled container plugins configured in .ap/plugins.yaml.
+func LoadContainerPlugins(ctx context.Context, scope *tasks.TaskContext, cacheDirectory, buildkitHost string, starter StartPluginFunc) ([]Plugin, error) {
+	return LoadContainerPluginsWithOptions(ctx, scope, ContainerPluginOptions{
+		CacheDirectory: cacheDirectory,
+		BuildkitHost:   buildkitHost,
+		Starter:        starter,
+	})
 }
 
 // ContainerTask represents a task executed inside a container plugin.

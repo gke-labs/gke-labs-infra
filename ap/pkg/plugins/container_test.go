@@ -1006,6 +1006,31 @@ plugins:
 		if _, err := os.Stat(cachedFile); err != nil {
 			t.Errorf("expected cached manifest at %s: %v", cachedFile, err)
 		}
+
+		// Remove build-args to detect if build is executed on second run
+		buildArgsPath := filepath.Join(stateDir, "build-args")
+		if err := os.Remove(buildArgsPath); err != nil {
+			t.Fatalf("removing build-args: %v", err)
+		}
+
+		// Second invocation with unchanged inputs: uses cached image ID without rebuilding
+		secondPlugins, err := plugins.LoadContainerPlugins(t.Context(), scope, cacheDirectory, "", starter)
+		if err != nil {
+			t.Fatalf("second LoadContainerPlugins failed: %v", err)
+		}
+		if len(secondPlugins) != 1 {
+			t.Fatalf("expected 1 plugin on second run, got %d", len(secondPlugins))
+		}
+		secondContainerPlugin, ok := secondPlugins[0].(*plugins.ContainerPlugin)
+		if !ok {
+			t.Fatalf("expected *plugins.ContainerPlugin, got %T", secondPlugins[0])
+		}
+		if secondContainerPlugin.ImageRef != "sha256:fake-built-image-1234" {
+			t.Errorf("expected cached ImageRef %q, got %q", "sha256:fake-built-image-1234", secondContainerPlugin.ImageRef)
+		}
+		if _, err := os.Stat(buildArgsPath); !os.IsNotExist(err) {
+			t.Errorf("expected build to not run on second invocation, but build-args was re-created")
+		}
 	})
 
 	t.Run("with buildkit host set build goes to buildctl and result is loaded", func(t *testing.T) {
