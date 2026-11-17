@@ -23,7 +23,7 @@ COPY ap/ ap/
 
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /usr/local/bin/ap-astro-plugin ./ap/images/ap-astro
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /usr/local/bin/ap-plugin-astro ./ap/images/ap-astro
 
 FROM node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
 
@@ -40,6 +40,6 @@ ENV ASTRO_TELEMETRY_DISABLED=1
 
 RUN mkdir -p /app/work
 
-COPY --from=builder /usr/local/bin/ap-astro-plugin /usr/local/bin/ap-astro-plugin
+COPY --from=builder /usr/local/bin/ap-plugin-astro /usr/local/bin/ap-plugin-astro
 
-ENTRYPOINT ["/usr/local/bin/ap-astro-plugin"]
+ENTRYPOINT ["/usr/local/bin/ap-plugin-astro"]
