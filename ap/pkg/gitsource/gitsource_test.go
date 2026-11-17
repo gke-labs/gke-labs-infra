@@ -321,7 +321,7 @@ func TestResolveTarget_OfflinePinnedCommit(t *testing.T) {
 	}
 
 	// GitHub blob URL with pinned commit: must resolve without contacting unreachable host
-	githubURL := "https://github.com/testorg/testrepo/blob/" + fakeCommit + "/ap/images/ap-astro/Dockerfile"
+	githubURL := "https://github.com/testorg/testrepo/blob/" + fakeCommit + "/ap/images/ap-plugin-astro/Dockerfile"
 	target, err = ResolveTarget(ctx, githubURL)
 	if err != nil {
 		t.Fatalf("unexpected error resolving pinned commit in github url: %v", err)
@@ -329,8 +329,8 @@ func TestResolveTarget_OfflinePinnedCommit(t *testing.T) {
 	if target.Commit != fakeCommit {
 		t.Errorf("got commit %q, want %q", target.Commit, fakeCommit)
 	}
-	if target.Path != "ap/images/ap-astro/Dockerfile" {
-		t.Errorf("got path %q, want %q", target.Path, "ap/images/ap-astro/Dockerfile")
+	if target.Path != "ap/images/ap-plugin-astro/Dockerfile" {
+		t.Errorf("got path %q, want %q", target.Path, "ap/images/ap-plugin-astro/Dockerfile")
 	}
 }
 

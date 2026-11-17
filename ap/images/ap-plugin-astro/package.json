@@ -1,5 +1,5 @@
 {
-  "name": "ap-astro",
+  "name": "ap-plugin-astro",
   "version": "0.0.1",
   "description": "Astro site builder plugin for ap.",
   "license": "Apache-2.0",

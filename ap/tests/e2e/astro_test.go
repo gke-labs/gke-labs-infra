@@ -132,8 +132,8 @@ func TestAstroPlugin_Build(t *testing.T) {
 	}
 
 	// Copy the plugin Dockerfile and assets from this repository.
-	pluginSourceDir := filepath.Join(repoRoot, "ap", "images", "ap-astro")
-	pluginTargetDir := filepath.Join(testRepo, "ap", "images", "ap-astro")
+	pluginSourceDir := filepath.Join(repoRoot, "ap", "images", "ap-plugin-astro")
+	pluginTargetDir := filepath.Join(testRepo, "ap", "images", "ap-plugin-astro")
 	if err := copyDir(pluginSourceDir, pluginTargetDir); err != nil {
 		t.Fatalf("failed to copy astro plugin image definition: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestAstroPlugin_Build(t *testing.T) {
 	pluginsConfig := `
 plugins:
   astro:
-    dockerfile: ap/images/ap-astro/Dockerfile
+    dockerfile: ap/images/ap-plugin-astro/Dockerfile
 `
 	if err := os.WriteFile(filepath.Join(testRepo, ".ap", "plugins.yaml"), []byte(pluginsConfig), 0644); err != nil {
 		t.Fatal(err)
