@@ -31,16 +31,14 @@ WORKDIR /app
 COPY ap/images/ap-astro/package.json ap/images/ap-astro/package-lock.json ./
 RUN npm ci
 
-# Build in a work directory (/app/work) instead of copying the site over /app.
-# Because /app/work is a subdirectory of /app, Node.js and Vite module resolution
-# naturally walks up the directory tree to find dependencies installed at image build time
-# in /app/node_modules without modifying /app.
+# Point TMPDIR to /app/work so the Go plugin SDK unpacks the streamed repository files
+# into a temporary directory under /app. Because the work directory is a subdirectory
+# of /app, Node.js module resolution naturally walks up the directory tree to find
+# dependencies installed at image build time in /app/node_modules without modifying /app.
 ENV TMPDIR=/app/work
-ENV PATH="/app/node_modules/.bin:$PATH"
-ENV NODE_PATH="/app/node_modules"
 ENV ASTRO_TELEMETRY_DISABLED=1
 
-RUN mkdir -p /app/work && ln -s /app/node_modules /node_modules
+RUN mkdir -p /app/work
 
 COPY --from=builder /usr/local/bin/ap-astro-plugin /usr/local/bin/ap-astro-plugin
 

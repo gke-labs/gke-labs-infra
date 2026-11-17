@@ -16,7 +16,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -24,6 +23,8 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/plugins/sdk"
 )
+
+const astroExecutable = "/app/node_modules/.bin/astro"
 
 func main() {
 	if err := sdk.ServeStdio(sdk.Plugin{
@@ -36,21 +37,11 @@ func main() {
 				Description: "Build Astro documentation site",
 				Outputs:     []string{"dist"},
 				Run: func(ctx context.Context, task sdk.TaskContext) error {
-					astroExecutable, err := exec.LookPath("astro")
-					if err != nil {
-						if _, statErr := os.Stat("/app/node_modules/.bin/astro"); statErr == nil {
-							astroExecutable = "/app/node_modules/.bin/astro"
-						} else {
-							return fmt.Errorf("finding astro executable: %w", errors.Join(err, statErr))
-						}
-					}
-
 					outputDirectory := filepath.Join(task.OutputDir, "dist")
 					command := exec.CommandContext(ctx, astroExecutable, "build", "--outDir", outputDirectory)
 					command.Dir = task.Dir
 					command.Stdout = task.Stdout
 					command.Stderr = task.Stderr
-					command.Env = os.Environ()
 
 					if err := command.Run(); err != nil {
 						return fmt.Errorf("running astro build: %w", err)
