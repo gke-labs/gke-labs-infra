@@ -27,6 +27,7 @@ import (
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/gitsource"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
@@ -42,6 +43,22 @@ type ImageLookupFunc func(ctx context.Context, scope *tasks.TaskContext, imageID
 type DockerfilePluginBuildRecord struct {
 	Key     string `json:"key"`
 	ImageID string `json:"image_id"`
+}
+
+func isLikelyURL(target string) bool {
+	trimmed := strings.TrimSpace(target)
+	return strings.Contains(trimmed, "://") || strings.HasPrefix(trimmed, "git@")
+}
+
+// URLPluginCacheKey computes a deterministic SHA-256 hash representing the inputs to
+// a URL Dockerfile plugin build: the resolved commit SHA, the path to the Dockerfile
+// inside that repository, and the BuildKit host setting.
+func URLPluginCacheKey(commit, dockerfilePath, buildkitHost string) string {
+	hasher := sha256.New()
+	hasher.Write([]byte("commit\x00" + commit + "\x00"))
+	hasher.Write([]byte("path\x00" + filepath.ToSlash(filepath.Clean(dockerfilePath)) + "\x00"))
+	hasher.Write([]byte("buildkit_host\x00" + buildkitHost + "\x00"))
+	return hex.EncodeToString(hasher.Sum(nil))
 }
 
 // DockerfilePluginCacheKey computes a deterministic SHA-256 hash representing the inputs to
@@ -98,9 +115,29 @@ func repoRootHash(repoRoot string) string {
 	return hex.EncodeToString(hash[:])[:12]
 }
 
+func sanitizePath(dockerfilePath string) string {
+	var builder strings.Builder
+	for _, character := range dockerfilePath {
+		if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9') || character == '-' || character == '_' || character == '.' {
+			builder.WriteRune(character)
+		} else {
+			builder.WriteRune('-')
+		}
+	}
+	result := builder.String()
+	for strings.Contains(result, "--") {
+		result = strings.ReplaceAll(result, "--", "-")
+	}
+	result = strings.Trim(result, "-")
+	if len(result) > 120 {
+		result = result[:120]
+	}
+	return result
+}
+
 // DockerfilePluginCachePath returns the file path where the build record for a Dockerfile plugin is stored under cacheDirectory.
 func DockerfilePluginCachePath(cacheDirectory, repoRoot, pluginName, dockerfilePath string) string {
-	sanitizedPath := strings.ReplaceAll(filepath.ToSlash(filepath.Clean(dockerfilePath)), "/", "-")
+	sanitizedPath := sanitizePath(dockerfilePath)
 	filename := fmt.Sprintf("%s-%s-%s.json", sanitizedPath, pluginName, repoRootHash(repoRoot))
 	return filepath.Join(cacheDirectory, "plugins", "builds", filename)
 }
@@ -132,12 +169,93 @@ func EnsureDockerfilePluginImage(
 	dockerfilePath string,
 	options ContainerPluginOptions,
 ) (string, error) {
+	cacheDirectory := options.CacheDirectory
+	if cacheDirectory == "" {
+		var err error
+		cacheDirectory, err = fileutils.CacheDir()
+		if err != nil {
+			return "", fmt.Errorf("resolving cache directory: %w", err)
+		}
+	}
+
+	if gitsource.IsURL(dockerfilePath) || isLikelyURL(dockerfilePath) {
+		if !gitsource.IsURL(dockerfilePath) {
+			return "", fmt.Errorf("plugin %q: URL %q: not a supported URL", pluginName, dockerfilePath)
+		}
+
+		target, err := gitsource.ResolveTarget(ctx, dockerfilePath)
+		if err != nil {
+			return "", fmt.Errorf("plugin %q: URL %q: not a supported URL: %w", pluginName, dockerfilePath, err)
+		}
+
+		key := URLPluginCacheKey(target.Commit, target.Path, options.BuildkitHost)
+		recordPath := DockerfilePluginCachePath(cacheDirectory, scope.RepoRoot(), pluginName, dockerfilePath)
+
+		recordData, readErr := os.ReadFile(recordPath)
+		if readErr != nil {
+			if !os.IsNotExist(readErr) {
+				scoped.Log(ctx).V(2).Info("failed to read cached plugin record", "path", recordPath, "error", readErr)
+			}
+		} else {
+			var record DockerfilePluginBuildRecord
+			if unmarshalErr := json.Unmarshal(recordData, &record); unmarshalErr != nil {
+				scoped.Log(ctx).V(2).Info("failed to parse cached plugin record", "path", recordPath, "error", unmarshalErr)
+			} else if record.Key == key && record.ImageID != "" {
+				exists, lookupErr := options.ImageLookup(ctx, scope, record.ImageID)
+				if lookupErr == nil && exists {
+					return record.ImageID, nil
+				}
+				if lookupErr != nil && ctx.Err() != nil {
+					return "", ctx.Err()
+				}
+			}
+		}
+
+		cloneDir, err := gitsource.CloneOrUpdateIn(ctx, cacheDirectory, target)
+		if err != nil {
+			return "", fmt.Errorf("plugin %q: URL %q: clone failed: %w", pluginName, dockerfilePath, err)
+		}
+
+		dockerfilePathInRepo := filepath.Join(cloneDir, filepath.FromSlash(target.Path))
+		stat, err := os.Stat(dockerfilePathInRepo)
+		if err != nil || stat.IsDir() {
+			return "", fmt.Errorf("plugin %q: URL %q: path %q not found at commit %s", pluginName, dockerfilePath, target.Path, target.Commit)
+		}
+
+		remoteTree, err := sourcetree.Load(cloneDir)
+		if err != nil {
+			return "", fmt.Errorf("plugin %q: URL %q: loading source tree for %s: %w", pluginName, dockerfilePath, cloneDir, err)
+		}
+
+		remoteScope := scope.WithRepoRoot(cloneDir, cloneDir, remoteTree)
+
+		imageID, err := options.BuildImage(ctx, remoteScope, pluginName, target.Path, options.BuildkitHost)
+		if err != nil {
+			return "", err
+		}
+
+		newRecord := DockerfilePluginBuildRecord{
+			Key:     key,
+			ImageID: imageID,
+		}
+		marshaledRecord, err := json.MarshalIndent(newRecord, "", "  ")
+		if err != nil {
+			return "", fmt.Errorf("marshaling build record for plugin %q: %w", pluginName, err)
+		}
+
+		if err := recordCachedImage(recordPath, marshaledRecord); err != nil {
+			return "", fmt.Errorf("recording cached image for plugin %q: %w", pluginName, err)
+		}
+
+		return imageID, nil
+	}
+
 	key, err := DockerfilePluginCacheKey(scope.SourceTree(), dockerfilePath, options.BuildkitHost)
 	if err != nil {
 		return "", fmt.Errorf("computing plugin cache key for %s (%s): %w", pluginName, dockerfilePath, err)
 	}
 
-	recordPath := DockerfilePluginCachePath(options.CacheDirectory, scope.RepoRoot(), pluginName, dockerfilePath)
+	recordPath := DockerfilePluginCachePath(cacheDirectory, scope.RepoRoot(), pluginName, dockerfilePath)
 
 	recordData, readErr := os.ReadFile(recordPath)
 	if readErr != nil {

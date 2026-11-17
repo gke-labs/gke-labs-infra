@@ -372,12 +372,15 @@ func cloneFresh(ctx context.Context, repoDirectory string, target *Target) error
 	return fetchAndCheckout(ctx, repoDirectory, target)
 }
 
-// CloneOrUpdate clones or fetches target.RepoURL into a subdirectory of cacheRoot (derived via fileutils.CacheDir),
+// CloneOrUpdateIn clones or fetches target.RepoURL into a subdirectory of cacheRoot (falling back to fileutils.CacheDir if cacheRoot is empty),
 // checks out target.Commit in detached HEAD mode, and returns the path to the repository on disk.
-func CloneOrUpdate(ctx context.Context, target *Target) (string, error) {
-	cacheRoot, err := fileutils.CacheDir()
-	if err != nil {
-		return "", fmt.Errorf("failed to determine cache dir: %w", err)
+func CloneOrUpdateIn(ctx context.Context, cacheRoot string, target *Target) (string, error) {
+	if cacheRoot == "" {
+		var err error
+		cacheRoot, err = fileutils.CacheDir()
+		if err != nil {
+			return "", fmt.Errorf("failed to determine cache dir: %w", err)
+		}
 	}
 
 	repoDirectory, err := repoCacheDir(cacheRoot, target.RepoURL)
@@ -404,4 +407,10 @@ func CloneOrUpdate(ctx context.Context, target *Target) (string, error) {
 	}
 
 	return repoDirectory, nil
+}
+
+// CloneOrUpdate clones or fetches target.RepoURL into a subdirectory of cacheRoot (derived via fileutils.CacheDir),
+// checks out target.Commit in detached HEAD mode, and returns the path to the repository on disk.
+func CloneOrUpdate(ctx context.Context, target *Target) (string, error) {
+	return CloneOrUpdateIn(ctx, "", target)
 }

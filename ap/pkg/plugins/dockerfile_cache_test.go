@@ -18,7 +18,9 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -580,6 +582,378 @@ func TestEnsureDockerfilePluginImage(t *testing.T) {
 		}
 		if atomic.LoadInt64(&buildCountB) != 1 {
 			t.Errorf("expected buildCountB to remain 1, got %d", atomic.LoadInt64(&buildCountB))
+		}
+	})
+}
+
+func setupTestGitRepo(t *testing.T) (string, func(args ...string) string) {
+	t.Helper()
+	repoDir := t.TempDir()
+
+	runGit := func(args ...string) string {
+		cmd := exec.Command("git", append([]string{"-C", repoDir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_CONFIG_GLOBAL=/dev/null",
+			"GIT_CONFIG_NOSYSTEM=1",
+			"GIT_AUTHOR_NAME=Test User",
+			"GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=Test User",
+			"GIT_COMMITTER_EMAIL=test@example.com",
+		)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s failed: %v\nOutput: %s", strings.Join(args, " "), err, string(output))
+		}
+		return strings.TrimSpace(string(output))
+	}
+
+	runGit("init")
+	runGit("checkout", "-b", "main")
+	return repoDir, runGit
+}
+
+func TestURLPluginCacheKey(t *testing.T) {
+	commit := "0123456789abcdef0123456789abcdef01234567"
+	path := "images/plugin/Dockerfile"
+
+	firstKey := plugins.URLPluginCacheKey(commit, path, "")
+	secondKey := plugins.URLPluginCacheKey(commit, path, "")
+	if firstKey != secondKey {
+		t.Errorf("expected deterministic key, got %s and %s", firstKey, secondKey)
+	}
+
+	diffCommitKey := plugins.URLPluginCacheKey("fedcba9876543210fedcba9876543210fedcba98", path, "")
+	if firstKey == diffCommitKey {
+		t.Errorf("expected different key when commit changes")
+	}
+
+	diffPathKey := plugins.URLPluginCacheKey(commit, "images/other/Dockerfile", "")
+	if firstKey == diffPathKey {
+		t.Errorf("expected different key when path changes")
+	}
+
+	diffHostKey := plugins.URLPluginCacheKey(commit, path, "tcp://127.0.0.1:2375")
+	if firstKey == diffHostKey {
+		t.Errorf("expected different key when buildkit host changes")
+	}
+}
+
+func TestEnsureDockerfilePluginImage_URL(t *testing.T) {
+	pluginName := "myplugin"
+
+	t.Run("builds from other repository root using resolved commit and path", func(t *testing.T) {
+		remoteRepoDir, runRemoteGit := setupTestGitRepo(t)
+		dockerfilePath := "images/plugin/Dockerfile"
+		remoteDockerfilePath := filepath.Join(remoteRepoDir, dockerfilePath)
+		if err := os.MkdirAll(filepath.Dir(remoteDockerfilePath), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(remoteDockerfilePath, []byte("FROM alpine\nRUN echo remote-plugin\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		remoteHelperPath := filepath.Join(remoteRepoDir, "pkg/remote/helper.go")
+		if err := os.MkdirAll(filepath.Dir(remoteHelperPath), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(remoteHelperPath, []byte("package remote\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		runRemoteGit("add", "-A")
+		runRemoteGit("commit", "-m", "remote initial commit")
+		mainCommit := runRemoteGit("rev-parse", "HEAD")
+
+		declaringRepoDir := t.TempDir()
+		declaringFile := filepath.Join(declaringRepoDir, "declaring_file.txt")
+		if err := os.WriteFile(declaringFile, []byte("declaring repo only\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		declaringTree, err := sourcetree.Open(declaringRepoDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		declaringScope := tasks.NewTaskContext(declaringRepoDir, declaringRepoDir, declaringTree)
+
+		cacheDirectory := t.TempDir()
+		t.Setenv("AP_CACHE_DIR", cacheDirectory)
+
+		urlTarget := "file://" + remoteRepoDir + "//" + dockerfilePath + "?ref=main"
+
+		var buildCount int64
+		var recordedScopeRoot string
+		var recordedDockerfile string
+		var recordedBuildkitHost string
+		fakeBuild := func(_ context.Context, scope *tasks.TaskContext, _, dfPath, buildkitHost string) (string, error) {
+			atomic.AddInt64(&buildCount, 1)
+			recordedScopeRoot = scope.RepoRoot()
+			recordedDockerfile = dfPath
+			recordedBuildkitHost = buildkitHost
+
+			// Verify the build context is the cloned repository, not the declaring repository
+			if recordedScopeRoot == declaringRepoDir {
+				t.Errorf("build context is declaring repository root, expected remote clone root")
+			}
+			if _, statErr := os.Stat(filepath.Join(recordedScopeRoot, "pkg/remote/helper.go")); statErr != nil {
+				t.Errorf("expected remote repo file in build context: %v", statErr)
+			}
+			if _, statErr := os.Stat(filepath.Join(recordedScopeRoot, "declaring_file.txt")); !os.IsNotExist(statErr) {
+				t.Errorf("declaring repo files leaked into remote build context")
+			}
+			return "sha256:remote-plugin-image-1111", nil
+		}
+		fakeLookup := func(_ context.Context, _ *tasks.TaskContext, imageID string) (bool, error) {
+			return imageID == "sha256:remote-plugin-image-1111", nil
+		}
+
+		options := plugins.ContainerPluginOptions{
+			CacheDirectory: cacheDirectory,
+			BuildImage:     fakeBuild,
+			ImageLookup:    fakeLookup,
+		}
+
+		firstID, err := plugins.EnsureDockerfilePluginImage(t.Context(), declaringScope, pluginName, urlTarget, options)
+		if err != nil {
+			t.Fatalf("first EnsureDockerfilePluginImage failed: %v", err)
+		}
+		if firstID != "sha256:remote-plugin-image-1111" {
+			t.Errorf("expected 'sha256:remote-plugin-image-1111', got %s", firstID)
+		}
+		if atomic.LoadInt64(&buildCount) != 1 {
+			t.Fatalf("expected build count 1 on cold run, got %d", atomic.LoadInt64(&buildCount))
+		}
+		if recordedDockerfile != dockerfilePath {
+			t.Errorf("expected Dockerfile path %q, got %q", dockerfilePath, recordedDockerfile)
+		}
+		if recordedBuildkitHost != "" {
+			t.Errorf("expected empty buildkitHost, got %q", recordedBuildkitHost)
+		}
+
+		recordPath := plugins.DockerfilePluginCachePath(cacheDirectory, declaringRepoDir, pluginName, urlTarget)
+		recordData, err := os.ReadFile(recordPath)
+		if err != nil {
+			t.Fatalf("expected record file at %s: %v", recordPath, err)
+		}
+		var record plugins.DockerfilePluginBuildRecord
+		if err := json.Unmarshal(recordData, &record); err != nil {
+			t.Fatalf("parsing record file: %v", err)
+		}
+		expectedKey := plugins.URLPluginCacheKey(mainCommit, dockerfilePath, "")
+		if record.Key != expectedKey {
+			t.Errorf("record.Key = %q, want %q", record.Key, expectedKey)
+		}
+		if record.ImageID != "sha256:remote-plugin-image-1111" {
+			t.Errorf("record.ImageID = %q, want 'sha256:remote-plugin-image-1111'", record.ImageID)
+		}
+
+		// Second call: record and image present -> build is skipped
+		secondID, err := plugins.EnsureDockerfilePluginImage(t.Context(), declaringScope, pluginName, urlTarget, options)
+		if err != nil {
+			t.Fatalf("second EnsureDockerfilePluginImage failed: %v", err)
+		}
+		if secondID != "sha256:remote-plugin-image-1111" {
+			t.Errorf("expected 'sha256:remote-plugin-image-1111', got %s", secondID)
+		}
+		if atomic.LoadInt64(&buildCount) != 1 {
+			t.Errorf("expected build count to stay 1, got %d", atomic.LoadInt64(&buildCount))
+		}
+	})
+
+	t.Run("moving reference triggers rebuild when remote branch advances", func(t *testing.T) {
+		remoteRepoDir, runRemoteGit := setupTestGitRepo(t)
+		dockerfilePath := "images/plugin/Dockerfile"
+		remoteDockerfilePath := filepath.Join(remoteRepoDir, dockerfilePath)
+		if err := os.MkdirAll(filepath.Dir(remoteDockerfilePath), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(remoteDockerfilePath, []byte("FROM alpine\nRUN echo initial\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		runRemoteGit("add", "-A")
+		runRemoteGit("commit", "-m", "initial commit")
+
+		declaringRepoDir := t.TempDir()
+		declaringTree, err := sourcetree.Open(declaringRepoDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		declaringScope := tasks.NewTaskContext(declaringRepoDir, declaringRepoDir, declaringTree)
+
+		cacheDirectory := t.TempDir()
+		t.Setenv("AP_CACHE_DIR", cacheDirectory)
+
+		urlTarget := "file://" + remoteRepoDir + "//" + dockerfilePath + "?ref=main"
+
+		var buildCount int64
+		fakeBuild := func(_ context.Context, _ *tasks.TaskContext, _, _, _ string) (string, error) {
+			count := atomic.AddInt64(&buildCount, 1)
+			if count == 1 {
+				return "sha256:initial-image-111", nil
+			}
+			return "sha256:updated-image-222", nil
+		}
+		fakeLookup := func(_ context.Context, _ *tasks.TaskContext, _ string) (bool, error) {
+			return true, nil
+		}
+
+		options := plugins.ContainerPluginOptions{
+			CacheDirectory: cacheDirectory,
+			BuildImage:     fakeBuild,
+			ImageLookup:    fakeLookup,
+		}
+
+		firstID, err := plugins.EnsureDockerfilePluginImage(t.Context(), declaringScope, pluginName, urlTarget, options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if firstID != "sha256:initial-image-111" {
+			t.Errorf("expected 'sha256:initial-image-111', got %s", firstID)
+		}
+
+		// Advance main branch on remote repo
+		if err := os.WriteFile(remoteDockerfilePath, []byte("FROM alpine\nRUN echo advanced\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		runRemoteGit("add", "-A")
+		runRemoteGit("commit", "-m", "second commit advancing main")
+		secondCommit := runRemoteGit("rev-parse", "HEAD")
+
+		secondID, err := plugins.EnsureDockerfilePluginImage(t.Context(), declaringScope, pluginName, urlTarget, options)
+		if err != nil {
+			t.Fatalf("second EnsureDockerfilePluginImage after branch advance failed: %v", err)
+		}
+		if secondID != "sha256:updated-image-222" {
+			t.Errorf("expected 'sha256:updated-image-222', got %s", secondID)
+		}
+		if atomic.LoadInt64(&buildCount) != 2 {
+			t.Errorf("expected build count 2 after moving ref advanced, got %d", atomic.LoadInt64(&buildCount))
+		}
+
+		recordPath := plugins.DockerfilePluginCachePath(cacheDirectory, declaringRepoDir, pluginName, urlTarget)
+		recordData, err := os.ReadFile(recordPath)
+		if err != nil {
+			t.Fatalf("expected record file: %v", err)
+		}
+		var record plugins.DockerfilePluginBuildRecord
+		if err := json.Unmarshal(recordData, &record); err != nil {
+			t.Fatal(err)
+		}
+		expectedKey := plugins.URLPluginCacheKey(secondCommit, dockerfilePath, "")
+		if record.Key != expectedKey {
+			t.Errorf("expected updated record key %s, got %s", expectedKey, record.Key)
+		}
+	})
+
+	t.Run("bad path fails with clear error", func(t *testing.T) {
+		remoteRepoDir, runRemoteGit := setupTestGitRepo(t)
+		if err := os.WriteFile(filepath.Join(remoteRepoDir, "readme.txt"), []byte("hi\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		runRemoteGit("add", "-A")
+		runRemoteGit("commit", "-m", "initial commit")
+
+		declaringRepoDir := t.TempDir()
+		declaringTree, err := sourcetree.Open(declaringRepoDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		declaringScope := tasks.NewTaskContext(declaringRepoDir, declaringRepoDir, declaringTree)
+		cacheDirectory := t.TempDir()
+		t.Setenv("AP_CACHE_DIR", cacheDirectory)
+
+		badPathURL := "file://" + remoteRepoDir + "//images/missing/Dockerfile?ref=main"
+
+		options := plugins.ContainerPluginOptions{
+			CacheDirectory: cacheDirectory,
+			BuildImage: func(_ context.Context, _ *tasks.TaskContext, _, _, _ string) (string, error) {
+				return "should-not-build", nil
+			},
+			ImageLookup: func(_ context.Context, _ *tasks.TaskContext, _ string) (bool, error) {
+				return false, nil
+			},
+		}
+
+		_, err = plugins.EnsureDockerfilePluginImage(t.Context(), declaringScope, pluginName, badPathURL, options)
+		if err == nil {
+			t.Fatal("expected error for bad path in URL, got nil")
+		}
+		errMsg := err.Error()
+		if !strings.Contains(errMsg, pluginName) {
+			t.Errorf("expected error to name plugin %q, got: %s", pluginName, errMsg)
+		}
+		if !strings.Contains(errMsg, badPathURL) {
+			t.Errorf("expected error to name URL %q, got: %s", badPathURL, errMsg)
+		}
+		if !strings.Contains(errMsg, "path \"images/missing/Dockerfile\" not found at commit") {
+			t.Errorf("expected error to state path not found at commit, got: %s", errMsg)
+		}
+	})
+
+	t.Run("unsupported URL fails with clear error", func(t *testing.T) {
+		declaringRepoDir := t.TempDir()
+		declaringTree, err := sourcetree.Open(declaringRepoDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		declaringScope := tasks.NewTaskContext(declaringRepoDir, declaringRepoDir, declaringTree)
+		cacheDirectory := t.TempDir()
+
+		unsupportedURL := "ftp://example.com/images/plugin/Dockerfile"
+
+		options := plugins.ContainerPluginOptions{
+			CacheDirectory: cacheDirectory,
+			BuildImage: func(_ context.Context, _ *tasks.TaskContext, _, _, _ string) (string, error) {
+				return "should-not-build", nil
+			},
+			ImageLookup: func(_ context.Context, _ *tasks.TaskContext, _ string) (bool, error) {
+				return false, nil
+			},
+		}
+
+		_, err = plugins.EnsureDockerfilePluginImage(t.Context(), declaringScope, pluginName, unsupportedURL, options)
+		if err == nil {
+			t.Fatal("expected error for unsupported URL scheme, got nil")
+		}
+		errMsg := err.Error()
+		if !strings.Contains(errMsg, pluginName) {
+			t.Errorf("expected error to name plugin %q, got: %s", pluginName, errMsg)
+		}
+		if !strings.Contains(errMsg, unsupportedURL) {
+			t.Errorf("expected error to name URL %q, got: %s", unsupportedURL, errMsg)
+		}
+		if !strings.Contains(errMsg, "not a supported URL") {
+			t.Errorf("expected error to say 'not a supported URL', got: %s", errMsg)
+		}
+	})
+
+	t.Run("relative path continues to build from declaring repository root", func(t *testing.T) {
+		declaringRepoDir := setupTestRepo(t)
+		declaringTree, err := sourcetree.Open(declaringRepoDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		declaringScope := tasks.NewTaskContext(declaringRepoDir, declaringRepoDir, declaringTree)
+		cacheDirectory := t.TempDir()
+
+		var recordedRoot string
+		options := plugins.ContainerPluginOptions{
+			CacheDirectory: cacheDirectory,
+			BuildImage: func(_ context.Context, scope *tasks.TaskContext, _, _, _ string) (string, error) {
+				recordedRoot = scope.RepoRoot()
+				return "sha256:relative-image-333", nil
+			},
+			ImageLookup: func(_ context.Context, _ *tasks.TaskContext, _ string) (bool, error) {
+				return false, nil
+			},
+		}
+
+		imageID, err := plugins.EnsureDockerfilePluginImage(t.Context(), declaringScope, pluginName, "images/plugin/Dockerfile", options)
+		if err != nil {
+			t.Fatalf("EnsureDockerfilePluginImage failed for relative path: %v", err)
+		}
+		if imageID != "sha256:relative-image-333" {
+			t.Errorf("expected 'sha256:relative-image-333', got %s", imageID)
+		}
+		if recordedRoot != declaringRepoDir {
+			t.Errorf("expected relative build to use declaringRepoDir %q, got %q", declaringRepoDir, recordedRoot)
 		}
 	})
 }

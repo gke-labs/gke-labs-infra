@@ -340,7 +340,7 @@ plugins:
 
 - `plugins`: Map of plugin names to declarations.
 - `image`: Remote container image pinned immutably by digest (`<repo>@sha256:...`). Either `image` or `dockerfile` must be specified, but not both.
-- `dockerfile`: Path relative to the repository root to a Dockerfile built automatically before discovery using the repository root as the build context. Plugin images built from a Dockerfile follow the same builder settings as other images (local Docker buildx or remote BuildKit via `BUILDKIT_HOST` or `--buildkit-host`). Either `image` or `dockerfile` must be specified, but not both.
+- `dockerfile`: Path relative to the repository root (e.g. `images/local-builder/Dockerfile`) or a Git URL (e.g. `https://github.com/gke-labs/gke-labs-infra/blob/<commit>/ap/images/ap-astro/Dockerfile`) to a Dockerfile built automatically before discovery using that repository's root as the build context. When a Git URL is specified, the repository is fetched at the resolved commit into the cache (under `AP_CACHE_DIR`) and built using that repository's root as context, allowing plugins whose images are built from their own repository's sources to be used from anywhere else. Plugin images built from a Dockerfile follow the same builder settings as other images (local Docker buildx or remote BuildKit via `BUILDKIT_HOST` or `--buildkit-host`). Either `image` or `dockerfile` must be specified, but not both.
 - `network`: Boolean flag (default `false`). When `true`, authorizes network access for the plugin if the plugin also declares that it requires network access.
 - `enabled`: Optional boolean flag. When `false`, disables the plugin (useful in subtree `.ap/plugins.yaml` overrides).
 
@@ -354,9 +354,11 @@ Example `.ap/plugins.yaml`:
 ```yaml
 plugins:
   astro:
-    dockerfile: ap/images/ap-astro/Dockerfile
+    dockerfile: https://github.com/gke-labs/gke-labs-infra/blob/<commit>/ap/images/ap-astro/Dockerfile
     network: false
 ```
+
+When declaring the Astro plugin by Git URL, `ap` fetches the repository at the specified commit into `AP_CACHE_DIR` and builds the plugin image with the root of that repository as the build context. This provides `go.mod`, `ap/`, and the plugin's npm dependencies (`package.json`, `package-lock.json`) in the build context so the image builds successfully from any repository.
 
 **Supplying and Pinning Dependencies**: The builder image defines its Node.js environment and pins npm dependencies using `package.json` and `package-lock.json` alongside `ap/images/ap-astro/Dockerfile`. When built via `dockerfile:`, `ap` runs `npm ci` during image build using the repository root as context, ensuring that dependencies are hermetically locked to the repository commit. To supply custom integrations or pin updated dependency versions, modify the `package.json` and `package-lock.json` files alongside the Dockerfile. The container executes with `--network none`, ensuring that builds are strictly offline and hermetic.
 

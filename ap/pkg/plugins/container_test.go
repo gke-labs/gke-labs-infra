@@ -1119,6 +1119,115 @@ plugins:
 	})
 }
 
+func TestDockerfilePlugin_URL(t *testing.T) {
+	remoteRepoDir, runRemoteGit := setupTestGitRepo(t)
+	remoteDockerfile := filepath.Join(remoteRepoDir, "images/urlplugin/Dockerfile")
+	if err := os.MkdirAll(filepath.Dir(remoteDockerfile), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(remoteDockerfile, []byte("FROM alpine\nRUN echo urlplugin\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runRemoteGit("add", "-A")
+	runRemoteGit("commit", "-m", "initial remote commit")
+
+	declaringRepoRoot := t.TempDir()
+	cacheDirectory := t.TempDir()
+	t.Setenv("AP_CACHE_DIR", cacheDirectory)
+
+	apDirectory := filepath.Join(declaringRepoRoot, ".ap")
+	if err := os.MkdirAll(apDirectory, 0755); err != nil {
+		t.Fatal(err)
+	}
+	urlTarget := "file://" + remoteRepoDir + "//images/urlplugin/Dockerfile?ref=main"
+	pluginsContent := fmt.Sprintf(`
+plugins:
+  urlplugin:
+    dockerfile: %s
+`, urlTarget)
+	if err := os.WriteFile(filepath.Join(apDirectory, "plugins.yaml"), []byte(pluginsContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tree, err := sourcetree.Open(declaringRepoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fakeBinDir, stateDir := setupFakeDocker(t)
+	fakeDockerPath := filepath.Join(fakeBinDir, "docker")
+	fakeBuildxPath := filepath.Join(fakeBinDir, "docker-buildx")
+	scope := tasks.NewTaskContext(declaringRepoRoot, declaringRepoRoot, tree).WithTool("docker", fakeDockerPath).WithTool("docker-buildx", fakeBuildxPath)
+
+	mockPlugin := sdk.Plugin{
+		Name:       "urlplugin",
+		Activation: []string{"url.config"},
+		Network:    false,
+		Tasks: []sdk.Task{
+			{Name: "build", Verb: "build", Outputs: []string{"dist"}},
+		},
+	}
+	starter := setupTestPluginStarter(t, mockPlugin)
+
+	options := plugins.ContainerPluginOptions{
+		CacheDirectory: cacheDirectory,
+		Starter:        starter,
+		BuildImage:     plugins.BuildPluginImage,
+		ImageLookup:    plugins.LookupDockerImage,
+	}
+
+	loadedPlugins, err := plugins.LoadContainerPlugins(t.Context(), scope, options)
+	if err != nil {
+		t.Fatalf("LoadContainerPlugins failed: %v", err)
+	}
+	if len(loadedPlugins) != 1 {
+		t.Fatalf("expected 1 plugin, got %d", len(loadedPlugins))
+	}
+
+	containerPlugin, ok := loadedPlugins[0].(*plugins.ContainerPlugin)
+	if !ok {
+		t.Fatalf("expected *plugins.ContainerPlugin, got %T", loadedPlugins[0])
+	}
+	if containerPlugin.ImageRef != "sha256:fake-built-image-1234" {
+		t.Errorf("expected ImageRef 'sha256:fake-built-image-1234', got %q", containerPlugin.ImageRef)
+	}
+	if containerPlugin.RepoRoot != declaringRepoRoot {
+		t.Errorf("expected plugin RepoRoot %q, got %q", declaringRepoRoot, containerPlugin.RepoRoot)
+	}
+
+	buildArgsData, err := os.ReadFile(filepath.Join(stateDir, "build-args"))
+	if err != nil {
+		t.Fatalf("reading build args: %v", err)
+	}
+	buildArgs := string(buildArgsData)
+	if !strings.Contains(buildArgs, "-f images/urlplugin/Dockerfile") {
+		t.Errorf("expected -f images/urlplugin/Dockerfile in build args, got: %s", buildArgs)
+	}
+	if !strings.Contains(buildArgs, "-t ap-plugin/urlplugin:latest") {
+		t.Errorf("expected -t ap-plugin/urlplugin:latest in build args, got: %s", buildArgs)
+	}
+
+	// Remove build-args to verify second call reuses cache
+	if err := os.Remove(filepath.Join(stateDir, "build-args")); err != nil {
+		t.Fatal(err)
+	}
+
+	secondPlugins, err := plugins.LoadContainerPlugins(t.Context(), scope, options)
+	if err != nil {
+		t.Fatalf("second LoadContainerPlugins failed: %v", err)
+	}
+	if len(secondPlugins) != 1 {
+		t.Fatalf("expected 1 plugin on second load, got %d", len(secondPlugins))
+	}
+	secondPlugin := secondPlugins[0].(*plugins.ContainerPlugin)
+	if secondPlugin.ImageRef != "sha256:fake-built-image-1234" {
+		t.Errorf("expected cached ImageRef 'sha256:fake-built-image-1234', got %q", secondPlugin.ImageRef)
+	}
+	if _, err := os.Stat(filepath.Join(stateDir, "build-args")); !os.IsNotExist(err) {
+		t.Errorf("expected build not to run on second invocation, but build-args was recreated")
+	}
+}
+
 func TestContainerTask_GetName(t *testing.T) {
 	tests := []struct {
 		relativeDirectory string

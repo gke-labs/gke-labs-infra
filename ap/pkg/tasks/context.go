@@ -97,6 +97,22 @@ func (s *TaskContext) withParent(name string) *TaskContext {
 	return &clone
 }
 
+// WithRepoRoot returns a shallow copy of the task context with a new repo root, dir, and source tree.
+func (s *TaskContext) WithRepoRoot(repoRoot, dir string, tree *sourcetree.SourceTree) *TaskContext {
+	if tree == nil {
+		panic("tasks.TaskContext.WithRepoRoot: tree cannot be nil")
+	}
+	clone := *s
+	clone.repoRoot = repoRoot
+	clone.dir = dir
+	clone.sourceTree = tree
+	clone.tools = make(map[string]string, len(s.tools))
+	for k, v := range s.tools {
+		clone.tools[k] = v
+	}
+	return &clone
+}
+
 // RepoRoot returns the repository root directory.
 func (s *TaskContext) RepoRoot() string {
 	return s.repoRoot
