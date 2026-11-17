@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
@@ -74,10 +75,19 @@ func StartDockerPlugin(ctx context.Context, scope *tasks.TaskContext, imageRef s
 	return DialStdioConn(ctx, commandConnection)
 }
 
+// describeTimeout is the deadline for a plugin to respond to the Describe RPC.
+const describeTimeout = 30 * time.Second
+
 // DialStdioConn establishes a gRPC client connection over the given net.Conn.
 func DialStdioConn(ctx context.Context, connection net.Conn) (api.PluginServiceClient, io.Closer, error) {
 	grpcClientConnection, err := grpc.NewClient("passthrough:///stdio",
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		// gRPC's default minimum connect timeout is 20s, which would expire before
+		// describeTimeout (30s) and produce a premature "error reading server preface"
+		// error. Ensure connect timeout exceeds describeTimeout.
+		grpc.WithConnectParams(grpc.ConnectParams{
+			MinConnectTimeout: describeTimeout + 5*time.Second,
+		}),
 		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
 			return connection, nil
 		}),
@@ -163,10 +173,16 @@ func DescribeContainer(ctx context.Context, scope *tasks.TaskContext, cacheDirec
 		return manifest, nil
 	}
 
+	describeContext, cancel := context.WithTimeout(ctx, describeTimeout)
+	defer cancel()
+
 	var stderrBuffer bytes.Buffer
-	client, closer, err := starter(ctx, scope, imageRef, false, &stderrBuffer)
+	client, closer, err := starter(describeContext, scope, imageRef, false, &stderrBuffer)
 	if err != nil {
-		return nil, fmt.Errorf("starting plugin %q for describe: %w", pluginName, err)
+		if errors.Is(describeContext.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("plugin %q (%s) did not answer Describe within %v", pluginName, imageRef, describeTimeout)
+		}
+		return nil, fmt.Errorf("starting plugin %q (%s) for describe: %w", pluginName, imageRef, err)
 	}
 	defer func() {
 		if closeError := closer.Close(); closeError != nil {
@@ -174,13 +190,16 @@ func DescribeContainer(ctx context.Context, scope *tasks.TaskContext, cacheDirec
 		}
 	}()
 
-	response, err := client.Describe(ctx, &api.DescribeRequest{})
+	response, err := client.Describe(describeContext, &api.DescribeRequest{})
 	if err != nil {
+		if errors.Is(describeContext.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("plugin %q (%s) did not answer Describe within %v", pluginName, imageRef, describeTimeout)
+		}
 		stderrOutput := strings.TrimSpace(stderrBuffer.String())
 		if stderrOutput != "" {
-			return nil, fmt.Errorf("running describe for plugin %q: %w (%s)", pluginName, err, stderrOutput)
+			return nil, fmt.Errorf("running describe for plugin %q (%s): %w (%s)", pluginName, imageRef, err, stderrOutput)
 		}
-		return nil, fmt.Errorf("running describe for plugin %q: %w", pluginName, err)
+		return nil, fmt.Errorf("running describe for plugin %q (%s): %w", pluginName, imageRef, err)
 	}
 
 	parsedManifest := &PluginManifest{

@@ -19,8 +19,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/gitsource"
@@ -186,6 +188,13 @@ func requireRepoRoot(opt *RootOptions) error {
 
 // Execute runs the root command.
 func Execute(ctx context.Context) error {
+	signalContext, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go func() {
+		<-signalContext.Done()
+		stop()
+	}()
+
 	rootCmd := BuildRootCommand()
-	return rootCmd.ExecuteContext(ctx)
+	return rootCmd.ExecuteContext(signalContext)
 }
