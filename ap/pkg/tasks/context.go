@@ -48,15 +48,17 @@ type TaskContext struct {
 	dir        string
 	sourceTree *sourcetree.SourceTree
 
-	stdout       io.Writer
-	stderr       io.Writer
-	printOutput  bool
-	verify       bool
-	artifactsDir string
-	taskDir      string
-	taskLogFile  string
-	runState     *runState
-	parents      []string
+	stdout        io.Writer
+	stderr        io.Writer
+	printOutput   bool
+	verify        bool
+	writeBaseline bool
+	race          bool
+	artifactsDir  string
+	taskDir       string
+	taskLogFile   string
+	runState      *runState
+	parents       []string
 
 	// tools holds memoized resolved tool binary paths keyed by tool name.
 	tools map[string]string
@@ -155,6 +157,30 @@ func (s *TaskContext) Verify() bool {
 func (s *TaskContext) WithVerify(verify bool) *TaskContext {
 	clone := *s
 	clone.verify = verify
+	return &clone
+}
+
+// WriteBaseline returns whether tasks should write baseline files.
+func (s *TaskContext) WriteBaseline() bool {
+	return s.writeBaseline
+}
+
+// WithWriteBaseline returns a shallow copy of the task context with the given writeBaseline setting.
+func (s *TaskContext) WithWriteBaseline(writeBaseline bool) *TaskContext {
+	clone := *s
+	clone.writeBaseline = writeBaseline
+	return &clone
+}
+
+// Race returns whether tests should run under the data race detector.
+func (s *TaskContext) Race() bool {
+	return s.race
+}
+
+// WithRace returns a shallow copy of the task context with the given race setting.
+func (s *TaskContext) WithRace(race bool) *TaskContext {
+	clone := *s
+	clone.race = race
 	return &clone
 }
 

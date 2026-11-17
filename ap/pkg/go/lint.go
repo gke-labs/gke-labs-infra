@@ -317,7 +317,7 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.TaskContext) error
 			RepoRoot:        t.RepoRoot,
 			Dir:             t.Dir,
 			ConfiguredPath:  configured,
-			WriteBaseline:   t.WriteBaseline,
+			WriteBaseline:   scope.WriteBaseline() || t.WriteBaseline,
 			AllCheckedFiles: allCheckedFiles,
 			Mode:            mode,
 			Stdout:          scope.Stdout(),
@@ -330,20 +330,6 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.TaskContext) error
 
 	errs = append(errs, actionErrors...)
 	return errors.Join(errs...)
-}
-
-type writeBaselineSetter interface {
-	SetWriteBaseline(bool)
-}
-
-// SetWriteBaseline recursively sets WriteBaseline on any task supporting it in the task tree.
-func SetWriteBaseline(t tasks.Task, writeBaseline bool) {
-	if wb, ok := t.(writeBaselineSetter); ok {
-		wb.SetWriteBaseline(writeBaseline)
-	}
-	for _, child := range t.GetChildren() {
-		SetWriteBaseline(child, writeBaseline)
-	}
 }
 
 func relPath(base, target string) string {
@@ -363,10 +349,6 @@ func (t *AnalyzersTask) GetName() string {
 
 func (t *AnalyzersTask) GetChildren() []tasks.Task {
 	return nil
-}
-
-func (t *AnalyzersTask) SetWriteBaseline(wb bool) {
-	t.WriteBaseline = wb
 }
 
 func determineTargetGOOS(r *sourcetree.SourceTree, dir string, skipGlobs []string, hostGOOS string) []string {

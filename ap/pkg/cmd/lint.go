@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"path/filepath"
 
-	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
@@ -90,11 +89,5 @@ func RunLint(ctx context.Context, opt LintOptions) error {
 		}
 	}
 
-	if opt.WriteBaseline {
-		for _, task := range allTasks {
-			golang.SetWriteBaseline(task, true)
-		}
-	}
-
-	return tasks.Run(ctx, tasks.NewTaskContext(opt.RepoRoot, opt.RepoRoot, r), allTasks, tasks.RunOptions{DryRun: opt.DryRun, ContinueOnError: true})
+	return tasks.Run(ctx, tasks.NewTaskContext(opt.RepoRoot, opt.RepoRoot, r).WithWriteBaseline(opt.WriteBaseline), allTasks, tasks.RunOptions{DryRun: opt.DryRun, ContinueOnError: true})
 }

@@ -104,6 +104,18 @@ func TestTaskContextSourceTree(t *testing.T) {
 	if scope.Stderr() != os.Stderr {
 		t.Fatalf("Stderr() = %v, want %v", scope.Stderr(), os.Stderr)
 	}
+	if scope.WriteBaseline() {
+		t.Fatalf("WriteBaseline() = true, want false")
+	}
+	if wbScope := scope.WithWriteBaseline(true); !wbScope.WriteBaseline() {
+		t.Fatalf("WithWriteBaseline(true).WriteBaseline() = false, want true")
+	}
+	if scope.Race() {
+		t.Fatalf("Race() = true, want false")
+	}
+	if raceScope := scope.WithRace(true); !raceScope.Race() {
+		t.Fatalf("WithRace(true).Race() = false, want true")
+	}
 
 	// NewTaskContext must panic if tree is nil
 	defer func() {

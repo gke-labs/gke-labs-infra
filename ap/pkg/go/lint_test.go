@@ -1071,12 +1071,11 @@ func main() {
 	if task == nil {
 		t.Fatal("expected AnalyzersTask")
 	}
-	task.WriteBaseline = true
 	task.BaselinePath = baselinePath
 
 	ctx := t.Context()
 	scope := tasks.NewTaskContext(dir, dir, r)
-	if err := task.Run(ctx, scope); err != nil {
+	if err := task.Run(ctx, scope.WithWriteBaseline(true)); err != nil {
 		t.Fatalf("write baseline failed: %v", err)
 	}
 

@@ -163,10 +163,6 @@ func (t *Task) GetChildren() []tasks.Task {
 	return nil
 }
 
-func (t *Task) SetWriteBaseline(wb bool) {
-	t.WriteBaseline = wb
-}
-
 // NewTask creates a new portability task for the given directory if task scripts exist.
 func NewTask(tree *sourcetree.SourceTree, dir, repoRoot string) (tasks.Task, error) {
 	scriptTasks, err := tasks.FindTaskScripts(tree, dir)
@@ -257,7 +253,7 @@ func (t *Task) Run(ctx context.Context, scope *tasks.TaskContext) error {
 		RepoRoot:        t.RepoRoot,
 		Dir:             t.Dir,
 		ConfiguredPath:  t.BaselinePath,
-		WriteBaseline:   t.WriteBaseline,
+		WriteBaseline:   scope.WriteBaseline() || t.WriteBaseline,
 		AllCheckedFiles: allCheckedFiles,
 		Mode:            string(t.Mode),
 		Stdout:          scope.Stdout(),
