@@ -102,17 +102,8 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.TaskContext) err
 
 	fullImageName := ImageRef{Prefix: actualImagePrefix, Name: t.ImageName, Tag: naming.Tag}.String()
 
-	dockerBin := t.DockerBin
-	if dockerBin == "" {
-		if dockerPath, err := scope.Tool(ctx, "docker"); err == nil && dockerPath != "" {
-			dockerBin = dockerPath
-		} else {
-			dockerBin = "docker"
-		}
-	}
-
 	if t.BuildkitHost != "" {
-		return t.runBuildctl(ctx, scope, dockerBin, t.Root, fullImageName, t.Dockerfile, naming, platforms)
+		return t.runBuildctl(ctx, scope, t.Root, fullImageName, t.Dockerfile, naming, platforms)
 	}
 
 	buildxBin := t.BuildxBin
@@ -126,6 +117,8 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.TaskContext) err
 			return fmt.Errorf("failed to ensure docker-buildx: %w", err)
 		}
 	}
+
+	dockerBin := t.dockerBinary(ctx, scope)
 
 	// If we are pushing and have requested multiple platforms, but the current Docker driver
 	// doesn't support multi-platform builds (e.g., standard default docker driver), we first
@@ -194,7 +187,17 @@ func (t *DockerBuildTask) supportsMultiPlatform(ctx context.Context, buildxBin s
 	return true
 }
 
-func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskContext, dockerBin, root, fullImageName, relDockerfilePath string, naming ImageNaming, platforms []string) (retErr error) {
+func (t *DockerBuildTask) dockerBinary(ctx context.Context, scope *tasks.TaskContext) string {
+	if t.DockerBin != "" {
+		return t.DockerBin
+	}
+	if dockerPath, err := scope.Tool(ctx, "docker"); err == nil && dockerPath != "" {
+		return dockerPath
+	}
+	return "docker"
+}
+
+func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskContext, root, fullImageName, relDockerfilePath string, naming ImageNaming, platforms []string) (retErr error) {
 	start := time.Now()
 
 	var output string
@@ -277,6 +280,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 	}
 
 	if t.Load {
+		dockerBin := t.dockerBinary(ctx, scope)
 		loadCommand := execCommandContext(ctx, dockerBin, "load", "-i", archivePath)
 		loadCommand.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(dockerBin))
 		loadOutput, err := loadCommand.CombinedOutput()
