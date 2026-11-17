@@ -116,17 +116,16 @@ func (t *GoTidyTask) GetChildren() []tasks.Task {
 
 // AnalyzersTask represents a task to run enabled code style analyzers in-process.
 type AnalyzersTask struct {
-	Dir           string
-	RepoRoot      string
-	Analyzers     []*analysis.Analyzer
-	Enabled       map[string]codestyle.Mode
-	Policies      map[string]fileset.Policy
-	Settings      map[string]*config.AnalyzerConfig
-	GOOS          []string
-	HostGOOS      string
-	LoadCount     int
-	WriteBaseline bool
-	BaselinePath  string
+	Dir          string
+	RepoRoot     string
+	Analyzers    []*analysis.Analyzer
+	Enabled      map[string]codestyle.Mode
+	Policies     map[string]fileset.Policy
+	Settings     map[string]*config.AnalyzerConfig
+	GOOS         []string
+	HostGOOS     string
+	LoadCount    int
+	BaselinePath string
 }
 
 // SkipGenerated reports whether skipGenerated is enabled for the named analyzer.
@@ -317,7 +316,7 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.TaskContext) error
 			RepoRoot:        t.RepoRoot,
 			Dir:             t.Dir,
 			ConfiguredPath:  configured,
-			WriteBaseline:   scope.WriteBaseline() || t.WriteBaseline,
+			WriteBaseline:   scope.WriteBaseline(),
 			AllCheckedFiles: allCheckedFiles,
 			Mode:            mode,
 			Stdout:          scope.Stdout(),

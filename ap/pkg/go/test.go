@@ -46,7 +46,6 @@ type GoTestTask struct {
 	Dir        string
 	Name       string
 	ResultFile string
-	Race       bool
 }
 
 func (t *GoTestTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
@@ -54,7 +53,7 @@ func (t *GoTestTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
 	opts := RunGoTestOptions{
 		Stdout: scope.Stdout(),
 		Stderr: scope.Stderr(),
-		Race:   scope.Race() || t.Race,
+		Race:   scope.Race(),
 	}
 	if err := RunGoTest(ctx, scope, t.Dir, t.ResultFile, opts); err != nil {
 		return fmt.Errorf("go test failed in %s: %w", t.Dir, err)
