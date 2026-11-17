@@ -94,11 +94,7 @@ func DockerfilePluginCacheKey(tree *sourcetree.SourceTree, dockerfilePath, build
 }
 
 func repoRootHash(repoRoot string) string {
-	absoluteRoot, err := filepath.Abs(repoRoot)
-	if err != nil {
-		absoluteRoot = filepath.Clean(repoRoot)
-	}
-	hash := sha256.Sum256([]byte(absoluteRoot))
+	hash := sha256.Sum256([]byte(repoRoot))
 	return hex.EncodeToString(hash[:])[:12]
 }
 
