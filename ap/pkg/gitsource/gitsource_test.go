@@ -195,7 +195,7 @@ func TestCloneOrUpdate(t *testing.T) {
 		Path:    "file.txt",
 	}
 
-	cloneDir, err := CloneOrUpdate(ctx, targetMain)
+	cloneDir, err := CloneOrUpdate(ctx, cacheDir, targetMain)
 	if err != nil {
 		t.Fatalf("CloneOrUpdate initial clone failed: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestCloneOrUpdate(t *testing.T) {
 		Path:    "file.txt",
 	}
 
-	updatedCloneDir, err := CloneOrUpdate(ctx, targetUpdated)
+	updatedCloneDir, err := CloneOrUpdate(ctx, cacheDir, targetUpdated)
 	if err != nil {
 		t.Fatalf("CloneOrUpdate update failed: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestCloneOrUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	repairedCloneDir, err := CloneOrUpdate(ctx, targetUpdated)
+	repairedCloneDir, err := CloneOrUpdate(ctx, cacheDir, targetUpdated)
 	if err != nil {
 		t.Fatalf("CloneOrUpdate after cache corruption failed: %v", err)
 	}
@@ -300,5 +300,66 @@ func TestCloneOrUpdate(t *testing.T) {
 
 	if isShallow := runClonedGit("rev-parse", "--is-shallow-repository"); isShallow != "true" {
 		t.Errorf("is-shallow-repository = %q, want %q", isShallow, "true")
+	}
+}
+
+func TestResolveTarget_OfflinePinnedCommit(t *testing.T) {
+	ctx := t.Context()
+	fakeCommit := "0123456789abcdef0123456789abcdef01234567"
+
+	// Kustomize-style URL with pinned commit: must resolve without contacting unreachable host
+	kustomizeURL := "https://nonexistent.invalid/org/repo//path/to/Dockerfile?ref=" + fakeCommit
+	target, err := ResolveTarget(ctx, kustomizeURL)
+	if err != nil {
+		t.Fatalf("unexpected error resolving pinned commit in kustomize style: %v", err)
+	}
+	if target.Commit != fakeCommit {
+		t.Errorf("got commit %q, want %q", target.Commit, fakeCommit)
+	}
+	if target.Path != "path/to/Dockerfile" {
+		t.Errorf("got path %q, want %q", target.Path, "path/to/Dockerfile")
+	}
+
+	// GitHub blob URL with pinned commit: must resolve without contacting unreachable host
+	githubURL := "https://github.com/testorg/testrepo/blob/" + fakeCommit + "/ap/images/ap-astro/Dockerfile"
+	target, err = ResolveTarget(ctx, githubURL)
+	if err != nil {
+		t.Fatalf("unexpected error resolving pinned commit in github url: %v", err)
+	}
+	if target.Commit != fakeCommit {
+		t.Errorf("got commit %q, want %q", target.Commit, fakeCommit)
+	}
+	if target.Path != "ap/images/ap-astro/Dockerfile" {
+		t.Errorf("got path %q, want %q", target.Path, "ap/images/ap-astro/Dockerfile")
+	}
+}
+
+func TestResolveTarget_UnreachableRemote(t *testing.T) {
+	ctx := t.Context()
+	// Moving branch reference on unreachable host must report error saying could not reach repository
+	urlWithBranch := "https://nonexistent.invalid/org/repo//path/to/Dockerfile?ref=main"
+	_, err := ResolveTarget(ctx, urlWithBranch)
+	if err == nil {
+		t.Fatal("expected error for unreachable remote, got nil")
+	}
+	if !strings.Contains(err.Error(), "could not reach repository") {
+		t.Errorf("expected error mentioning 'could not reach repository', got: %v", err)
+	}
+}
+
+func TestResolveTarget_UnsupportedURL(t *testing.T) {
+	ctx := t.Context()
+	tests := []string{
+		"ftp://example.com/repo/Dockerfile",
+		"git@github.com:org/repo.git",
+	}
+	for _, rawURL := range tests {
+		_, err := ResolveTarget(ctx, rawURL)
+		if err == nil {
+			t.Errorf("expected error for %q, got nil", rawURL)
+		}
+		if !strings.Contains(err.Error(), "not a supported URL") {
+			t.Errorf("expected error mentioning 'not a supported URL' for %q, got: %v", rawURL, err)
+		}
 	}
 }

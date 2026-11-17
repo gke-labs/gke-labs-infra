@@ -956,6 +956,127 @@ func TestEnsureDockerfilePluginImage_URL(t *testing.T) {
 			t.Errorf("expected relative build to use declaringRepoDir %q, got %q", declaringRepoDir, recordedRoot)
 		}
 	})
+
+	t.Run("pinned commit works offline once image is built", func(t *testing.T) {
+		remoteRepoDir, runRemoteGit := setupTestGitRepo(t)
+		dockerfilePath := "images/plugin/Dockerfile"
+		remoteDockerfilePath := filepath.Join(remoteRepoDir, dockerfilePath)
+		if err := os.MkdirAll(filepath.Dir(remoteDockerfilePath), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(remoteDockerfilePath, []byte("FROM alpine\nRUN echo offline-plugin\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		runRemoteGit("add", "-A")
+		runRemoteGit("commit", "-m", "pinned commit")
+		pinnedCommit := runRemoteGit("rev-parse", "HEAD")
+
+		declaringRepoDir := t.TempDir()
+		declaringTree, err := sourcetree.Open(declaringRepoDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		declaringScope := tasks.NewTaskContext(declaringRepoDir, declaringRepoDir, declaringTree)
+		cacheDirectory := t.TempDir()
+		t.Setenv("AP_CACHE_DIR", cacheDirectory)
+
+		pinnedURL := "file://" + remoteRepoDir + "//" + dockerfilePath + "?ref=" + pinnedCommit
+
+		var buildCount int64
+		options := plugins.ContainerPluginOptions{
+			CacheDirectory: cacheDirectory,
+			BuildImage: func(_ context.Context, _ *tasks.TaskContext, _, _, _ string) (string, error) {
+				atomic.AddInt64(&buildCount, 1)
+				return "sha256:offline-built-image-999", nil
+			},
+			ImageLookup: func(_ context.Context, _ *tasks.TaskContext, imageID string) (bool, error) {
+				return imageID == "sha256:offline-built-image-999", nil
+			},
+		}
+
+		// Initial build succeeds
+		imageID, err := plugins.EnsureDockerfilePluginImage(t.Context(), declaringScope, pluginName, pinnedURL, options)
+		if err != nil {
+			t.Fatalf("initial build failed: %v", err)
+		}
+		if imageID != "sha256:offline-built-image-999" {
+			t.Errorf("got %s, want sha256:offline-built-image-999", imageID)
+		}
+
+		// Make the remote completely unreachable by deleting the remote repo directory
+		if err := os.RemoveAll(remoteRepoDir); err != nil {
+			t.Fatal(err)
+		}
+
+		// Pinned commit must resolve and reuse cache offline without contacting remote
+		secondID, err := plugins.EnsureDockerfilePluginImage(t.Context(), declaringScope, pluginName, pinnedURL, options)
+		if err != nil {
+			t.Fatalf("offline resolution failed: %v", err)
+		}
+		if secondID != "sha256:offline-built-image-999" {
+			t.Errorf("got %s, want sha256:offline-built-image-999", secondID)
+		}
+		if atomic.LoadInt64(&buildCount) != 1 {
+			t.Errorf("expected build count to stay 1, got %d", atomic.LoadInt64(&buildCount))
+		}
+	})
+
+	t.Run("symlink escaping clone is rejected", func(t *testing.T) {
+		remoteRepoDir, runRemoteGit := setupTestGitRepo(t)
+		outsideDir := t.TempDir()
+		outsideDockerfile := filepath.Join(outsideDir, "Dockerfile")
+		if err := os.WriteFile(outsideDockerfile, []byte("FROM alpine\nRUN echo escape\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		dockerfileRelPath := "images/plugin/Dockerfile"
+		symlinkTarget := filepath.Join(remoteRepoDir, dockerfileRelPath)
+		if err := os.MkdirAll(filepath.Dir(symlinkTarget), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outsideDockerfile, symlinkTarget); err != nil {
+			t.Fatal(err)
+		}
+
+		runRemoteGit("add", "-A")
+		runRemoteGit("commit", "-m", "symlink pointing outside repo")
+
+		declaringRepoDir := t.TempDir()
+		declaringTree, err := sourcetree.Open(declaringRepoDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		declaringScope := tasks.NewTaskContext(declaringRepoDir, declaringRepoDir, declaringTree)
+		cacheDirectory := t.TempDir()
+		t.Setenv("AP_CACHE_DIR", cacheDirectory)
+
+		urlTarget := "file://" + remoteRepoDir + "//" + dockerfileRelPath + "?ref=main"
+
+		options := plugins.ContainerPluginOptions{
+			CacheDirectory: cacheDirectory,
+			BuildImage: func(_ context.Context, _ *tasks.TaskContext, _, _, _ string) (string, error) {
+				return "should-not-build", nil
+			},
+			ImageLookup: func(_ context.Context, _ *tasks.TaskContext, _ string) (bool, error) {
+				return false, nil
+			},
+		}
+
+		_, err = plugins.EnsureDockerfilePluginImage(t.Context(), declaringScope, pluginName, urlTarget, options)
+		if err == nil {
+			t.Fatal("expected error for symlink escaping clone root, got nil")
+		}
+		errMsg := err.Error()
+		if !strings.Contains(errMsg, pluginName) {
+			t.Errorf("expected error to name plugin %q, got: %s", pluginName, errMsg)
+		}
+		if !strings.Contains(errMsg, urlTarget) {
+			t.Errorf("expected error to name URL %q, got: %s", urlTarget, errMsg)
+		}
+		if !strings.Contains(errMsg, "not found at commit") {
+			t.Errorf("expected error to state path not found at commit, got: %s", errMsg)
+		}
+	})
 }
 
 func TestBenchmarkHashingRepoRoot(t *testing.T) {

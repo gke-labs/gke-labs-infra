@@ -1119,6 +1119,55 @@ plugins:
 	})
 }
 
+func setupFakeDockerInCache(t *testing.T, cacheDirectory string) string {
+	t.Helper()
+	stateDir := t.TempDir()
+
+	script := fmt.Sprintf(`#!/bin/sh
+STATE_DIR=%q
+
+case "$1" in
+  build)
+    if [ -f "$STATE_DIR/fail-build" ]; then
+      echo "simulated build failure" >&2
+      exit 42
+    fi
+    echo "$*" > "$STATE_DIR/build-args"
+    ;;
+  load)
+    echo "$*" > "$STATE_DIR/load-args"
+    ;;
+  image)
+    if [ "$2" = "inspect" ]; then
+      if [ -f "$STATE_DIR/buildctl-args" ]; then
+        echo "sha256:fake-buildctl-image-5678"
+      else
+        echo "sha256:fake-built-image-1234"
+      fi
+    fi
+    ;;
+esac
+`, stateDir)
+
+	dockerDir := filepath.Join(cacheDirectory, "tools", "docker", "29.9.2", "bin")
+	if err := os.MkdirAll(dockerDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dockerDir, "docker"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	buildxDir := filepath.Join(cacheDirectory, "tools", "docker-buildx", "v0.38.1", "bin")
+	if err := os.MkdirAll(buildxDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(buildxDir, "docker-buildx"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	return stateDir
+}
+
 func TestDockerfilePlugin_URL(t *testing.T) {
 	remoteRepoDir, runRemoteGit := setupTestGitRepo(t)
 	remoteDockerfile := filepath.Join(remoteRepoDir, "images/urlplugin/Dockerfile")
@@ -1154,10 +1203,8 @@ plugins:
 		t.Fatal(err)
 	}
 
-	fakeBinDir, stateDir := setupFakeDocker(t)
-	fakeDockerPath := filepath.Join(fakeBinDir, "docker")
-	fakeBuildxPath := filepath.Join(fakeBinDir, "docker-buildx")
-	scope := tasks.NewTaskContext(declaringRepoRoot, declaringRepoRoot, tree).WithTool("docker", fakeDockerPath).WithTool("docker-buildx", fakeBuildxPath)
+	stateDir := setupFakeDockerInCache(t, cacheDirectory)
+	scope := tasks.NewTaskContext(declaringRepoRoot, declaringRepoRoot, tree)
 
 	mockPlugin := sdk.Plugin{
 		Name:       "urlplugin",
