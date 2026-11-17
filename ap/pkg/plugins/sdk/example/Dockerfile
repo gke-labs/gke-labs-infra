@@ -21,8 +21,8 @@ WORKDIR /workspace
 COPY go.mod go.sum ./
 COPY ap/ ap/
 
-RUN CGO_ENABLED=0 go build -o /plugin ./ap/pkg/plugins/sdk/example
+RUN CGO_ENABLED=0 go build -o /ap-plugin-example ./ap/pkg/plugins/sdk/example
 
 FROM gcr.io/distroless/static-debian12
-COPY --from=builder /plugin /plugin
-ENTRYPOINT ["/plugin"]
+COPY --from=builder /ap-plugin-example /ap-plugin-example
+ENTRYPOINT ["/ap-plugin-example"]
