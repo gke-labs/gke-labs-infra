@@ -146,6 +146,38 @@ func TestResolveTarget_Table(t *testing.T) {
 			wantCommit:  releaseV1Commit,
 			wantPath:    "cert-manager/kustomization.yaml",
 		},
+		{
+			name:        "github tree branch",
+			rawURL:      "https://github.com/testorg/testrepo/tree/main/cert-manager/kustomization.yaml",
+			wantRepoURL: "https://github.com/testorg/testrepo.git",
+			wantRef:     "main",
+			wantCommit:  mainCommit,
+			wantPath:    "cert-manager/kustomization.yaml",
+		},
+		{
+			name:        "github tree tag",
+			rawURL:      "https://github.com/testorg/testrepo/tree/release/cert-manager/kustomization.yaml",
+			wantRepoURL: "https://github.com/testorg/testrepo.git",
+			wantRef:     "release",
+			wantCommit:  mainCommit,
+			wantPath:    "cert-manager/kustomization.yaml",
+		},
+		{
+			name:        "github tree full commit",
+			rawURL:      "https://github.com/testorg/testrepo/tree/" + mainCommit + "/cert-manager/kustomization.yaml",
+			wantRepoURL: "https://github.com/testorg/testrepo.git",
+			wantRef:     mainCommit,
+			wantCommit:  mainCommit,
+			wantPath:    "cert-manager/kustomization.yaml",
+		},
+		{
+			name:        "github tree branch with slash",
+			rawURL:      "https://github.com/testorg/testrepo/tree/release/v1/cert-manager/kustomization.yaml",
+			wantRepoURL: "https://github.com/testorg/testrepo.git",
+			wantRef:     "release/v1",
+			wantCommit:  releaseV1Commit,
+			wantPath:    "cert-manager/kustomization.yaml",
+		},
 	}
 
 	for _, tt := range tests {
@@ -325,6 +357,19 @@ func TestResolveTarget_OfflinePinnedCommit(t *testing.T) {
 	target, err = ResolveTarget(ctx, githubURL)
 	if err != nil {
 		t.Fatalf("unexpected error resolving pinned commit in github url: %v", err)
+	}
+	if target.Commit != fakeCommit {
+		t.Errorf("got commit %q, want %q", target.Commit, fakeCommit)
+	}
+	if target.Path != "ap/images/ap-astro/Dockerfile" {
+		t.Errorf("got path %q, want %q", target.Path, "ap/images/ap-astro/Dockerfile")
+	}
+
+	// GitHub tree URL with pinned commit: must resolve without contacting unreachable host
+	githubTreeURL := "https://github.com/testorg/testrepo/tree/" + fakeCommit + "/ap/images/ap-astro/Dockerfile"
+	target, err = ResolveTarget(ctx, githubTreeURL)
+	if err != nil {
+		t.Fatalf("unexpected error resolving pinned commit in github tree url: %v", err)
 	}
 	if target.Commit != fakeCommit {
 		t.Errorf("got commit %q, want %q", target.Commit, fakeCommit)

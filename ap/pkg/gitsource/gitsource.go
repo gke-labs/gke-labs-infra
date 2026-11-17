@@ -163,7 +163,7 @@ func extractCandidate(candidateURL string) string {
 	pathSegments := strings.Split(trimmedPath, "/")
 	if len(pathSegments) >= 3 {
 		remainingSegments := pathSegments[2:]
-		if len(remainingSegments) > 0 && (remainingSegments[0] == "blob" || remainingSegments[0] == "raw") {
+		if len(remainingSegments) > 0 && (remainingSegments[0] == "blob" || remainingSegments[0] == "raw" || remainingSegments[0] == "tree") {
 			remainingSegments = remainingSegments[1:]
 		}
 		return strings.Join(remainingSegments, "/")
@@ -236,7 +236,7 @@ func resolveGitHub(ctx context.Context, parsedURL *url.URL) (*Target, error) {
 	repoURL := fmt.Sprintf("https://github.com/%s/%s.git", organization, repository)
 
 	remainingSegments := pathSegments[2:]
-	if len(remainingSegments) > 0 && (remainingSegments[0] == "blob" || remainingSegments[0] == "raw") {
+	if len(remainingSegments) > 0 && (remainingSegments[0] == "blob" || remainingSegments[0] == "raw" || remainingSegments[0] == "tree") {
 		remainingSegments = remainingSegments[1:]
 	}
 	candidate := strings.Join(remainingSegments, "/")
