@@ -1119,6 +1119,162 @@ plugins:
 	})
 }
 
+func setupFakeDockerInCache(t *testing.T, cacheDirectory string) string {
+	t.Helper()
+	stateDir := t.TempDir()
+
+	script := fmt.Sprintf(`#!/bin/sh
+STATE_DIR=%q
+
+case "$1" in
+  build)
+    if [ -f "$STATE_DIR/fail-build" ]; then
+      echo "simulated build failure" >&2
+      exit 42
+    fi
+    echo "$*" > "$STATE_DIR/build-args"
+    ;;
+  load)
+    echo "$*" > "$STATE_DIR/load-args"
+    ;;
+  image)
+    if [ "$2" = "inspect" ]; then
+      if [ -f "$STATE_DIR/buildctl-args" ]; then
+        echo "sha256:fake-buildctl-image-5678"
+      else
+        echo "sha256:fake-built-image-1234"
+      fi
+    fi
+    ;;
+esac
+`, stateDir)
+
+	dockerDir := filepath.Join(cacheDirectory, "tools", "docker", "29.9.2", "bin")
+	if err := os.MkdirAll(dockerDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dockerDir, "docker"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	buildxDir := filepath.Join(cacheDirectory, "tools", "docker-buildx", "v0.38.1", "bin")
+	if err := os.MkdirAll(buildxDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(buildxDir, "docker-buildx"), []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	return stateDir
+}
+
+func TestDockerfilePlugin_URL(t *testing.T) {
+	remoteRepoDir, runRemoteGit := setupTestGitRepo(t)
+	remoteDockerfile := filepath.Join(remoteRepoDir, "images/urlplugin/Dockerfile")
+	if err := os.MkdirAll(filepath.Dir(remoteDockerfile), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(remoteDockerfile, []byte("FROM alpine\nRUN echo urlplugin\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runRemoteGit("add", "-A")
+	runRemoteGit("commit", "-m", "initial remote commit")
+
+	declaringRepoRoot := t.TempDir()
+	cacheDirectory := t.TempDir()
+	t.Setenv("AP_CACHE_DIR", cacheDirectory)
+
+	apDirectory := filepath.Join(declaringRepoRoot, ".ap")
+	if err := os.MkdirAll(apDirectory, 0755); err != nil {
+		t.Fatal(err)
+	}
+	urlTarget := "file://" + remoteRepoDir + "//images/urlplugin/Dockerfile?ref=main"
+	pluginsContent := fmt.Sprintf(`
+plugins:
+  urlplugin:
+    dockerfile: %s
+`, urlTarget)
+	if err := os.WriteFile(filepath.Join(apDirectory, "plugins.yaml"), []byte(pluginsContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tree, err := sourcetree.Open(declaringRepoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stateDir := setupFakeDockerInCache(t, cacheDirectory)
+	scope := tasks.NewTaskContext(declaringRepoRoot, declaringRepoRoot, tree)
+
+	mockPlugin := sdk.Plugin{
+		Name:       "urlplugin",
+		Activation: []string{"url.config"},
+		Network:    false,
+		Tasks: []sdk.Task{
+			{Name: "build", Verb: "build", Outputs: []string{"dist"}},
+		},
+	}
+	starter := setupTestPluginStarter(t, mockPlugin)
+
+	options := plugins.ContainerPluginOptions{
+		CacheDirectory: cacheDirectory,
+		Starter:        starter,
+		BuildImage:     plugins.BuildPluginImage,
+		ImageLookup:    plugins.LookupDockerImage,
+	}
+
+	loadedPlugins, err := plugins.LoadContainerPlugins(t.Context(), scope, options)
+	if err != nil {
+		t.Fatalf("LoadContainerPlugins failed: %v", err)
+	}
+	if len(loadedPlugins) != 1 {
+		t.Fatalf("expected 1 plugin, got %d", len(loadedPlugins))
+	}
+
+	containerPlugin, ok := loadedPlugins[0].(*plugins.ContainerPlugin)
+	if !ok {
+		t.Fatalf("expected *plugins.ContainerPlugin, got %T", loadedPlugins[0])
+	}
+	if containerPlugin.ImageRef != "sha256:fake-built-image-1234" {
+		t.Errorf("expected ImageRef 'sha256:fake-built-image-1234', got %q", containerPlugin.ImageRef)
+	}
+	if containerPlugin.RepoRoot != declaringRepoRoot {
+		t.Errorf("expected plugin RepoRoot %q, got %q", declaringRepoRoot, containerPlugin.RepoRoot)
+	}
+
+	buildArgsData, err := os.ReadFile(filepath.Join(stateDir, "build-args"))
+	if err != nil {
+		t.Fatalf("reading build args: %v", err)
+	}
+	buildArgs := string(buildArgsData)
+	if !strings.Contains(buildArgs, "-f images/urlplugin/Dockerfile") {
+		t.Errorf("expected -f images/urlplugin/Dockerfile in build args, got: %s", buildArgs)
+	}
+	if !strings.Contains(buildArgs, "-t ap-plugin/urlplugin:latest") {
+		t.Errorf("expected -t ap-plugin/urlplugin:latest in build args, got: %s", buildArgs)
+	}
+
+	// Remove build-args to verify second call reuses cache
+	if err := os.Remove(filepath.Join(stateDir, "build-args")); err != nil {
+		t.Fatal(err)
+	}
+
+	secondPlugins, err := plugins.LoadContainerPlugins(t.Context(), scope, options)
+	if err != nil {
+		t.Fatalf("second LoadContainerPlugins failed: %v", err)
+	}
+	if len(secondPlugins) != 1 {
+		t.Fatalf("expected 1 plugin on second load, got %d", len(secondPlugins))
+	}
+	secondPlugin := secondPlugins[0].(*plugins.ContainerPlugin)
+	if secondPlugin.ImageRef != "sha256:fake-built-image-1234" {
+		t.Errorf("expected cached ImageRef 'sha256:fake-built-image-1234', got %q", secondPlugin.ImageRef)
+	}
+	if _, err := os.Stat(filepath.Join(stateDir, "build-args")); !os.IsNotExist(err) {
+		t.Errorf("expected build not to run on second invocation, but build-args was recreated")
+	}
+}
+
 func TestContainerTask_GetName(t *testing.T) {
 	tests := []struct {
 		relativeDirectory string

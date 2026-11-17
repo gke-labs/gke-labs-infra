@@ -24,9 +24,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/gitsource"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
@@ -42,6 +42,17 @@ type ImageLookupFunc func(ctx context.Context, scope *tasks.TaskContext, imageID
 type DockerfilePluginBuildRecord struct {
 	Key     string `json:"key"`
 	ImageID string `json:"image_id"`
+}
+
+// URLPluginCacheKey computes a deterministic SHA-256 hash representing the inputs to
+// a URL Dockerfile plugin build: the resolved commit SHA, the path to the Dockerfile
+// inside that repository, and the BuildKit host setting.
+func URLPluginCacheKey(commit, dockerfilePath, buildkitHost string) string {
+	hasher := sha256.New()
+	hasher.Write([]byte("commit\x00" + commit + "\x00"))
+	hasher.Write([]byte("path\x00" + filepath.ToSlash(filepath.Clean(dockerfilePath)) + "\x00"))
+	hasher.Write([]byte("buildkit_host\x00" + buildkitHost + "\x00"))
+	return hex.EncodeToString(hasher.Sum(nil))
 }
 
 // DockerfilePluginCacheKey computes a deterministic SHA-256 hash representing the inputs to
@@ -93,15 +104,14 @@ func DockerfilePluginCacheKey(tree *sourcetree.SourceTree, dockerfilePath, build
 	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
-func repoRootHash(repoRoot string) string {
-	hash := sha256.Sum256([]byte(repoRoot))
+func shortHash(input string) string {
+	hash := sha256.Sum256([]byte(input))
 	return hex.EncodeToString(hash[:])[:12]
 }
 
 // DockerfilePluginCachePath returns the file path where the build record for a Dockerfile plugin is stored under cacheDirectory.
 func DockerfilePluginCachePath(cacheDirectory, repoRoot, pluginName, dockerfilePath string) string {
-	sanitizedPath := strings.ReplaceAll(filepath.ToSlash(filepath.Clean(dockerfilePath)), "/", "-")
-	filename := fmt.Sprintf("%s-%s-%s.json", sanitizedPath, pluginName, repoRootHash(repoRoot))
+	filename := fmt.Sprintf("%s-%s-%s.json", pluginName, shortHash(repoRoot), shortHash(dockerfilePath))
 	return filepath.Join(cacheDirectory, "plugins", "builds", filename)
 }
 
@@ -132,9 +142,22 @@ func EnsureDockerfilePluginImage(
 	dockerfilePath string,
 	options ContainerPluginOptions,
 ) (string, error) {
-	key, err := DockerfilePluginCacheKey(scope.SourceTree(), dockerfilePath, options.BuildkitHost)
-	if err != nil {
-		return "", fmt.Errorf("computing plugin cache key for %s (%s): %w", pluginName, dockerfilePath, err)
+	var key string
+	var target *gitsource.Target
+
+	if gitsource.IsURL(dockerfilePath) {
+		resolvedTarget, err := gitsource.ResolveTarget(ctx, dockerfilePath)
+		if err != nil {
+			return "", fmt.Errorf("plugin %q: URL %q: %w", pluginName, dockerfilePath, err)
+		}
+		target = resolvedTarget
+		key = URLPluginCacheKey(target.Commit, target.Path, options.BuildkitHost)
+	} else {
+		localKey, err := DockerfilePluginCacheKey(scope.SourceTree(), dockerfilePath, options.BuildkitHost)
+		if err != nil {
+			return "", fmt.Errorf("computing plugin cache key for %s (%s): %w", pluginName, dockerfilePath, err)
+		}
+		key = localKey
 	}
 
 	recordPath := DockerfilePluginCachePath(options.CacheDirectory, scope.RepoRoot(), pluginName, dockerfilePath)
@@ -159,7 +182,40 @@ func EnsureDockerfilePluginImage(
 		}
 	}
 
-	imageID, err := options.BuildImage(ctx, scope, pluginName, dockerfilePath, options.BuildkitHost)
+	buildScope := scope
+	buildDockerfile := dockerfilePath
+
+	if target != nil {
+		cloneDir, err := gitsource.CloneOrUpdate(ctx, options.CacheDirectory, target)
+		if err != nil {
+			return "", fmt.Errorf("plugin %q: URL %q: clone failed: %w", pluginName, dockerfilePath, err)
+		}
+
+		repoRootFS, err := os.OpenRoot(cloneDir)
+		if err != nil {
+			return "", fmt.Errorf("plugin %q: URL %q: opening clone directory %s: %w", pluginName, dockerfilePath, cloneDir, err)
+		}
+		defer func() {
+			if closeErr := repoRootFS.Close(); closeErr != nil {
+				scoped.Log(ctx).V(2).Info("failed to close clone directory root", "directory", cloneDir, "error", closeErr)
+			}
+		}()
+
+		fileInfo, err := repoRootFS.Stat(filepath.FromSlash(target.Path))
+		if err != nil || !fileInfo.Mode().IsRegular() {
+			return "", fmt.Errorf("plugin %q: URL %q: path %q not found at commit %s", pluginName, dockerfilePath, target.Path, target.Commit)
+		}
+
+		remoteTree, err := sourcetree.Load(cloneDir)
+		if err != nil {
+			return "", fmt.Errorf("plugin %q: URL %q: loading source tree for %s: %w", pluginName, dockerfilePath, cloneDir, err)
+		}
+
+		buildScope = tasks.NewTaskContext(cloneDir, cloneDir, remoteTree)
+		buildDockerfile = target.Path
+	}
+
+	imageID, err := options.BuildImage(ctx, buildScope, pluginName, buildDockerfile, options.BuildkitHost)
 	if err != nil {
 		return "", err
 	}

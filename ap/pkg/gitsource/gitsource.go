@@ -24,7 +24,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 )
 
@@ -42,12 +41,10 @@ type matchResult struct {
 	Path   string
 }
 
-// IsURL reports whether target is a supported Git repository URL.
+// IsURL reports whether target appears to be a URL or Git repository reference rather than a local file path.
 func IsURL(target string) bool {
 	trimmed := strings.TrimSpace(target)
-	return strings.HasPrefix(trimmed, "https://") ||
-		strings.HasPrefix(trimmed, "http://") ||
-		strings.HasPrefix(trimmed, "file://")
+	return strings.Contains(trimmed, "://") || strings.HasPrefix(trimmed, "git@")
 }
 
 func isCommitSHA(candidate string) bool {
@@ -109,9 +106,22 @@ func listRemoteRefs(ctx context.Context, repoURL string) (map[string]string, err
 func matchRefAndPath(ctx context.Context, repoURL, candidate string) (*matchResult, error) {
 	candidate = strings.Trim(candidate, "/")
 
+	parts := strings.Split(candidate, "/")
+	if len(parts) > 0 && isCommitSHA(parts[0]) {
+		remainingPath := strings.Join(parts[1:], "/")
+		if remainingPath == "" {
+			remainingPath = "."
+		}
+		return &matchResult{
+			Ref:    parts[0],
+			Commit: parts[0],
+			Path:   remainingPath,
+		}, nil
+	}
+
 	remoteRefs, err := listRemoteRefs(ctx, repoURL)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not reach repository %s: %w", repoURL, err)
 	}
 
 	if candidate == "" || candidate == "." {
@@ -126,7 +136,6 @@ func matchRefAndPath(ctx context.Context, repoURL, candidate string) (*matchResu
 		}, nil
 	}
 
-	parts := strings.Split(candidate, "/")
 	for i := len(parts); i >= 1; i-- {
 		refCandidate := strings.Join(parts[:i], "/")
 		if commitSHA, found := remoteRefs[refCandidate]; found {
@@ -142,18 +151,6 @@ func matchRefAndPath(ctx context.Context, repoURL, candidate string) (*matchResu
 		}
 	}
 
-	if isCommitSHA(parts[0]) {
-		remainingPath := strings.Join(parts[1:], "/")
-		if remainingPath == "" {
-			remainingPath = "."
-		}
-		return &matchResult{
-			Ref:    parts[0],
-			Commit: parts[0],
-			Path:   remainingPath,
-		}, nil
-	}
-
 	return nil, fmt.Errorf("could not match ref in %q against branches or tags in %s", candidate, repoURL)
 }
 
@@ -166,7 +163,7 @@ func extractCandidate(candidateURL string) string {
 	pathSegments := strings.Split(trimmedPath, "/")
 	if len(pathSegments) >= 3 {
 		remainingSegments := pathSegments[2:]
-		if len(remainingSegments) > 0 && remainingSegments[0] == "blob" {
+		if len(remainingSegments) > 0 && (remainingSegments[0] == "blob" || remainingSegments[0] == "raw") {
 			remainingSegments = remainingSegments[1:]
 		}
 		return strings.Join(remainingSegments, "/")
@@ -193,9 +190,18 @@ func resolveKustomizeStyle(ctx context.Context, parsedURL *url.URL) (*Target, er
 	}
 
 	ref := parsedURL.Query().Get("ref")
+	if isCommitSHA(ref) {
+		return &Target{
+			RepoURL: repoURL,
+			Ref:     ref,
+			Commit:  ref,
+			Path:    subPath,
+		}, nil
+	}
+
 	remoteRefs, err := listRemoteRefs(ctx, repoURL)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not reach repository %s: %w", repoURL, err)
 	}
 
 	var commitSHA string
@@ -205,8 +211,6 @@ func resolveKustomizeStyle(ctx context.Context, parsedURL *url.URL) (*Target, er
 			return nil, fmt.Errorf("could not find HEAD ref in %s", repoURL)
 		}
 		commitSHA = headSHA
-	} else if isCommitSHA(ref) {
-		commitSHA = ref
 	} else if sha, found := remoteRefs[ref]; found {
 		commitSHA = sha
 	} else {
@@ -221,18 +225,18 @@ func resolveKustomizeStyle(ctx context.Context, parsedURL *url.URL) (*Target, er
 	}, nil
 }
 
-func resolveRawGitHub(ctx context.Context, parsedURL *url.URL) (*Target, error) {
+func resolveGitHub(ctx context.Context, parsedURL *url.URL) (*Target, error) {
 	trimmedPath := strings.Trim(parsedURL.Path, "/")
 	pathSegments := strings.Split(trimmedPath, "/")
 	if len(pathSegments) < 2 {
-		return nil, fmt.Errorf("invalid GitHub raw URL %q", parsedURL.String())
+		return nil, fmt.Errorf("invalid GitHub URL %q", parsedURL.String())
 	}
 	organization := pathSegments[0]
 	repository := strings.TrimSuffix(pathSegments[1], ".git")
 	repoURL := fmt.Sprintf("https://github.com/%s/%s.git", organization, repository)
 
 	remainingSegments := pathSegments[2:]
-	if len(remainingSegments) > 0 && remainingSegments[0] == "blob" {
+	if len(remainingSegments) > 0 && (remainingSegments[0] == "blob" || remainingSegments[0] == "raw") {
 		remainingSegments = remainingSegments[1:]
 	}
 	candidate := strings.Join(remainingSegments, "/")
@@ -259,7 +263,7 @@ func resolveFromHeaders(ctx context.Context, parsedURL *url.URL) (*Target, error
 
 	response, err := scoped.HTTPClient(ctx).Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch %s: %w", cleanURL, err)
+		return nil, fmt.Errorf("could not reach repository %s: %w", cleanURL, err)
 	}
 	defer func() {
 		if closeErr := response.Body.Close(); closeErr != nil {
@@ -269,7 +273,7 @@ func resolveFromHeaders(ctx context.Context, parsedURL *url.URL) (*Target, error
 
 	repoDownload := response.Header.Get("x-repository-download")
 	if repoDownload == "" {
-		return nil, fmt.Errorf("URL %q did not return an x-repository-download header", cleanURL)
+		return nil, fmt.Errorf("not a supported URL: %q did not return an x-repository-download header", cleanURL)
 	}
 
 	repoURL := strings.TrimPrefix(strings.TrimSpace(repoDownload), "git clone ")
@@ -306,16 +310,24 @@ func resolveFromHeaders(ctx context.Context, parsedURL *url.URL) (*Target, error
 // ResolveTarget parses a Git or web URL into a Target containing RepoURL, Ref, Commit, and Path.
 func ResolveTarget(ctx context.Context, rawURL string) (*Target, error) {
 	cleanURL := strings.TrimSpace(rawURL)
+	if strings.HasPrefix(cleanURL, "git@") {
+		return nil, fmt.Errorf("not a supported URL %q: SSH syntax is not supported", cleanURL)
+	}
+
 	parsedURL, err := url.Parse(cleanURL)
 	if err != nil {
-		return nil, fmt.Errorf("invalid URL %q: %w", rawURL, err)
+		return nil, fmt.Errorf("not a supported URL %q: %w", rawURL, err)
+	}
+
+	if parsedURL.Scheme != "https" && parsedURL.Scheme != "http" && parsedURL.Scheme != "file" {
+		return nil, fmt.Errorf("not a supported URL %q: scheme %q is not supported", cleanURL, parsedURL.Scheme)
 	}
 
 	if strings.Contains(parsedURL.Path, "//") {
 		return resolveKustomizeStyle(ctx, parsedURL)
 	}
-	if parsedURL.Host == "raw.github.com" || parsedURL.Host == "raw.githubusercontent.com" {
-		return resolveRawGitHub(ctx, parsedURL)
+	if parsedURL.Host == "github.com" || parsedURL.Host == "raw.github.com" || parsedURL.Host == "raw.githubusercontent.com" {
+		return resolveGitHub(ctx, parsedURL)
 	}
 	return resolveFromHeaders(ctx, parsedURL)
 }
@@ -372,14 +384,9 @@ func cloneFresh(ctx context.Context, repoDirectory string, target *Target) error
 	return fetchAndCheckout(ctx, repoDirectory, target)
 }
 
-// CloneOrUpdate clones or fetches target.RepoURL into a subdirectory of cacheRoot (derived via fileutils.CacheDir),
+// CloneOrUpdate clones or fetches target.RepoURL into a subdirectory of cacheRoot,
 // checks out target.Commit in detached HEAD mode, and returns the path to the repository on disk.
-func CloneOrUpdate(ctx context.Context, target *Target) (string, error) {
-	cacheRoot, err := fileutils.CacheDir()
-	if err != nil {
-		return "", fmt.Errorf("failed to determine cache dir: %w", err)
-	}
-
+func CloneOrUpdate(ctx context.Context, cacheRoot string, target *Target) (string, error) {
 	repoDirectory, err := repoCacheDir(cacheRoot, target.RepoURL)
 	if err != nil {
 		return "", err

@@ -92,6 +92,10 @@ func TestLoadPluginsConfig_Validation(t *testing.T) {
 			name: "valid dockerfile",
 			yaml: "plugins:\n  testplugin:\n    dockerfile: Dockerfile\n",
 		},
+		{
+			name: "valid git url dockerfile",
+			yaml: "plugins:\n  testplugin:\n    dockerfile: https://github.com/gke-labs/gke-labs-infra/blob/main/ap/images/ap-astro/Dockerfile\n",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -104,8 +108,8 @@ func TestLoadPluginsConfig_Validation(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), "testplugin") || !strings.Contains(err.Error(), tc.wantErrPart) {
 					t.Fatalf("expected error naming plugin and containing %q, got: %v", tc.wantErrPart, err)
 				}
-			} else if err != nil || cfg.Plugins["testplugin"].Dockerfile != "Dockerfile" {
-				t.Fatalf("unexpected error or config for valid dockerfile: %v", err)
+			} else if err != nil || cfg.Plugins["testplugin"].Dockerfile == "" {
+				t.Fatalf("unexpected error or empty dockerfile: %v", err)
 			}
 		})
 	}

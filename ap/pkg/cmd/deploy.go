@@ -24,6 +24,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/applyset"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/gitsource"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/imageref"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
@@ -102,7 +103,11 @@ func (opt *DeployOptions) Resolve(ctx context.Context, args []string) error {
 			shortCommit = shortCommit[:7]
 		}
 		scoped.Log(ctx).Info(fmt.Sprintf("deploying %s@%s path %s", target.RepoURL, shortCommit, target.Path))
-		cloneDir, err := gitsource.CloneOrUpdate(ctx, target)
+		cacheRoot, err := fileutils.CacheDir()
+		if err != nil {
+			return fmt.Errorf("failed to determine cache dir: %w", err)
+		}
+		cloneDir, err := gitsource.CloneOrUpdate(ctx, cacheRoot, target)
 		if err != nil {
 			return fmt.Errorf("failed to clone repository: %w", err)
 		}

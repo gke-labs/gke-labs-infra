@@ -152,6 +152,9 @@ message TaskResult {
     astro:
       image: ghcr.io/gke-labs/astro-builder@sha256:4b22...
       network: false
+    remote-tool:
+      dockerfile: https://github.com/gke-labs/gke-labs-infra/blob/<commit>/ap/images/ap-astro/Dockerfile
+      network: false
     local-tool:
       dockerfile: images/local-builder/Dockerfile
       network: false
