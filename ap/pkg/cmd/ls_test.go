@@ -162,6 +162,7 @@ func main() {
 	if err := os.WriteFile(filepath.Join(dockerBinDirectory, "docker"), []byte(mockToolScript), 0755); err != nil {
 		t.Fatal(err)
 	}
+	t.Setenv("PATH", dockerBinDirectory+string(filepath.ListSeparator)+os.Getenv("PATH"))
 
 	buildxBinDirectory := filepath.Join(cacheDirectory, "tools", "docker-buildx", "v0.38.1", "bin")
 	if err := os.MkdirAll(buildxBinDirectory, 0755); err != nil {

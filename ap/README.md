@@ -342,7 +342,20 @@ that fails if any generated file lacks a standard generated code header.
 
 Configures plugins for extensible build tooling.
 
-Plugins communicate with `ap` using gRPC over container stdio (`ap.plugin/v1alpha1`). When a plugin container starts, `ap` discovers capabilities via the `Describe` RPC, streams repository view files as `FileChunk` messages over the bi-directional `RunTask` stream, receives streamed task logs and output chunks, and safely writes outputs via `fileutils.UntrustedRoot`.
+Plugins communicate with `ap` using gRPC over stdio (`ap.plugin/v1alpha1`). When a plugin starts, `ap` discovers capabilities via the `Describe` RPC, streams repository view files as `FileChunk` messages over the bi-directional `RunTask` stream, receives streamed task logs and output chunks, and safely writes outputs via `fileutils.UntrustedRoot`. Files travel over the stream; no mounts are required.
+
+#### Sandbox Backends and Requirements
+
+- **`image:` plugins run through the clix sandbox library**: `ap` launches remote container images through `github.com/gke-labs/clix/sandbox` rather than requiring Docker directly.
+- **Backend Auto-Detection**: `ap` automatically detects the sandbox backend to use. It tests backends in a fixed order:
+  1. `docker`: Used whenever a Docker engine answers on the host.
+  2. `apple-container`: Used on macOS when the `container` CLI is installed.
+  3. `chroot`: Used on Linux when user namespaces or root privileges are available.
+  4. `proot`: Used on Linux when `proot` is installed on `PATH`.
+  - Detection is entirely automatic: `ap` does not read `CLIX_SANDBOX`, and there is no flag or configuration key.
+  - If no backend works on the host, `ap` fails with an actionable error listing every backend tried and why each failed.
+- **Network Isolation Guarantee**: Plugins default to running offline without network access (`network: none` in the sandbox). Where a backend cannot guarantee network isolation, the run fails with an error naming the plugin and the backend reason.
+- **`dockerfile:` plugins require Docker**: Plugins defined with `dockerfile:` are built into the local Docker engine and referenced by local image ID, which non-Docker backends cannot access. On a host without Docker, a `dockerfile:` plugin fails with an error stating that Docker is required and naming the plugin; `image:` plugins continue to work using other available sandbox backends.
 
 Example `.ap/plugins.yaml`:
 ```yaml

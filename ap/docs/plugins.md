@@ -4,13 +4,15 @@
 
 `ap` automates development tasks across repositories using convention over configuration. Today, `ap` implements a fixed set of built-in toolchains (Go, protoc, docker, kind). To support additional toolchains without baking foreign runtimes (e.g. Node.js for Astro documentation sites) into the host or `ap` binary, `ap` introduces an extensible **plugin** model.
 
-The design operates within the following established constraints (decisions 2026-11-15 & 2026-11-16):
+The design operates within the following established constraints (decisions 2026-11-15 to 2026-11-17):
 - **gRPC over Stdio Transport**: `ap` launches the plugin container with stdin attached and no network, speaking gRPC directly over stdin and stdout. No TCP ports, mounted unix sockets, or `docker cp` commands are used.
-- **End-to-End RPC Scope**: All operations—capability discovery (`Describe`), task execution (`RunTask`), source tree input streaming, task logs, and staged outputs—pass exclusively through the RPC stream. Container `/src` and `/out` directories are eliminated.
-- **Declarative Activation & Directed Outputs**: Plugins declare repository-relative activation patterns (`activation: ["docs/astro.config.*"]`). The containing directory is the unit of work. Output files are received via RPC and written via `fileutils.UntrustedRoot` (regular files only, no `.git`, no path escapes).
-- **Hermetic by Default & Two-Key Network**: Container runs with `--network none` unless network is declared in the plugin manifest AND explicitly authorized in `.ap/plugins.yaml`.
+- **Clix Sandbox Library**: Rather than `ap` invoking `docker run` directly, `image:` plugins are executed through `github.com/gke-labs/clix/sandbox` behind a unified `sandbox.Sandbox` interface (`docker`, `apple-container`, `chroot`, `proot`).
+- **End-to-End RPC Scope**: All operations—capability discovery (`Describe`), task execution (`RunTask`), source tree input streaming, task logs, and staged outputs—pass exclusively through the RPC stream. Container `/src` and `/out` directories are eliminated. No filesystem mounts are needed.
+- **Hermetic by Default & Two-Key Network**: Runs with `Config.Network: "none"` unless network is declared in the plugin manifest AND explicitly authorized in `.ap/plugins.yaml`. Backends that cannot guarantee network isolation reject no-network runs.
+- **Backend Auto-Detection**: Sandbox backends are probed in fixed order (`docker`, `apple-container`, `chroot`, `proot`). If no backend works, `ap` lists what was tried and why each failed.
+- **`dockerfile:` Plugins**: Require Docker because they are built into the local engine and referenced by image ID. On hosts without Docker, `dockerfile:` plugins fail with an actionable error naming the plugin; `image:` plugins work.
 - **Unified Interface & Discovery Caching**: Built-in Go tooling and container plugins share the same plugin metadata abstractions. Discovery results are cached under `AP_CACHE_DIR` by image digest or local Dockerfile image ID.
-- **Recommendation**: Standardize all container plugin interaction on gRPC over container stdin/stdout.
+- **Recommendation**: Standardize all container plugin interaction on gRPC over container stdin/stdout via the clix sandbox library.
 - **Alternative Not Taken**: Command-line subcommands (`describe`/`run`) combined with `docker cp` tar streaming into `/src` and `/out`. Rejected because multiple external `docker cp` invocations add process overhead, require temporary filesystem directories, and lack stream-level lifecycle control.
 
 ---
@@ -102,12 +104,12 @@ message TaskResult {
 ## 3. Framing on Stdio & Transport
 
 - **Duplex Stdio Connection**: gRPC runs over HTTP/2, requiring a bidirectional byte stream (`net.Conn`).
-  - On the host, `ap` spawns `docker run -i --network none <image>` and wraps `cmd.StdinPipe()` and `cmd.StdoutPipe()` into a `net.Conn` duplex adapter passed to `grpc.WithContextDialer` (the same command-as-connection mechanism used by BuildKit's connection helpers in `github.com/docker/cli/cli/connhelper/commandconn` and `buildctl dial-stdio`).
+  - On the host, `ap` invokes the sandbox backend via `sandbox.Run(ctx, stdin, stdout, stderr, config, args)` using a pipe pair (`io.Pipe()`), wrapping the host end with `stdio.NewConn` and passing it to `grpc.WithContextDialer` (the same command-as-connection mechanism used by BuildKit's connection helpers in `github.com/docker/cli/cli/connhelper/commandconn` and `buildctl dial-stdio`). Files travel over the stream; no mounts are attached.
   - Inside the container, the plugin wraps `os.Stdin` and `os.Stdout` into a `net.Conn` and serves it with a `net.Listener` whose `Accept()` returns the connection once and blocks on subsequent calls.
 - **Logging Roles (Two Channels)**:
   - *Task tool output (`LogLine`)*: Output produced by the tools that a task executes travels strictly as `LogLine` messages over the `RunTaskResponse` stream. This allows `ap` to interleave stdout and stderr in chronological order within the task log and route output to `TaskContext.Stdout()` and `TaskContext.Stderr()`.
   - *Container stderr*: The container's raw `stderr` is reserved exclusively for the plugin process's own internal diagnostics when no task stream exists (e.g. startup initialization failures or fatal crashes before gRPC serves). `ap` writes container stderr to its verbose debug log (`scoped.Log(ctx).Fine`), or prints it to host stderr if the container exits unexpectedly. Container stdout carries binary HTTP/2 frames and must never receive unstructured text.
-- **Recommendation**: Run gRPC over container stdio using a BuildKit-style `dial-stdio` adapter, routing task output to `LogLine` and plugin process diagnostics to stderr.
+- **Recommendation**: Run gRPC over sandbox stdio using a BuildKit-style `dial-stdio` adapter, routing task output to `LogLine` and plugin process diagnostics to stderr.
 - **Alternative Not Taken**: Unix domain sockets or localhost TCP. Bind-mounted unix sockets fail on macOS where Docker runs inside a VM (the socket appears in the filesystem but `connect(2)` fails across the hypervisor). TCP requires port allocation and risks port conflicts or firewall blocks.
 
 ---
