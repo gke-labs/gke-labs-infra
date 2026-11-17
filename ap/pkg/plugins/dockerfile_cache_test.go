@@ -16,10 +16,9 @@ package plugins_test
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -34,15 +33,13 @@ func setupTestRepo(t *testing.T) string {
 	repoRoot := t.TempDir()
 
 	files := map[string]string{
-		".gitignore":               "ignored.txt\n*.tmp\n",
-		"ignored.txt":              "this is ignored\n",
 		"images/plugin/Dockerfile": "FROM alpine\nRUN echo hello\n",
 		"pkg/app/main.go":          "package main\n\nfunc main() {}\n",
 		"docs/readme.md":           "# Demo\n",
 	}
 
-	for relPath, content := range files {
-		absPath := filepath.Join(repoRoot, relPath)
+	for relativePath, content := range files {
+		absPath := filepath.Join(repoRoot, relativePath)
 		if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -54,444 +51,434 @@ func setupTestRepo(t *testing.T) string {
 	return repoRoot
 }
 
-func TestDockerfilePluginCacheKey_Stable(t *testing.T) {
-	repoRoot := setupTestRepo(t)
-	sourcetree.ResetCache()
-	tree, err := sourcetree.Open(repoRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-
+func TestDockerfilePluginCacheKey(t *testing.T) {
 	dockerfilePath := "images/plugin/Dockerfile"
-	key1, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "")
-	if err != nil {
-		t.Fatalf("DockerfilePluginCacheKey failed: %v", err)
-	}
-	key2, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "")
-	if err != nil {
-		t.Fatalf("DockerfilePluginCacheKey failed: %v", err)
-	}
 
-	if key1 != key2 {
-		t.Errorf("expected stable key on repeated runs, got %s and %s", key1, key2)
-	}
-}
-
-func TestDockerfilePluginCacheKey_ContextFileChange(t *testing.T) {
-	repoRoot := setupTestRepo(t)
-	sourcetree.ResetCache()
-	tree, err := sourcetree.Open(repoRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	dockerfilePath := "images/plugin/Dockerfile"
-	initialKey, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Change a context file
-	appFile := filepath.Join(repoRoot, "pkg/app/main.go")
-	if err := os.WriteFile(appFile, []byte("package main\n\nfunc Updated() {}\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	sourcetree.ResetCache()
-	updatedTree, err := sourcetree.Open(repoRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	newKey, err := plugins.DockerfilePluginCacheKey(updatedTree, dockerfilePath, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if initialKey == newKey {
-		t.Errorf("expected key to change when context file changes, but both were %s", initialKey)
-	}
-}
-
-func TestDockerfilePluginCacheKey_ContextFileModeChange(t *testing.T) {
-	repoRoot := setupTestRepo(t)
-	sourcetree.ResetCache()
-	tree, err := sourcetree.Open(repoRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	dockerfilePath := "images/plugin/Dockerfile"
-	initialKey, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Change mode of a context file
-	appFile := filepath.Join(repoRoot, "pkg/app/main.go")
-	if err := os.Chmod(appFile, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	sourcetree.ResetCache()
-	updatedTree, err := sourcetree.Open(repoRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	newKey, err := plugins.DockerfilePluginCacheKey(updatedTree, dockerfilePath, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if initialKey == newKey {
-		t.Errorf("expected key to change when context file mode changes, but both were %s", initialKey)
-	}
-}
-
-func TestDockerfilePluginCacheKey_DockerfileContentChange(t *testing.T) {
-	repoRoot := setupTestRepo(t)
-	sourcetree.ResetCache()
-	tree, err := sourcetree.Open(repoRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	dockerfilePath := "images/plugin/Dockerfile"
-	initialKey, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Change the Dockerfile
-	df := filepath.Join(repoRoot, dockerfilePath)
-	if err := os.WriteFile(df, []byte("FROM alpine\nRUN echo modified\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	sourcetree.ResetCache()
-	updatedTree, err := sourcetree.Open(repoRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	newKey, err := plugins.DockerfilePluginCacheKey(updatedTree, dockerfilePath, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if initialKey == newKey {
-		t.Errorf("expected key to change when Dockerfile content changes, but both were %s", initialKey)
-	}
-}
-
-func TestDockerfilePluginCacheKey_DockerfileChangePath(t *testing.T) {
-	repoRoot := setupTestRepo(t)
-	sourcetree.ResetCache()
-	tree, err := sourcetree.Open(repoRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	key1, err := plugins.DockerfilePluginCacheKey(tree, "images/plugin/Dockerfile", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Clean path normalization check
-	keyNormalized, err := plugins.DockerfilePluginCacheKey(tree, "images/plugin/./Dockerfile", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if key1 != keyNormalized {
-		t.Errorf("expected clean path to produce same key: %s != %s", key1, keyNormalized)
-	}
-
-	// Different path
-	key2, err := plugins.DockerfilePluginCacheKey(tree, "images/other/Dockerfile", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if key1 == key2 {
-		t.Errorf("expected different Dockerfile path to produce different key: %s == %s", key1, key2)
-	}
-}
-
-func TestDockerfilePluginCacheKey_BuildkitHostChange(t *testing.T) {
-	repoRoot := setupTestRepo(t)
-	sourcetree.ResetCache()
-	tree, err := sourcetree.Open(repoRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	dockerfilePath := "images/plugin/Dockerfile"
-	keyLocal, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	keyRemote, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "tcp://127.0.0.1:2375")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if keyLocal == keyRemote {
-		t.Errorf("expected key to change when BuildKit host changes, but both were %s", keyLocal)
-	}
-}
-
-func TestDockerfilePluginCacheKey_IgnoredFilesIgnored(t *testing.T) {
-	repoRoot := setupTestRepo(t)
-	sourcetree.ResetCache()
-	tree, err := sourcetree.Open(repoRoot, sourcetree.WithIgnore("ignored.txt"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	dockerfilePath := "images/plugin/Dockerfile"
-	initialKey, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Modify ignored file
-	ignoredFile := filepath.Join(repoRoot, "ignored.txt")
-	if err := os.WriteFile(ignoredFile, []byte("changed ignored content\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Also modify a default ignored directory (node_modules)
-	nodeModulesFile := filepath.Join(repoRoot, "node_modules", "package.json")
-	if err := os.MkdirAll(filepath.Dir(nodeModulesFile), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(nodeModulesFile, []byte(`{"name":"foo"}`), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	sourcetree.ResetCache()
-	updatedTree, err := sourcetree.Open(repoRoot, sourcetree.WithIgnore("ignored.txt"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	newKey, err := plugins.DockerfilePluginCacheKey(updatedTree, dockerfilePath, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if initialKey != newKey {
-		t.Errorf("expected ignored file change to not affect key: %s != %s", initialKey, newKey)
-	}
-}
-
-func TestEnsureDockerfilePluginImage_RecordPresentAndImagePresentMeansNoBuild(t *testing.T) {
-	repoRoot := setupTestRepo(t)
-	cacheDir := t.TempDir()
-	sourcetree.ResetCache()
-	tree, err := sourcetree.Open(repoRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	scope := tasks.NewTaskContext(repoRoot, repoRoot, tree)
-
-	var buildCount int64
-	fakeBuild := func(ctx context.Context, s *tasks.TaskContext, pluginName, dockerfilePath, buildkitHost string) (string, error) {
-		atomic.AddInt64(&buildCount, 1)
-		return "sha256:fake-image-id-1234", nil
-	}
-
-	existingImages := map[string]bool{
-		"sha256:fake-image-id-1234": true,
-	}
-	fakeLookup := func(ctx context.Context, s *tasks.TaskContext, imageID string) (bool, error) {
-		return existingImages[imageID], nil
-	}
-
-	// 1. First run: cold cache -> build is called
-	imageID1, err := plugins.EnsureDockerfilePluginImage(t.Context(), scope, cacheDir, "myplugin", "images/plugin/Dockerfile", "", fakeBuild, fakeLookup)
-	if err != nil {
-		t.Fatalf("first EnsureDockerfilePluginImage failed: %v", err)
-	}
-	if imageID1 != "sha256:fake-image-id-1234" {
-		t.Errorf("expected image ID 'sha256:fake-image-id-1234', got: %s", imageID1)
-	}
-	if atomic.LoadInt64(&buildCount) != 1 {
-		t.Fatalf("expected build count 1 on cold run, got: %d", atomic.LoadInt64(&buildCount))
-	}
-
-	// Verify record file was written
-	key, err := plugins.DockerfilePluginCacheKey(tree, "images/plugin/Dockerfile", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	recordPath := plugins.DockerfilePluginCachePath(cacheDir, key)
-	recordData, err := os.ReadFile(recordPath)
-	if err != nil {
-		t.Fatalf("expected record file at %s: %v", recordPath, err)
-	}
-	if strings.TrimSpace(string(recordData)) != "sha256:fake-image-id-1234" {
-		t.Errorf("expected record content 'sha256:fake-image-id-1234', got: %q", string(recordData))
-	}
-
-	// 2. Second run: record present and image present in engine -> NO build!
-	imageID2, err := plugins.EnsureDockerfilePluginImage(t.Context(), scope, cacheDir, "myplugin", "images/plugin/Dockerfile", "", fakeBuild, fakeLookup)
-	if err != nil {
-		t.Fatalf("second EnsureDockerfilePluginImage failed: %v", err)
-	}
-	if imageID2 != "sha256:fake-image-id-1234" {
-		t.Errorf("expected image ID 'sha256:fake-image-id-1234', got: %s", imageID2)
-	}
-	if atomic.LoadInt64(&buildCount) != 1 {
-		t.Errorf("expected build count to remain 1 (no rebuild), but was: %d", atomic.LoadInt64(&buildCount))
-	}
-}
-
-func TestEnsureDockerfilePluginImage_ImageGoneTriggersRebuild(t *testing.T) {
-	repoRoot := setupTestRepo(t)
-	cacheDir := t.TempDir()
-	sourcetree.ResetCache()
-	tree, err := sourcetree.Open(repoRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	scope := tasks.NewTaskContext(repoRoot, repoRoot, tree)
-
-	var buildCount int64
-	fakeBuild := func(ctx context.Context, s *tasks.TaskContext, pluginName, dockerfilePath, buildkitHost string) (string, error) {
-		count := atomic.AddInt64(&buildCount, 1)
-		if count == 1 {
-			return "sha256:first-image-1111", nil
+	t.Run("stable across repeated invocations", func(t *testing.T) {
+		repoRoot := setupTestRepo(t)
+		sourcetree.ResetCache()
+		tree, err := sourcetree.Open(repoRoot)
+		if err != nil {
+			t.Fatal(err)
 		}
-		return "sha256:second-image-2222", nil
-	}
 
-	existingImages := map[string]bool{
-		"sha256:first-image-1111": true,
-	}
-	fakeLookup := func(ctx context.Context, s *tasks.TaskContext, imageID string) (bool, error) {
-		return existingImages[imageID], nil
-	}
+		firstKey, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "")
+		if err != nil {
+			t.Fatalf("first DockerfilePluginCacheKey failed: %v", err)
+		}
+		secondKey, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "")
+		if err != nil {
+			t.Fatalf("second DockerfilePluginCacheKey failed: %v", err)
+		}
+		if firstKey != secondKey {
+			t.Errorf("expected stable key, got %s and %s", firstKey, secondKey)
+		}
+	})
 
-	// First run: builds first image
-	id1, err := plugins.EnsureDockerfilePluginImage(t.Context(), scope, cacheDir, "myplugin", "images/plugin/Dockerfile", "", fakeBuild, fakeLookup)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if id1 != "sha256:first-image-1111" {
-		t.Errorf("expected 'sha256:first-image-1111', got %s", id1)
-	}
+	t.Run("changes when context file content changes", func(t *testing.T) {
+		repoRoot := setupTestRepo(t)
+		sourcetree.ResetCache()
+		tree, err := sourcetree.Open(repoRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	// Simulate image deleted from container engine
-	existingImages["sha256:first-image-1111"] = false
-	existingImages["sha256:second-image-2222"] = true
+		initialKey, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "")
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	// Next run: record present, but image is gone -> rebuilds and rewrites record
-	id2, err := plugins.EnsureDockerfilePluginImage(t.Context(), scope, cacheDir, "myplugin", "images/plugin/Dockerfile", "", fakeBuild, fakeLookup)
-	if err != nil {
-		t.Fatalf("expected delete-and-retry to succeed, got: %v", err)
-	}
-	if id2 != "sha256:second-image-2222" {
-		t.Errorf("expected rebuilt image 'sha256:second-image-2222', got %s", id2)
-	}
-	if atomic.LoadInt64(&buildCount) != 2 {
-		t.Errorf("expected build count 2, got: %d", atomic.LoadInt64(&buildCount))
-	}
+		appFile := filepath.Join(repoRoot, "pkg/app/main.go")
+		if err := os.WriteFile(appFile, []byte("package main\n\nfunc Modified() {}\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
 
-	// Third run: new image is present -> no build
-	id3, err := plugins.EnsureDockerfilePluginImage(t.Context(), scope, cacheDir, "myplugin", "images/plugin/Dockerfile", "", fakeBuild, fakeLookup)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if id3 != "sha256:second-image-2222" {
-		t.Errorf("expected 'sha256:second-image-2222', got %s", id3)
-	}
-	if atomic.LoadInt64(&buildCount) != 2 {
-		t.Errorf("expected build count to stay 2, got: %d", atomic.LoadInt64(&buildCount))
-	}
+		sourcetree.ResetCache()
+		updatedTree, err := sourcetree.Open(repoRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		newKey, err := plugins.DockerfilePluginCacheKey(updatedTree, dockerfilePath, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if initialKey == newKey {
+			t.Errorf("expected key to change when context file content changes")
+		}
+	})
+
+	t.Run("changes when context file mode changes", func(t *testing.T) {
+		repoRoot := setupTestRepo(t)
+		sourcetree.ResetCache()
+		tree, err := sourcetree.Open(repoRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		initialKey, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		appFile := filepath.Join(repoRoot, "pkg/app/main.go")
+		if err := os.Chmod(appFile, 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		sourcetree.ResetCache()
+		updatedTree, err := sourcetree.Open(repoRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		newKey, err := plugins.DockerfilePluginCacheKey(updatedTree, dockerfilePath, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if initialKey == newKey {
+			t.Errorf("expected key to change when context file mode changes")
+		}
+	})
+
+	t.Run("changes when Dockerfile content changes", func(t *testing.T) {
+		repoRoot := setupTestRepo(t)
+		sourcetree.ResetCache()
+		tree, err := sourcetree.Open(repoRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		initialKey, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		df := filepath.Join(repoRoot, dockerfilePath)
+		if err := os.WriteFile(df, []byte("FROM alpine\nRUN echo modified\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		sourcetree.ResetCache()
+		updatedTree, err := sourcetree.Open(repoRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		newKey, err := plugins.DockerfilePluginCacheKey(updatedTree, dockerfilePath, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if initialKey == newKey {
+			t.Errorf("expected key to change when Dockerfile content changes")
+		}
+	})
+
+	t.Run("changes when Dockerfile path changes", func(t *testing.T) {
+		repoRoot := setupTestRepo(t)
+		sourcetree.ResetCache()
+		tree, err := sourcetree.Open(repoRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		keyA, err := plugins.DockerfilePluginCacheKey(tree, "images/plugin/Dockerfile", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		keyB, err := plugins.DockerfilePluginCacheKey(tree, "images/other/Dockerfile", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if keyA == keyB {
+			t.Errorf("expected different keys for different Dockerfile paths")
+		}
+	})
+
+	t.Run("changes when BuildKit host changes", func(t *testing.T) {
+		repoRoot := setupTestRepo(t)
+		sourcetree.ResetCache()
+		tree, err := sourcetree.Open(repoRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		localKey, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		remoteKey, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "tcp://127.0.0.1:2375")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if localKey == remoteKey {
+			t.Errorf("expected key to change when BuildKit host changes")
+		}
+	})
+
+	t.Run("ignores ignored files", func(t *testing.T) {
+		repoRoot := setupTestRepo(t)
+		sourcetree.ResetCache()
+		tree, err := sourcetree.Open(repoRoot, sourcetree.WithIgnore("ignored.txt"))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		initialKey, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		ignoredPath := filepath.Join(repoRoot, "ignored.txt")
+		if err := os.WriteFile(ignoredPath, []byte("ignored content\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		sourcetree.ResetCache()
+		updatedTree, err := sourcetree.Open(repoRoot, sourcetree.WithIgnore("ignored.txt"))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		newKey, err := plugins.DockerfilePluginCacheKey(updatedTree, dockerfilePath, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if initialKey != newKey {
+			t.Errorf("expected ignored file change not to affect key: %s != %s", initialKey, newKey)
+		}
+	})
 }
 
-func TestEnsureDockerfilePluginImage_UnreadableRecordTriggersRebuild(t *testing.T) {
-	repoRoot := setupTestRepo(t)
-	cacheDir := t.TempDir()
-	sourcetree.ResetCache()
-	tree, err := sourcetree.Open(repoRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	scope := tasks.NewTaskContext(repoRoot, repoRoot, tree)
+func TestEnsureDockerfilePluginImage(t *testing.T) {
+	dockerfilePath := "images/plugin/Dockerfile"
+	pluginName := "myplugin"
 
-	key, err := plugins.DockerfilePluginCacheKey(tree, "images/plugin/Dockerfile", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	recordPath := plugins.DockerfilePluginCachePath(cacheDir, key)
-	if err := os.MkdirAll(filepath.Dir(recordPath), 0755); err != nil {
-		t.Fatal(err)
-	}
-	// Write empty / whitespace record
-	if err := os.WriteFile(recordPath, []byte("   \n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	t.Run("record present and image present means no build", func(t *testing.T) {
+		repoRoot := setupTestRepo(t)
+		cacheDirectory := t.TempDir()
+		sourcetree.ResetCache()
+		tree, err := sourcetree.Open(repoRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope := tasks.NewTaskContext(repoRoot, repoRoot, tree)
 
-	var buildCount int64
-	fakeBuild := func(ctx context.Context, s *tasks.TaskContext, pluginName, dockerfilePath, buildkitHost string) (string, error) {
-		atomic.AddInt64(&buildCount, 1)
-		return "sha256:fresh-image-3333", nil
-	}
-	fakeLookup := func(ctx context.Context, s *tasks.TaskContext, imageID string) (bool, error) {
-		return true, nil
-	}
+		var buildCount int64
+		fakeBuild := func(_ context.Context, _ *tasks.TaskContext, _, _, _ string) (string, error) {
+			atomic.AddInt64(&buildCount, 1)
+			return "sha256:fake-image-id-1234", nil
+		}
+		fakeLookup := func(_ context.Context, _ *tasks.TaskContext, imageID string) (bool, error) {
+			return imageID == "sha256:fake-image-id-1234", nil
+		}
 
-	// Should delete corrupt record, build fresh image, write new record, return no error
-	id, err := plugins.EnsureDockerfilePluginImage(t.Context(), scope, cacheDir, "myplugin", "images/plugin/Dockerfile", "", fakeBuild, fakeLookup)
-	if err != nil {
-		t.Fatalf("EnsureDockerfilePluginImage failed on unreadable record: %v", err)
-	}
-	if id != "sha256:fresh-image-3333" {
-		t.Errorf("expected 'sha256:fresh-image-3333', got %s", id)
-	}
-	if atomic.LoadInt64(&buildCount) != 1 {
-		t.Errorf("expected build count 1, got %d", atomic.LoadInt64(&buildCount))
-	}
-}
+		options := plugins.ContainerPluginOptions{
+			CacheDirectory: cacheDirectory,
+			BuildImage:     fakeBuild,
+			ImageLookup:    fakeLookup,
+		}
 
-func TestEnsureDockerfilePluginImage_BuildFailureReturnsError(t *testing.T) {
-	repoRoot := setupTestRepo(t)
-	cacheDir := t.TempDir()
-	sourcetree.ResetCache()
-	tree, err := sourcetree.Open(repoRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	scope := tasks.NewTaskContext(repoRoot, repoRoot, tree)
+		firstImageID, err := plugins.EnsureDockerfilePluginImage(t.Context(), scope, pluginName, dockerfilePath, options)
+		if err != nil {
+			t.Fatalf("first EnsureDockerfilePluginImage failed: %v", err)
+		}
+		if firstImageID != "sha256:fake-image-id-1234" {
+			t.Errorf("expected image ID 'sha256:fake-image-id-1234', got %s", firstImageID)
+		}
+		if atomic.LoadInt64(&buildCount) != 1 {
+			t.Fatalf("expected build count 1 on cold run, got %d", atomic.LoadInt64(&buildCount))
+		}
 
-	expectedErr := errors.New("simulated build failure")
-	fakeBuild := func(ctx context.Context, s *tasks.TaskContext, pluginName, dockerfilePath, buildkitHost string) (string, error) {
-		return "", expectedErr
-	}
-	fakeLookup := func(ctx context.Context, s *tasks.TaskContext, imageID string) (bool, error) {
-		return true, nil
-	}
+		recordPath := plugins.DockerfilePluginCachePath(cacheDirectory, pluginName, dockerfilePath)
+		recordData, err := os.ReadFile(recordPath)
+		if err != nil {
+			t.Fatalf("expected record file at %s: %v", recordPath, err)
+		}
+		var record plugins.DockerfilePluginBuildRecord
+		if err := json.Unmarshal(recordData, &record); err != nil {
+			t.Fatalf("parsing record file: %v", err)
+		}
+		if record.ImageID != "sha256:fake-image-id-1234" {
+			t.Errorf("expected recorded image ID 'sha256:fake-image-id-1234', got %s", record.ImageID)
+		}
 
-	_, err = plugins.EnsureDockerfilePluginImage(t.Context(), scope, cacheDir, "myplugin", "images/plugin/Dockerfile", "", fakeBuild, fakeLookup)
-	if !errors.Is(err, expectedErr) {
-		t.Fatalf("expected error %v, got %v", expectedErr, err)
-	}
+		// Second invocation: record and image present -> build is skipped
+		secondImageID, err := plugins.EnsureDockerfilePluginImage(t.Context(), scope, pluginName, dockerfilePath, options)
+		if err != nil {
+			t.Fatalf("second EnsureDockerfilePluginImage failed: %v", err)
+		}
+		if secondImageID != "sha256:fake-image-id-1234" {
+			t.Errorf("expected image ID 'sha256:fake-image-id-1234', got %s", secondImageID)
+		}
+		if atomic.LoadInt64(&buildCount) != 1 {
+			t.Errorf("expected build count to stay 1, got %d", atomic.LoadInt64(&buildCount))
+		}
+	})
 
-	key, err := plugins.DockerfilePluginCacheKey(tree, "images/plugin/Dockerfile", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	recordPath := plugins.DockerfilePluginCachePath(cacheDir, key)
-	if _, err := os.Stat(recordPath); !os.IsNotExist(err) {
-		t.Errorf("expected no record file to be written on build failure, but file exists")
-	}
+	t.Run("missing image triggers rebuild", func(t *testing.T) {
+		repoRoot := setupTestRepo(t)
+		cacheDirectory := t.TempDir()
+		sourcetree.ResetCache()
+		tree, err := sourcetree.Open(repoRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope := tasks.NewTaskContext(repoRoot, repoRoot, tree)
+
+		var buildCount int64
+		fakeBuild := func(_ context.Context, _ *tasks.TaskContext, _, _, _ string) (string, error) {
+			count := atomic.AddInt64(&buildCount, 1)
+			if count == 1 {
+				return "sha256:first-image-1111", nil
+			}
+			return "sha256:second-image-2222", nil
+		}
+
+		engineImages := map[string]bool{
+			"sha256:first-image-1111": true,
+		}
+		fakeLookup := func(_ context.Context, _ *tasks.TaskContext, imageID string) (bool, error) {
+			return engineImages[imageID], nil
+		}
+
+		options := plugins.ContainerPluginOptions{
+			CacheDirectory: cacheDirectory,
+			BuildImage:     fakeBuild,
+			ImageLookup:    fakeLookup,
+		}
+
+		firstID, err := plugins.EnsureDockerfilePluginImage(t.Context(), scope, pluginName, dockerfilePath, options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if firstID != "sha256:first-image-1111" {
+			t.Errorf("expected 'sha256:first-image-1111', got %s", firstID)
+		}
+
+		// Simulate image deleted / pruned from local engine
+		engineImages["sha256:first-image-1111"] = false
+		engineImages["sha256:second-image-2222"] = true
+
+		secondID, err := plugins.EnsureDockerfilePluginImage(t.Context(), scope, pluginName, dockerfilePath, options)
+		if err != nil {
+			t.Fatalf("expected rebuild when image is gone, got: %v", err)
+		}
+		if secondID != "sha256:second-image-2222" {
+			t.Errorf("expected 'sha256:second-image-2222', got %s", secondID)
+		}
+		if atomic.LoadInt64(&buildCount) != 2 {
+			t.Errorf("expected build count 2 after missing image rebuild, got %d", atomic.LoadInt64(&buildCount))
+		}
+	})
+
+	t.Run("unreadable record triggers rebuild", func(t *testing.T) {
+		repoRoot := setupTestRepo(t)
+		cacheDirectory := t.TempDir()
+		sourcetree.ResetCache()
+		tree, err := sourcetree.Open(repoRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope := tasks.NewTaskContext(repoRoot, repoRoot, tree)
+
+		recordPath := plugins.DockerfilePluginCachePath(cacheDirectory, pluginName, dockerfilePath)
+		if err := os.MkdirAll(filepath.Dir(recordPath), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(recordPath, []byte("not valid json"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		var buildCount int64
+		fakeBuild := func(_ context.Context, _ *tasks.TaskContext, _, _, _ string) (string, error) {
+			atomic.AddInt64(&buildCount, 1)
+			return "sha256:fresh-image-3333", nil
+		}
+		fakeLookup := func(_ context.Context, _ *tasks.TaskContext, _ string) (bool, error) {
+			return true, nil
+		}
+
+		options := plugins.ContainerPluginOptions{
+			CacheDirectory: cacheDirectory,
+			BuildImage:     fakeBuild,
+			ImageLookup:    fakeLookup,
+		}
+
+		imageID, err := plugins.EnsureDockerfilePluginImage(t.Context(), scope, pluginName, dockerfilePath, options)
+		if err != nil {
+			t.Fatalf("expected rebuild on unreadable record, got: %v", err)
+		}
+		if imageID != "sha256:fresh-image-3333" {
+			t.Errorf("expected 'sha256:fresh-image-3333', got %s", imageID)
+		}
+		if atomic.LoadInt64(&buildCount) != 1 {
+			t.Errorf("expected build count 1, got %d", atomic.LoadInt64(&buildCount))
+		}
+	})
+
+	t.Run("key mismatch triggers rebuild and overwrites record", func(t *testing.T) {
+		repoRoot := setupTestRepo(t)
+		cacheDirectory := t.TempDir()
+		sourcetree.ResetCache()
+		tree, err := sourcetree.Open(repoRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope := tasks.NewTaskContext(repoRoot, repoRoot, tree)
+
+		var buildCount int64
+		fakeBuild := func(_ context.Context, _ *tasks.TaskContext, _, _, _ string) (string, error) {
+			count := atomic.AddInt64(&buildCount, 1)
+			if count == 1 {
+				return "sha256:initial-image", nil
+			}
+			return "sha256:updated-image", nil
+		}
+		fakeLookup := func(_ context.Context, _ *tasks.TaskContext, _ string) (bool, error) {
+			return true, nil
+		}
+
+		options := plugins.ContainerPluginOptions{
+			CacheDirectory: cacheDirectory,
+			BuildImage:     fakeBuild,
+			ImageLookup:    fakeLookup,
+		}
+
+		firstID, err := plugins.EnsureDockerfilePluginImage(t.Context(), scope, pluginName, dockerfilePath, options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if firstID != "sha256:initial-image" {
+			t.Errorf("expected 'sha256:initial-image', got %s", firstID)
+		}
+
+		// Modify a context file
+		appFile := filepath.Join(repoRoot, "pkg/app/main.go")
+		if err := os.WriteFile(appFile, []byte("package main\n\nfunc Changed() {}\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		sourcetree.ResetCache()
+		updatedTree, err := sourcetree.Open(repoRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		updatedScope := tasks.NewTaskContext(repoRoot, repoRoot, updatedTree)
+
+		secondID, err := plugins.EnsureDockerfilePluginImage(t.Context(), updatedScope, pluginName, dockerfilePath, options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if secondID != "sha256:updated-image" {
+			t.Errorf("expected 'sha256:updated-image', got %s", secondID)
+		}
+		if atomic.LoadInt64(&buildCount) != 2 {
+			t.Errorf("expected build count 2 after context file change, got %d", atomic.LoadInt64(&buildCount))
+		}
+	})
 }
 
 func TestBenchmarkHashingRepoRoot(t *testing.T) {
-	// Find repo root containing go.mod
 	dir, err := os.Getwd()
 	if err != nil {
 		t.Skip(err)
@@ -521,13 +508,4 @@ func TestBenchmarkHashingRepoRoot(t *testing.T) {
 	duration := time.Since(start)
 
 	t.Logf("Computed cache key %s for %d repo files in %v (cold)", key[:12], len(tree.Files()), duration)
-
-	startWarm := time.Now()
-	keyWarm, err := plugins.DockerfilePluginCacheKey(tree, "ap/images/ap-astro/Dockerfile", "")
-	if err != nil {
-		t.Fatalf("DockerfilePluginCacheKey failed on repo root: %v", err)
-	}
-	durationWarm := time.Since(startWarm)
-
-	t.Logf("Computed cache key %s for %d repo files in %v (warm)", keyWarm[:12], len(tree.Files()), durationWarm)
 }

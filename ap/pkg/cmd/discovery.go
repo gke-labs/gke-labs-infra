@@ -126,7 +126,13 @@ func DiscoverScopes(ctx context.Context, r *sourcetree.SourceTree, repoRoot, dir
 	if err != nil {
 		return nil, fmt.Errorf("resolving cache directory: %w", err)
 	}
-	containerPlugins, err := plugins.LoadContainerPlugins(ctx, scope, cacheDir, buildkitHost, plugins.StartDockerPlugin)
+	containerPlugins, err := plugins.LoadContainerPlugins(ctx, scope, plugins.ContainerPluginOptions{
+		CacheDirectory: cacheDir,
+		BuildkitHost:   buildkitHost,
+		Starter:        plugins.StartDockerPlugin,
+		BuildImage:     plugins.BuildPluginImage,
+		ImageLookup:    plugins.LookupDockerImage,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to load plugins in %s: %w", repoRoot, err)
 	}

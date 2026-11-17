@@ -243,9 +243,13 @@ plugins:
 	if err != nil {
 		t.Fatalf("DockerfilePluginCacheKey failed: %v", err)
 	}
-	cachedBuildRecord := plugins.DockerfilePluginCachePath(cacheDirectory, buildCacheKey)
-	if _, err := os.Stat(cachedBuildRecord); err != nil {
+	cachedBuildRecord := plugins.DockerfilePluginCachePath(cacheDirectory, "demo", "tools/demo/Dockerfile")
+	recordData, err := os.ReadFile(cachedBuildRecord)
+	if err != nil {
 		t.Errorf("expected cached build record at %s: %v", cachedBuildRecord, err)
+	}
+	if !strings.Contains(string(recordData), buildCacheKey) || !strings.Contains(string(recordData), "sha256:fake-dockerfile-image-1234") {
+		t.Errorf("expected build record to contain key %s and image ID, got:\n%s", buildCacheKey, string(recordData))
 	}
 
 	// Second invocation: RunLs again uses cached Dockerfile image and manifest

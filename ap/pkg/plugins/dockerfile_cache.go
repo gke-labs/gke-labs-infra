@@ -19,6 +19,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -37,40 +38,38 @@ type BuildPluginImageFunc func(ctx context.Context, scope *tasks.TaskContext, pl
 // ImageLookupFunc checks whether an image ID exists in the local container engine.
 type ImageLookupFunc func(ctx context.Context, scope *tasks.TaskContext, imageID string) (bool, error)
 
+// DockerfilePluginBuildRecord records the cache key and built image ID for a Dockerfile plugin.
+type DockerfilePluginBuildRecord struct {
+	Key     string `json:"key"`
+	ImageID string `json:"image_id"`
+}
+
 // DockerfilePluginCacheKey computes a deterministic SHA-256 hash representing the inputs to
 // a Dockerfile plugin build: the plugin's Dockerfile path, the content and modes of all files
 // in the build context (the repository root view, excluding ignored files), and the BuildKit
 // host setting.
 func DockerfilePluginCacheKey(tree *sourcetree.SourceTree, dockerfilePath, buildkitHost string) (string, error) {
-	if tree == nil {
-		return "", fmt.Errorf("sourcetree is nil")
-	}
-
-	repoTree := tree
-	if repoTree.RepoTree() != nil {
-		repoTree = repoTree.RepoTree()
-	}
-
+	repoTree := tree.RepoTree()
 	repoRoot := repoTree.RepoRoot()
 	files := repoTree.Files()
 
 	type fileEntry struct {
-		relPath string
-		file    *sourcetree.File
+		relativePath string
+		file         *sourcetree.File
 	}
 	entries := make([]fileEntry, len(files))
-	for i, f := range files {
-		relPath, err := filepath.Rel(repoRoot, f.Path)
+	for index, file := range files {
+		relativePath, err := filepath.Rel(repoRoot, file.Path)
 		if err != nil {
-			relPath = f.Path
+			return "", fmt.Errorf("calculating relative path for %s from %s: %w", file.Path, repoRoot, err)
 		}
-		entries[i] = fileEntry{
-			relPath: filepath.ToSlash(relPath),
-			file:    f,
+		entries[index] = fileEntry{
+			relativePath: filepath.ToSlash(relativePath),
+			file:         file,
 		}
 	}
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].relPath < entries[j].relPath
+	sort.Slice(entries, func(firstIndex, secondIndex int) bool {
+		return entries[firstIndex].relativePath < entries[secondIndex].relativePath
 	})
 
 	hasher := sha256.New()
@@ -83,7 +82,7 @@ func DockerfilePluginCacheKey(tree *sourcetree.SourceTree, dockerfilePath, build
 		if err != nil {
 			return "", fmt.Errorf("hashing file %s: %w", entry.file.Path, err)
 		}
-		hasher.Write([]byte(entry.relPath))
+		hasher.Write([]byte(entry.relativePath))
 		hasher.Write([]byte{0})
 		binary.BigEndian.PutUint32(modeBytes[:], uint32(entry.file.Info().Mode()))
 		hasher.Write(modeBytes[:])
@@ -94,19 +93,21 @@ func DockerfilePluginCacheKey(tree *sourcetree.SourceTree, dockerfilePath, build
 	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
-// DockerfilePluginCachePath returns the file path where the built image ID for key is recorded under cacheDirectory.
-func DockerfilePluginCachePath(cacheDirectory, key string) string {
-	sanitizedKey := strings.ReplaceAll(strings.ReplaceAll(key, ":", "-"), "/", "-")
-	return filepath.Join(cacheDirectory, "plugins", "builds", sanitizedKey)
+// DockerfilePluginCachePath returns the file path where the build record for a Dockerfile plugin is stored under cacheDirectory.
+func DockerfilePluginCachePath(cacheDirectory, pluginName, dockerfilePath string) string {
+	sanitizedPath := strings.ReplaceAll(filepath.ToSlash(filepath.Clean(dockerfilePath)), "/", "-")
+	filename := fmt.Sprintf("%s-%s.json", sanitizedPath, pluginName)
+	return filepath.Join(cacheDirectory, "plugins", "builds", filename)
 }
 
-func defaultDockerImageLookup(ctx context.Context, scope *tasks.TaskContext, imageID string) (bool, error) {
+// LookupDockerImage checks whether an image ID is present in the local container engine using docker image inspect.
+func LookupDockerImage(ctx context.Context, scope *tasks.TaskContext, imageID string) (bool, error) {
 	dockerBin, err := scope.Tool(ctx, "docker")
 	if err != nil {
 		return false, err
 	}
-	_, err = inspectImageID(ctx, dockerBin, imageID)
-	if err != nil {
+	_, inspectErr := inspectImageID(ctx, dockerBin, imageID)
+	if inspectErr != nil {
 		if ctx.Err() != nil {
 			return false, ctx.Err()
 		}
@@ -116,93 +117,76 @@ func defaultDockerImageLookup(ctx context.Context, scope *tasks.TaskContext, ima
 }
 
 // EnsureDockerfilePluginImage ensures a Dockerfile plugin image is built and available in the local container engine.
-// If a valid record exists under AP_CACHE_DIR/plugins/ for the current build inputs key and the image still exists
-// in the engine, the build is skipped and the recorded image ID is returned.
-// Otherwise, the image is built and the record is written atomically with fileutils.CreateTempFile.
+// If a record exists under AP_CACHE_DIR/plugins/builds/ for the plugin matching the current build key and the image
+// is present in the engine, the build is skipped and the recorded image ID is returned.
+// Otherwise, the image is built and the record is overwritten atomically with fileutils.CreateTempFile.
 func EnsureDockerfilePluginImage(
 	ctx context.Context,
 	scope *tasks.TaskContext,
-	cacheDirectory string,
 	pluginName string,
 	dockerfilePath string,
-	buildkitHost string,
-	build BuildPluginImageFunc,
-	lookup ImageLookupFunc,
+	options ContainerPluginOptions,
 ) (string, error) {
-	if scope == nil || scope.SourceTree() == nil {
-		return "", fmt.Errorf("task context or source tree is nil")
-	}
-
-	if build == nil {
-		build = buildPluginImage
-	}
-	if lookup == nil {
-		lookup = defaultDockerImageLookup
-	}
-	if cacheDirectory == "" {
-		var err error
-		cacheDirectory, err = fileutils.CacheDir()
-		if err != nil {
-			return "", fmt.Errorf("resolving cache directory: %w", err)
-		}
-	}
-
-	key, err := DockerfilePluginCacheKey(scope.SourceTree(), dockerfilePath, buildkitHost)
+	key, err := DockerfilePluginCacheKey(scope.SourceTree(), dockerfilePath, options.BuildkitHost)
 	if err != nil {
 		return "", fmt.Errorf("computing plugin cache key for %s (%s): %w", pluginName, dockerfilePath, err)
 	}
 
-	recordPath := DockerfilePluginCachePath(cacheDirectory, key)
+	recordPath := DockerfilePluginCachePath(options.CacheDirectory, pluginName, dockerfilePath)
 
-	// Check if cached record exists and image is still in the engine
-	data, readErr := os.ReadFile(recordPath)
+	recordData, readErr := os.ReadFile(recordPath)
 	if readErr != nil {
 		if !os.IsNotExist(readErr) {
-			scoped.Log(ctx).V(2).Info("failed to read cached plugin image ID", "path", recordPath, "error", readErr)
+			scoped.Log(ctx).V(2).Info("failed to read cached plugin record", "path", recordPath, "error", readErr)
 		}
 	} else {
-		recordedID := strings.TrimSpace(string(data))
-		if recordedID != "" {
-			exists, lookupErr := lookup(ctx, scope, recordedID)
+		var record DockerfilePluginBuildRecord
+		if unmarshalErr := json.Unmarshal(recordData, &record); unmarshalErr != nil {
+			scoped.Log(ctx).V(2).Info("failed to parse cached plugin record", "path", recordPath, "error", unmarshalErr)
+		} else if record.Key == key && record.ImageID != "" {
+			exists, lookupErr := options.ImageLookup(ctx, scope, record.ImageID)
 			if lookupErr == nil && exists {
-				return recordedID, nil
+				return record.ImageID, nil
 			}
 			if lookupErr != nil && ctx.Err() != nil {
 				return "", ctx.Err()
 			}
 		}
-		// Record cannot be read properly or image is gone: delete-and-retry
-		if removeErr := os.Remove(recordPath); removeErr != nil && !os.IsNotExist(removeErr) {
-			scoped.Log(ctx).V(2).Info("failed to remove stale plugin cache record", "path", recordPath, "error", removeErr)
-		}
 	}
 
-	// Build the image
-	imageID, err := build(ctx, scope, pluginName, dockerfilePath, buildkitHost)
+	imageID, err := options.BuildImage(ctx, scope, pluginName, dockerfilePath, options.BuildkitHost)
 	if err != nil {
 		return "", err
 	}
 
-	// Record the image ID atomically
-	if err := recordCachedImageID(recordPath, imageID); err != nil {
-		return "", fmt.Errorf("recording cached image ID for plugin %q: %w", pluginName, err)
+	newRecord := DockerfilePluginBuildRecord{
+		Key:     key,
+		ImageID: imageID,
+	}
+	marshaledRecord, err := json.MarshalIndent(newRecord, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshaling build record for plugin %q: %w", pluginName, err)
+	}
+
+	if err := recordCachedImage(recordPath, marshaledRecord); err != nil {
+		return "", fmt.Errorf("recording cached image for plugin %q: %w", pluginName, err)
 	}
 
 	return imageID, nil
 }
 
-func recordCachedImageID(dest, imageID string) error {
-	tempFile, err := fileutils.CreateTempFile(dest)
+func recordCachedImage(destinationPath string, recordData []byte) error {
+	temporaryFile, err := fileutils.CreateTempFile(destinationPath)
 	if err != nil {
-		return fmt.Errorf("creating temp file for %s: %w", dest, err)
+		return fmt.Errorf("creating temp file for %s: %w", destinationPath, err)
 	}
-	defer tempFile.Cleanup()
+	defer temporaryFile.Cleanup()
 
-	if _, err := tempFile.Write([]byte(imageID + "\n")); err != nil {
-		return fmt.Errorf("writing to %s: %w", dest, err)
+	if _, err := temporaryFile.Write(recordData); err != nil {
+		return fmt.Errorf("writing to %s: %w", destinationPath, err)
 	}
-	if err := tempFile.Rename(0644); err != nil {
-		return fmt.Errorf("saving %s: %w", dest, err)
+	if err := temporaryFile.Rename(0644); err != nil {
+		return fmt.Errorf("saving %s: %w", destinationPath, err)
 	}
 	return nil
 }
