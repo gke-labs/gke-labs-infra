@@ -159,6 +159,7 @@ message TaskResult {
 - **Two-Key Network Authorization**: Both the manifest (`network: true`) and `.ap/plugins.yaml` (`network: true`) must agree; otherwise, `ap` refuses execution.
 - **Discovery Caching**: On cold discovery, `ap` runs `Describe` over stdio and caches the manifest under `${AP_CACHE_DIR:-$HOME/.cache/ap}/plugins/describe/<digest-or-id>.json`. Warm commands (`ap ls`, `ap test`) read cached JSON with zero container invocations.
 - **Task Naming & Conflicts**: Plugin tasks use hyphenated names (`<plugin>-<task>`, e.g. `astro-build`). Multiple plugins in the same directory execute in deterministic alphabetical order. Overlapping task output path detection during discovery is planned.
+- **Entrypoint Binary**: By convention, a plugin's entrypoint binary is named `ap-plugin-<plugin name>`.
 - **Recommendation**: Maintain two-key network authorization, discovery caching under `AP_CACHE_DIR`, and hyphenated task naming.
 - **Alternative Not Taken**: Dynamic container discovery on every run, or static image labels that restrict dynamic task declarations.
 

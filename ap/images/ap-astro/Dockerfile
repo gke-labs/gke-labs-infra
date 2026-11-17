@@ -12,16 +12,34 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+FROM --platform=$BUILDPLATFORM golang:1.27.4-trixie AS builder
+
+ARG TARGETOS
+ARG TARGETARCH
+
+WORKDIR /workspace
+COPY go.mod go.sum ./
+COPY ap/ ap/
+
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /usr/local/bin/ap-plugin-astro ./ap/images/ap-astro
+
 FROM node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee
 
 WORKDIR /app
 COPY ap/images/ap-astro/package.json ap/images/ap-astro/package-lock.json ./
 RUN npm ci
 
+# Point TMPDIR to /app/work so the Go plugin SDK unpacks the streamed repository files
+# into a temporary directory under /app. Because the work directory is a subdirectory
+# of /app, Node.js module resolution naturally walks up the directory tree to find
+# dependencies installed at image build time in /app/node_modules without modifying /app.
+ENV TMPDIR=/app/work
 ENV ASTRO_TELEMETRY_DISABLED=1
 
-COPY ap/images/ap-astro/build.sh /build.sh
-COPY ap/images/ap-astro/entrypoint.sh /entrypoint.sh
-RUN chmod +x /build.sh /entrypoint.sh
+RUN mkdir -p /app/work
 
-ENTRYPOINT ["/entrypoint.sh"]
+COPY --from=builder /usr/local/bin/ap-plugin-astro /usr/local/bin/ap-plugin-astro
+
+ENTRYPOINT ["/usr/local/bin/ap-plugin-astro"]
