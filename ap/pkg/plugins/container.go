@@ -38,7 +38,9 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 )
 
 // StartPluginFunc launches or connects to a plugin and returns a gRPC client and closer.
@@ -179,7 +181,7 @@ func DescribeContainer(ctx context.Context, scope *tasks.TaskContext, cacheDirec
 	var stderrBuffer bytes.Buffer
 	client, closer, err := starter(describeContext, scope, imageRef, false, &stderrBuffer)
 	if err != nil {
-		if errors.Is(describeContext.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+		if isDeadlineExceeded(describeContext, err) {
 			return nil, fmt.Errorf("plugin %q (%s) did not answer Describe within %v", pluginName, imageRef, describeTimeout)
 		}
 		return nil, fmt.Errorf("starting plugin %q (%s) for describe: %w", pluginName, imageRef, err)
@@ -192,7 +194,7 @@ func DescribeContainer(ctx context.Context, scope *tasks.TaskContext, cacheDirec
 
 	response, err := client.Describe(describeContext, &api.DescribeRequest{})
 	if err != nil {
-		if errors.Is(describeContext.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+		if isDeadlineExceeded(describeContext, err) {
 			return nil, fmt.Errorf("plugin %q (%s) did not answer Describe within %v", pluginName, imageRef, describeTimeout)
 		}
 		stderrOutput := strings.TrimSpace(stderrBuffer.String())
@@ -239,6 +241,21 @@ func DescribeContainer(ctx context.Context, scope *tasks.TaskContext, cacheDirec
 	}
 
 	return parsedManifest, nil
+}
+
+// isDeadlineExceeded reports whether an operation failed because the describe deadline passed,
+// either via the context deadline or via a gRPC DeadlineExceeded status code.
+func isDeadlineExceeded(ctx context.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	if ctx != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return true
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	return status.Code(err) == codes.DeadlineExceeded
 }
 
 // ContainerPlugin implements Plugin for container-based plugins.
