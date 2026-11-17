@@ -380,7 +380,7 @@ var (
 // GetName returns the hyphenated task name `<plugin>-<task>`, suffixed by the activating directory.
 func (task *ContainerTask) GetName() string {
 	name := fmt.Sprintf("%s-%s", task.PluginName, task.TaskMetadata.Name)
-	if task.RelativeDirectory == "" || task.RelativeDirectory == "." {
+	if task.RelativeDirectory == "." {
 		return name
 	}
 	return fmt.Sprintf("%s %s", name, task.RelativeDirectory)
@@ -477,7 +477,7 @@ func (task *ContainerTask) run(ctx context.Context, scope *tasks.TaskContext) er
 	}
 
 	if scope.Verify() {
-		return verifyStagedOutputs(ctx, task.Dir, stagingDirectory, task.TaskMetadata.Outputs, task, scope.Stderr())
+		return verifyStagedOutputs(ctx, task.Dir, stagingDirectory, task.TaskMetadata.Outputs, scope.Stderr())
 	}
 
 	return placeStagedOutputs(task.Dir, stagingDirectory, task.TaskMetadata.Outputs, scope.SourceTree())
@@ -717,7 +717,7 @@ func placeStagedOutputs(targetDirectory, stagingDirectory string, outputs []stri
 	return nil
 }
 
-func verifyStagedOutputs(ctx context.Context, targetDirectory, stagingDirectory string, outputs []string, task *ContainerTask, outputWriter io.Writer) error {
+func verifyStagedOutputs(ctx context.Context, targetDirectory, stagingDirectory string, outputs []string, outputWriter io.Writer) error {
 	var stagedFiles []string
 	if walkError := fileutils.WalkStagedOutputs(stagingDirectory, outputs, func(path string, info os.FileInfo, stagingRoot *os.Root) error {
 		stagedFiles = append(stagedFiles, path)
@@ -778,7 +778,7 @@ func verifyStagedOutputs(ctx context.Context, targetDirectory, stagingDirectory 
 				return fmt.Errorf("writing diff: %w", writeError)
 			}
 		}
-		return fmt.Errorf("plugin %q task %q outputs differ from checkout; run 'ap generate' to update", task.PluginName, task.TaskMetadata.Name)
+		return fmt.Errorf("outputs differ from the checkout; run 'ap generate' to update")
 	}
 
 	return nil

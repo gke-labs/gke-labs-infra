@@ -118,14 +118,7 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.TaskContext) err
 		}
 	}
 
-	dockerBin := t.DockerBin
-	if dockerBin == "" {
-		if dockerPath, err := scope.Tool(ctx, "docker"); err == nil && dockerPath != "" {
-			dockerBin = dockerPath
-		} else {
-			dockerBin = "docker"
-		}
-	}
+	dockerBin := t.dockerBinary(ctx, scope)
 
 	// If we are pushing and have requested multiple platforms, but the current Docker driver
 	// doesn't support multi-platform builds (e.g., standard default docker driver), we first
@@ -194,25 +187,31 @@ func (t *DockerBuildTask) supportsMultiPlatform(ctx context.Context, buildxBin s
 	return true
 }
 
+func (t *DockerBuildTask) dockerBinary(ctx context.Context, scope *tasks.TaskContext) string {
+	if t.DockerBin != "" {
+		return t.DockerBin
+	}
+	if dockerPath, err := scope.Tool(ctx, "docker"); err == nil && dockerPath != "" {
+		return dockerPath
+	}
+	return "docker"
+}
+
 func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskContext, root, fullImageName, relDockerfilePath string, naming ImageNaming, platforms []string) (retErr error) {
 	start := time.Now()
 
 	var output string
 	var archivePath string
 	if t.Load {
-		temporaryArchive, err := os.CreateTemp("", "ap-buildctl-image-*.tar")
+		temporaryArchive, err := fileutils.CreateTempFile(filepath.Join(os.TempDir(), "ap-buildctl-image.tar"))
 		if err != nil {
 			return fmt.Errorf("creating temporary archive for %s: %w", t.ImageName, err)
 		}
-		archivePath = temporaryArchive.Name()
-		defer func() {
-			if removeErr := os.Remove(archivePath); removeErr != nil && !os.IsNotExist(removeErr) {
-				scoped.Log(ctx).V(4).Info("failed to remove temporary archive", "path", archivePath, "error", removeErr)
-			}
-		}()
+		defer temporaryArchive.Cleanup()
 		if err := temporaryArchive.Close(); err != nil {
 			return fmt.Errorf("closing temporary archive for %s: %w", t.ImageName, err)
 		}
+		archivePath = temporaryArchive.Name()
 		output = fmt.Sprintf("type=docker,name=%s,dest=%s", fullImageName, archivePath)
 	} else {
 		output = fmt.Sprintf("type=image,name=%s,push=%t", fullImageName, t.Push)
@@ -281,14 +280,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 	}
 
 	if t.Load {
-		dockerBin := t.DockerBin
-		if dockerBin == "" {
-			if dockerPath, err := scope.Tool(ctx, "docker"); err == nil && dockerPath != "" {
-				dockerBin = dockerPath
-			} else {
-				dockerBin = "docker"
-			}
-		}
+		dockerBin := t.dockerBinary(ctx, scope)
 		loadCommand := execCommandContext(ctx, dockerBin, "load", "-i", archivePath)
 		loadCommand.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(dockerBin))
 		loadOutput, err := loadCommand.CombinedOutput()

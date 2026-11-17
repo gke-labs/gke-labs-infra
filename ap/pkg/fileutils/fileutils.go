@@ -83,6 +83,20 @@ func CreateTempFile(dest string) (*TempFile, error) {
 	}, nil
 }
 
+// Name returns the path of the underlying temporary file.
+func (t *TempFile) Name() string {
+	return t.name
+}
+
+// Close closes the underlying temporary file.
+func (t *TempFile) Close() error {
+	if t.closed {
+		return nil
+	}
+	t.closed = true
+	return t.file.Close()
+}
+
 // Write writes p to the underlying temporary file.
 func (t *TempFile) Write(p []byte) (int, error) {
 	return t.file.Write(p)

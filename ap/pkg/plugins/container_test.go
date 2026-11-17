@@ -568,7 +568,7 @@ func TestVerifyMode_ReportsDifferenceWithoutTouchingCheckout(t *testing.T) {
 		t.Fatal("expected task.Run to fail in verify mode when generated file differs, got nil")
 	}
 
-	if !strings.Contains(runErr.Error(), "outputs differ from checkout") {
+	if !strings.Contains(runErr.Error(), "outputs differ from the checkout") {
 		t.Errorf("expected error to mention diff, got: %v", runErr)
 	}
 
@@ -831,13 +831,14 @@ func TestNetworkAuthorization(t *testing.T) {
 	}
 
 	task := &plugins.ContainerTask{
-		PluginName:   "mockplugin",
-		TaskMetadata: manifest.Tasks[0],
-		Declaration:  declaration,
-		ImageRef:     declaration.Image,
-		Manifest:     manifest,
-		Dir:          repoRoot,
-		RepoRoot:     repoRoot,
+		PluginName:        "mockplugin",
+		TaskMetadata:      manifest.Tasks[0],
+		Declaration:       declaration,
+		ImageRef:          declaration.Image,
+		Manifest:          manifest,
+		Dir:               repoRoot,
+		RelativeDirectory: ".",
+		RepoRoot:          repoRoot,
 	}
 
 	err = task.Run(t.Context(), scope)
@@ -1396,7 +1397,7 @@ func TestContainerVerifyMode(t *testing.T) {
 		if !strings.Contains(output, "-site output") || !strings.Contains(output, "+new site output") {
 			t.Errorf("expected diff content in task output, got:\n%s", output)
 		}
-		expectedErr := "plugin \"mockplugin\" task \"generate\" outputs differ from checkout; run 'ap generate' to update"
+		expectedErr := "outputs differ from the checkout; run 'ap generate' to update"
 		if !strings.Contains(err.Error(), expectedErr) {
 			t.Errorf("expected error message directing to run ap generate, got: %v", err)
 		}
@@ -1413,7 +1414,7 @@ func TestContainerVerifyMode(t *testing.T) {
 		if !strings.Contains(output, "missing.html") {
 			t.Errorf("expected diff naming missing file in task output, got:\n%s", output)
 		}
-		expectedErr := "plugin \"mockplugin\" task \"generate\" outputs differ from checkout; run 'ap generate' to update"
+		expectedErr := "outputs differ from the checkout; run 'ap generate' to update"
 		if !strings.Contains(err.Error(), expectedErr) {
 			t.Errorf("expected error message directing to run ap generate, got: %v", err)
 		}
