@@ -237,4 +237,28 @@ plugins:
 	if _, err := os.Stat(cachedManifestPath); err != nil {
 		t.Errorf("expected cached manifest at %s: %v", cachedManifestPath, err)
 	}
+
+	// Verify build cache record exists
+	buildCacheKey, err := plugins.DockerfilePluginCacheKey(sourceTree, "tools/demo/Dockerfile", "")
+	if err != nil {
+		t.Fatalf("DockerfilePluginCacheKey failed: %v", err)
+	}
+	cachedBuildRecord := plugins.DockerfilePluginCachePath(cacheDirectory, repoRoot, "demo", "tools/demo/Dockerfile")
+	recordData, err := os.ReadFile(cachedBuildRecord)
+	if err != nil {
+		t.Errorf("expected cached build record at %s: %v", cachedBuildRecord, err)
+	}
+	if !strings.Contains(string(recordData), buildCacheKey) || !strings.Contains(string(recordData), "sha256:fake-dockerfile-image-1234") {
+		t.Errorf("expected build record to contain key %s and image ID, got:\n%s", buildCacheKey, string(recordData))
+	}
+
+	// Second invocation: RunLs again uses cached Dockerfile image and manifest
+	listingOutput2 := captureStdout(t, func() {
+		if err := RunLs(t.Context(), LsOptions{RootOptions: rootOptions}); err != nil {
+			t.Fatalf("second RunLs failed: %v", err)
+		}
+	})
+	if !strings.Contains(listingOutput2, "docs\n  - build-tasks\n    - demo-build") {
+		t.Errorf("expected second listing output to contain docs build-tasks demo-build, got:\n%s", listingOutput2)
+	}
 }

@@ -98,11 +98,12 @@ func DialStdioConn(ctx context.Context, connection net.Conn) (api.PluginServiceC
 
 type closerFunc func() error
 
-func (f closerFunc) Close() error {
-	return f()
+func (closer closerFunc) Close() error {
+	return closer()
 }
 
-func buildPluginImage(ctx context.Context, scope *tasks.TaskContext, pluginName, dockerfilePath, buildkitHost string) (string, error) {
+// BuildPluginImage builds a Dockerfile plugin image using ap's DockerBuildTask and returns its image ID.
+func BuildPluginImage(ctx context.Context, scope *tasks.TaskContext, pluginName, dockerfilePath, buildkitHost string) (string, error) {
 	naming := images.ImageNaming{
 		Prefix: "ap-plugin",
 		Tag:    "latest",
@@ -273,8 +274,27 @@ func (plugin *ContainerPlugin) DiscoverTasks(ctx context.Context, directory stri
 	return discoveredTasks, nil
 }
 
-// LoadContainerPlugins loads all enabled container plugins configured in .ap/plugins.yaml.
-func LoadContainerPlugins(ctx context.Context, scope *tasks.TaskContext, cacheDirectory, buildkitHost string, starter StartPluginFunc) ([]Plugin, error) {
+// ContainerPluginOptions configures container plugin loading, image building, and caching.
+type ContainerPluginOptions struct {
+	// CacheDirectory is the root cache directory (e.g. AP_CACHE_DIR) for plugin manifests and build records.
+	CacheDirectory string
+
+	// BuildkitHost is the address of an optional remote BuildKit daemon (e.g. BUILDKIT_HOST).
+	BuildkitHost string
+
+	// Starter starts a plugin container process and establishes a gRPC client connection.
+	Starter StartPluginFunc
+
+	// BuildImage builds a Dockerfile plugin image and returns its resulting image ID.
+	BuildImage BuildPluginImageFunc
+
+	// ImageLookup checks whether a built container image is present in the local container engine.
+	ImageLookup ImageLookupFunc
+}
+
+// LoadContainerPlugins loads all enabled container plugins configured in .ap/plugins.yaml
+// using the provided options.
+func LoadContainerPlugins(ctx context.Context, scope *tasks.TaskContext, options ContainerPluginOptions) ([]Plugin, error) {
 	pluginsConfig, err := config.LoadPluginsConfig(scope.RepoRoot())
 	if err != nil {
 		return nil, err
@@ -298,12 +318,12 @@ func LoadContainerPlugins(ctx context.Context, scope *tasks.TaskContext, cacheDi
 		imageRef := declaration.Image
 		if declaration.Dockerfile != "" {
 			var buildError error
-			imageRef, buildError = buildPluginImage(ctx, scope, name, declaration.Dockerfile, buildkitHost)
+			imageRef, buildError = EnsureDockerfilePluginImage(ctx, scope, name, declaration.Dockerfile, options)
 			if buildError != nil {
 				return nil, buildError
 			}
 		}
-		manifest, err := DescribeContainer(ctx, scope, cacheDirectory, name, imageRef, starter)
+		manifest, err := DescribeContainer(ctx, scope, options.CacheDirectory, name, imageRef, options.Starter)
 		if err != nil {
 			return nil, err
 		}
@@ -313,7 +333,7 @@ func LoadContainerPlugins(ctx context.Context, scope *tasks.TaskContext, cacheDi
 			ImageRef:    imageRef,
 			Manifest:    manifest,
 			RepoRoot:    scope.RepoRoot(),
-			Starter:     starter,
+			Starter:     options.Starter,
 		})
 	}
 	return result, nil

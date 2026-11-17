@@ -962,7 +962,13 @@ plugins:
 	starter := setupTestPluginStarter(t, mockPlugin)
 
 	t.Run("build invoked with expected arguments and image ID becomes cache key", func(t *testing.T) {
-		loadedPlugins, err := plugins.LoadContainerPlugins(t.Context(), scope, cacheDirectory, "", starter)
+		options := plugins.ContainerPluginOptions{
+			CacheDirectory: cacheDirectory,
+			Starter:        starter,
+			BuildImage:     plugins.BuildPluginImage,
+			ImageLookup:    plugins.LookupDockerImage,
+		}
+		loadedPlugins, err := plugins.LoadContainerPlugins(t.Context(), scope, options)
 		if err != nil {
 			t.Fatalf("LoadContainerPlugins failed: %v", err)
 		}
@@ -1006,11 +1012,42 @@ plugins:
 		if _, err := os.Stat(cachedFile); err != nil {
 			t.Errorf("expected cached manifest at %s: %v", cachedFile, err)
 		}
+
+		// Remove build-args to detect if build is executed on second run
+		buildArgsPath := filepath.Join(stateDir, "build-args")
+		if err := os.Remove(buildArgsPath); err != nil {
+			t.Fatalf("removing build-args: %v", err)
+		}
+
+		// Second invocation with unchanged inputs: uses cached image ID without rebuilding
+		secondPlugins, err := plugins.LoadContainerPlugins(t.Context(), scope, options)
+		if err != nil {
+			t.Fatalf("second LoadContainerPlugins failed: %v", err)
+		}
+		if len(secondPlugins) != 1 {
+			t.Fatalf("expected 1 plugin on second run, got %d", len(secondPlugins))
+		}
+		secondContainerPlugin, ok := secondPlugins[0].(*plugins.ContainerPlugin)
+		if !ok {
+			t.Fatalf("expected *plugins.ContainerPlugin, got %T", secondPlugins[0])
+		}
+		if secondContainerPlugin.ImageRef != "sha256:fake-built-image-1234" {
+			t.Errorf("expected cached ImageRef %q, got %q", "sha256:fake-built-image-1234", secondContainerPlugin.ImageRef)
+		}
+		if _, err := os.Stat(buildArgsPath); !os.IsNotExist(err) {
+			t.Errorf("expected build to not run on second invocation, but build-args was re-created")
+		}
 	})
 
 	t.Run("with buildkit host set build goes to buildctl and result is loaded", func(t *testing.T) {
 		buildkitCacheDirectory := t.TempDir()
-		loadedPlugins, err := plugins.LoadContainerPlugins(t.Context(), scope, buildkitCacheDirectory, "tcp://127.0.0.1:2375", starter)
+		loadedPlugins, err := plugins.LoadContainerPlugins(t.Context(), scope, plugins.ContainerPluginOptions{
+			CacheDirectory: buildkitCacheDirectory,
+			BuildkitHost:   "tcp://127.0.0.1:2375",
+			Starter:        starter,
+			BuildImage:     plugins.BuildPluginImage,
+			ImageLookup:    plugins.LookupDockerImage,
+		})
 		if err != nil {
 			t.Fatalf("LoadContainerPlugins failed: %v", err)
 		}
@@ -1061,7 +1098,12 @@ plugins:
 			t.Fatal(err)
 		}
 		emptyCacheDirectory := t.TempDir()
-		_, err := plugins.LoadContainerPlugins(t.Context(), scope, emptyCacheDirectory, "", starter)
+		_, err := plugins.LoadContainerPlugins(t.Context(), scope, plugins.ContainerPluginOptions{
+			CacheDirectory: emptyCacheDirectory,
+			Starter:        starter,
+			BuildImage:     plugins.BuildPluginImage,
+			ImageLookup:    plugins.LookupDockerImage,
+		})
 		if err == nil {
 			t.Fatal("expected LoadContainerPlugins to fail when build fails")
 		}
