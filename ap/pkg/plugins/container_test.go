@@ -1272,3 +1272,69 @@ func TestContainerVerifyMode(t *testing.T) {
 		}
 	})
 }
+
+type hangingPluginServer struct {
+	api.UnimplementedPluginServiceServer
+}
+
+func (s *hangingPluginServer) Describe(ctx context.Context, _ *api.DescribeRequest) (*api.DescribeResponse, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestDescribeContainer_Deadline(t *testing.T) {
+	repoRoot := t.TempDir()
+	cacheDir := t.TempDir()
+	tree, err := sourcetree.Open(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := tasks.NewTaskContext(repoRoot, repoRoot, tree)
+
+	hangingStarter := func(ctx context.Context, scope *tasks.TaskContext, imageRef string, allowNetwork bool, stderr io.Writer) (api.PluginServiceClient, io.Closer, error) {
+		serverReader, clientWriter := io.Pipe()
+		clientReader, serverWriter := io.Pipe()
+
+		serverListener := stdio.NewListener(serverReader, serverWriter)
+		clientConnection := stdio.NewConn(clientReader, clientWriter)
+
+		grpcServer := grpc.NewServer()
+		api.RegisterPluginServiceServer(grpcServer, &hangingPluginServer{})
+
+		go func() {
+			_ = grpcServer.Serve(serverListener)
+		}()
+
+		client, closer, dialError := plugins.DialStdioConn(ctx, clientConnection)
+		if dialError != nil {
+			_ = serverListener.Close()
+			return nil, nil, dialError
+		}
+		wrappedCloser := closerFunc(func() error {
+			grpcServer.Stop()
+			return errors.Join(closer.Close(), serverListener.Close())
+		})
+		return client, wrappedCloser, nil
+	}
+
+	pluginName := "sleepy"
+	imageRef := "sleepy-image:latest"
+
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+
+	_, err = plugins.DescribeContainer(ctx, scope, cacheDir, pluginName, imageRef, hangingStarter)
+	if err == nil {
+		t.Fatal("expected DescribeContainer to fail due to deadline, got nil")
+	}
+	errorString := err.Error()
+	if !strings.Contains(errorString, pluginName) {
+		t.Errorf("expected error to contain plugin name %q, got: %s", pluginName, errorString)
+	}
+	if !strings.Contains(errorString, imageRef) {
+		t.Errorf("expected error to contain image ref %q, got: %s", imageRef, errorString)
+	}
+	if !strings.Contains(errorString, "did not answer Describe within 30s") {
+		t.Errorf("expected error to state deadline exceeded, got: %s", errorString)
+	}
+}
