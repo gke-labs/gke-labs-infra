@@ -1283,9 +1283,6 @@ func (s *hangingPluginServer) Describe(ctx context.Context, _ *api.DescribeReque
 }
 
 func TestDescribeContainer_Deadline(t *testing.T) {
-	restore := plugins.SetDescribeTimeoutForTest(100 * time.Millisecond)
-	defer restore()
-
 	repoRoot := t.TempDir()
 	cacheDir := t.TempDir()
 	tree, err := sourcetree.Open(repoRoot)
@@ -1308,10 +1305,10 @@ func TestDescribeContainer_Deadline(t *testing.T) {
 			_ = grpcServer.Serve(serverListener)
 		}()
 
-		client, closer, dialErr := plugins.DialStdioConn(ctx, clientConnection)
-		if dialErr != nil {
+		client, closer, dialError := plugins.DialStdioConn(ctx, clientConnection)
+		if dialError != nil {
 			_ = serverListener.Close()
-			return nil, nil, dialErr
+			return nil, nil, dialError
 		}
 		wrappedCloser := closerFunc(func() error {
 			grpcServer.Stop()
@@ -1323,16 +1320,22 @@ func TestDescribeContainer_Deadline(t *testing.T) {
 	pluginName := "sleepy"
 	imageRef := "sleepy-image:latest"
 
-	_, err = plugins.DescribeContainer(t.Context(), scope, cacheDir, pluginName, imageRef, hangingStarter)
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+
+	_, err = plugins.DescribeContainer(ctx, scope, cacheDir, pluginName, imageRef, hangingStarter)
 	if err == nil {
 		t.Fatal("expected DescribeContainer to fail due to deadline, got nil")
 	}
-	errStr := err.Error()
-	if !strings.Contains(errStr, pluginName) {
-		t.Errorf("expected error to contain plugin name %q, got: %s", pluginName, errStr)
+	errorString := err.Error()
+	if !strings.Contains(errorString, pluginName) {
+		t.Errorf("expected error to contain plugin name %q, got: %s", pluginName, errorString)
 	}
-	if !strings.Contains(errStr, imageRef) {
-		t.Errorf("expected error to contain image ref %q, got: %s", imageRef, errStr)
+	if !strings.Contains(errorString, imageRef) {
+		t.Errorf("expected error to contain image ref %q, got: %s", imageRef, errorString)
+	}
+	if !strings.Contains(errorString, "did not answer Describe within 30 seconds") {
+		t.Errorf("expected error to state deadline exceeded, got: %s", errorString)
 	}
 }
 
@@ -1439,8 +1442,8 @@ func TestStartDockerPlugin_ContainerCleanup(t *testing.T) {
 			t.Fatalf("StartDockerPlugin: %v", err)
 		}
 
-		closeErr := closer.Close()
-		if closeErr == nil {
+		closeError := closer.Close()
+		if closeError == nil {
 			t.Fatal("expected closer.Close to return error when process had to be killed, got nil")
 		}
 
@@ -1477,7 +1480,7 @@ func TestStartDockerPlugin_ContainerCleanup(t *testing.T) {
 		}
 
 		for i := 0; i < 100; i++ {
-			if _, statErr := os.Stat(filepath.Join(stateDir, "started")); statErr == nil {
+			if _, statError := os.Stat(filepath.Join(stateDir, "started")); statError == nil {
 				break
 			}
 			time.Sleep(10 * time.Millisecond)

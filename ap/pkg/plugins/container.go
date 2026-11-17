@@ -81,15 +81,15 @@ func StartDockerPlugin(ctx context.Context, scope *tasks.TaskContext, imageRef s
 	}
 
 	commandConnection := stdio.NewCommandConn(command, stdinPipe, stdoutPipe)
-	grpcClient, connCloser, err := DialStdioConn(ctx, commandConnection)
+	grpcClient, connectionCloser, err := DialStdioConn(ctx, commandConnection)
 
 	killContainer := func() {
-		killCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		killContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
-		killCmd := exec.CommandContext(killCtx, dockerPath, "kill", containerName)
-		killCmd.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(dockerPath))
-		if killErr := killCmd.Run(); killErr != nil {
-			scoped.Log(ctx).V(2).Info("failed to kill plugin container", "container", containerName, "error", killErr)
+		killCommand := exec.CommandContext(killContext, dockerPath, "kill", containerName)
+		killCommand.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(dockerPath))
+		if killError := killCommand.Run(); killError != nil {
+			scoped.Log(ctx).V(2).Info("failed to kill plugin container", "container", containerName, "error", killError)
 		}
 	}
 
@@ -104,7 +104,7 @@ func StartDockerPlugin(ctx context.Context, scope *tasks.TaskContext, imageRef s
 	var closeError error
 	closer := closerFunc(func() error {
 		closeOnce.Do(func() {
-			closeError = connCloser.Close()
+			closeError = connectionCloser.Close()
 			if commandConnection.Killed() || ctx.Err() != nil {
 				killContainer()
 			}
@@ -118,6 +118,9 @@ func StartDockerPlugin(ctx context.Context, scope *tasks.TaskContext, imageRef s
 func DialStdioConn(ctx context.Context, connection net.Conn) (api.PluginServiceClient, io.Closer, error) {
 	grpcClientConnection, err := grpc.NewClient("passthrough:///stdio",
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithConnectParams(grpc.ConnectParams{
+			MinConnectTimeout: 35 * time.Second,
+		}),
 		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
 			return connection, nil
 		}),
@@ -195,7 +198,7 @@ func inspectImageID(ctx context.Context, dockerBin, fullImageName string) (strin
 	return imageID, nil
 }
 
-var describeTimeout = 30 * time.Second
+const describeTimeout = 30 * time.Second
 
 // DescribeContainer runs Describe RPC on the plugin container on cold runs and caches the manifest.
 func DescribeContainer(ctx context.Context, scope *tasks.TaskContext, cacheDirectory, pluginName, imageRef string, starter StartPluginFunc) (*PluginManifest, error) {
@@ -211,6 +214,9 @@ func DescribeContainer(ctx context.Context, scope *tasks.TaskContext, cacheDirec
 	var stderrBuffer bytes.Buffer
 	client, closer, err := starter(describeContext, scope, imageRef, false, &stderrBuffer)
 	if err != nil {
+		if errors.Is(describeContext.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("plugin %q (%s) did not answer Describe within 30 seconds", pluginName, imageRef)
+		}
 		return nil, fmt.Errorf("starting plugin %q (%s) for describe: %w", pluginName, imageRef, err)
 	}
 	defer func() {
@@ -221,6 +227,9 @@ func DescribeContainer(ctx context.Context, scope *tasks.TaskContext, cacheDirec
 
 	response, err := client.Describe(describeContext, &api.DescribeRequest{})
 	if err != nil {
+		if errors.Is(describeContext.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("plugin %q (%s) did not answer Describe within 30 seconds", pluginName, imageRef)
+		}
 		stderrOutput := strings.TrimSpace(stderrBuffer.String())
 		if stderrOutput != "" {
 			return nil, fmt.Errorf("running describe for plugin %q (%s): %w (%s)", pluginName, imageRef, err, stderrOutput)
