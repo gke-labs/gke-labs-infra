@@ -93,8 +93,6 @@ func copyDir(src, dst string) error {
 }
 
 func TestAstroPlugin_Build(t *testing.T) {
-	t.Skip("skipping test: astro plugin has not been moved to the gRPC contract yet")
-
 	if os.Getenv("RUN_E2E") == "" {
 		t.Skip("RUN_E2E not set, skipping e2e test")
 	}
@@ -120,6 +118,17 @@ func TestAstroPlugin_Build(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(testRepo, ".ap", "ap.yaml"), []byte("version: '!self'\n"), 0644); err != nil {
 		t.Fatal(err)
+	}
+
+	// Copy the Go module definitions and packages required to build the plugin entrypoint.
+	if err := copyFile(filepath.Join(repoRoot, "go.mod"), filepath.Join(testRepo, "go.mod")); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyFile(filepath.Join(repoRoot, "go.sum"), filepath.Join(testRepo, "go.sum")); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyDir(filepath.Join(repoRoot, "ap", "pkg"), filepath.Join(testRepo, "ap", "pkg")); err != nil {
+		t.Fatalf("failed to copy ap/pkg: %v", err)
 	}
 
 	// Copy the plugin Dockerfile and assets from this repository.
