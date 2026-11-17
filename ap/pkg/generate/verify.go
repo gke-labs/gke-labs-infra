@@ -367,41 +367,41 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext
 	runErr := tasks.Run(ctx, tasks.NewTaskContext(repoRoot, repoRoot, r).WithVerify(true), allTasks, tasks.RunOptions{DryRun: false})
 	if runErr != nil {
 		findings = append(findings, fmt.Sprintf("generation tasks failed: %v", runErr))
-	}
-
-	// Verify all perturbed files were restored byte-identical using content hashes
-	for _, pf := range perturbedFiles {
-		currentHash, err := pf.file.Hash()
-		if err != nil {
-			findings = append(findings, fmt.Sprintf("file %q missing after generation: %v", pf.relPath, err))
-			continue
-		}
-
-		if currentHash == pf.hash {
-			// File is byte-identical! Restore mtime.
-			if err := os.Chtimes(pf.path, pf.modTime, pf.modTime); err != nil {
-				log.V(2).Info("failed to restore mtime", "path", pf.path, "error", err)
+	} else {
+		// Verify all perturbed files were restored byte-identical using content hashes
+		for _, pf := range perturbedFiles {
+			currentHash, err := pf.file.Hash()
+			if err != nil {
+				findings = append(findings, fmt.Sprintf("file %q missing after generation: %v", pf.relPath, err))
+				continue
 			}
-		} else {
-			currentContent, readErr := os.ReadFile(pf.path)
-			if readErr != nil {
-				findings = append(findings, fmt.Sprintf("failed to read file %q: %v", pf.relPath, readErr))
-			} else if !pf.isBinary && pf.marker != "" && bytes.Contains(currentContent, []byte(pf.marker)) {
-				findings = append(findings, fmt.Sprintf("file %q was not regenerated (still carries perturbation marker)", pf.relPath))
-			} else if pf.isBinary && len(currentContent) > 0 && pf.marker == "" && !pf.wasEmpty {
-				findings = append(findings, fmt.Sprintf("file %q was not regenerated (still carries perturbation mutation)", pf.relPath))
+
+			if currentHash == pf.hash {
+				// File is byte-identical! Restore mtime.
+				if err := os.Chtimes(pf.path, pf.modTime, pf.modTime); err != nil {
+					log.V(2).Info("failed to restore mtime", "path", pf.path, "error", err)
+				}
 			} else {
-				findings = append(findings, fmt.Sprintf("file %q was modified by generation but differs from pre-run content", pf.relPath))
+				currentContent, readErr := os.ReadFile(pf.path)
+				if readErr != nil {
+					findings = append(findings, fmt.Sprintf("failed to read file %q: %v", pf.relPath, readErr))
+				} else if !pf.isBinary && pf.marker != "" && bytes.Contains(currentContent, []byte(pf.marker)) {
+					findings = append(findings, fmt.Sprintf("file %q was not regenerated (still carries perturbation marker)", pf.relPath))
+				} else if pf.isBinary && len(currentContent) > 0 && pf.marker == "" && !pf.wasEmpty {
+					findings = append(findings, fmt.Sprintf("file %q was not regenerated (still carries perturbation mutation)", pf.relPath))
+				} else {
+					findings = append(findings, fmt.Sprintf("file %q was modified by generation but differs from pre-run content", pf.relPath))
+				}
 			}
 		}
-	}
 
-	// Clean tree check: ensure generation did not produce any unexpected changes compared to pre-run
-	currentGitStatus, curGitErr := getGitStatus(ctx, repoRoot)
-	if curGitErr != nil {
-		findings = append(findings, fmt.Sprintf("failed to get git status after generation: %v", curGitErr))
-	} else if currentGitStatus != initialGitStatus {
-		findings = append(findings, fmt.Sprintf("working tree was dirtied by generation:\n%s", currentGitStatus))
+		// Clean tree check: ensure generation did not produce any unexpected changes compared to pre-run
+		currentGitStatus, curGitErr := getGitStatus(ctx, repoRoot)
+		if curGitErr != nil {
+			findings = append(findings, fmt.Sprintf("failed to get git status after generation: %v", curGitErr))
+		} else if currentGitStatus != initialGitStatus {
+			findings = append(findings, fmt.Sprintf("working tree was dirtied by generation:\n%s", currentGitStatus))
+		}
 	}
 
 	if len(findings) > 0 {
