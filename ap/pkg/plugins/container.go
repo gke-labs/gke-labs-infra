@@ -47,6 +47,20 @@ import (
 // StartPluginFunc launches or connects to a plugin and returns a gRPC client and closer.
 type StartPluginFunc func(ctx context.Context, scope *tasks.TaskContext, imageRef string, allowNetwork bool, stderr io.Writer) (api.PluginServiceClient, io.Closer, error)
 
+// ContainerLeakError indicates that a plugin container could not be killed and remains running.
+type ContainerLeakError struct {
+	ContainerName string
+	Err           error
+}
+
+func (e *ContainerLeakError) Error() string {
+	return fmt.Sprintf("failed to kill plugin container %q (run 'docker kill %s' to clean up): %v", e.ContainerName, e.ContainerName, e.Err)
+}
+
+func (e *ContainerLeakError) Unwrap() error {
+	return e.Err
+}
+
 // StartDockerPlugin launches a plugin container using docker run -i --rm.
 func StartDockerPlugin(ctx context.Context, scope *tasks.TaskContext, imageRef string, allowNetwork bool, stderr io.Writer) (api.PluginServiceClient, io.Closer, error) {
 	dockerPath, err := scope.Tool(ctx, "docker")
@@ -83,19 +97,29 @@ func StartDockerPlugin(ctx context.Context, scope *tasks.TaskContext, imageRef s
 	commandConnection := stdio.NewCommandConn(command, stdinPipe, stdoutPipe)
 	grpcClient, connectionCloser, err := DialStdioConn(ctx, commandConnection)
 
-	killContainer := func() {
+	killContainer := func() error {
 		killContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
 		killCommand := exec.CommandContext(killContext, dockerPath, "kill", containerName)
 		killCommand.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(dockerPath))
 		if killError := killCommand.Run(); killError != nil {
-			scoped.Log(ctx).V(2).Info("failed to kill plugin container", "container", containerName, "error", killError)
+			return &ContainerLeakError{
+				ContainerName: containerName,
+				Err:           killError,
+			}
 		}
+		return nil
 	}
 
 	if err != nil {
-		if commandConnection.Killed() || ctx.Err() != nil {
-			killContainer()
+		closeError := connectionCloser.Close()
+		if command.ProcessState == nil || !command.ProcessState.Exited() {
+			if killError := killContainer(); killError != nil {
+				return nil, nil, errors.Join(err, closeError, killError)
+			}
+		}
+		if closeError != nil {
+			return nil, nil, errors.Join(err, closeError)
 		}
 		return nil, nil, err
 	}
@@ -105,8 +129,10 @@ func StartDockerPlugin(ctx context.Context, scope *tasks.TaskContext, imageRef s
 	closer := closerFunc(func() error {
 		closeOnce.Do(func() {
 			closeError = connectionCloser.Close()
-			if commandConnection.Killed() || ctx.Err() != nil {
-				killContainer()
+			if command.ProcessState == nil || !command.ProcessState.Exited() {
+				if killError := killContainer(); killError != nil {
+					closeError = errors.Join(closeError, killError)
+				}
 			}
 		})
 		return closeError
@@ -205,11 +231,11 @@ func inspectImageID(ctx context.Context, dockerBin, fullImageName string) (strin
 }
 
 // DescribeContainer runs Describe RPC on the plugin container on cold runs and caches the manifest.
-func DescribeContainer(ctx context.Context, scope *tasks.TaskContext, cacheDirectory, pluginName, imageRef string, starter StartPluginFunc) (*PluginManifest, error) {
+func DescribeContainer(ctx context.Context, scope *tasks.TaskContext, cacheDirectory, pluginName, imageRef string, starter StartPluginFunc) (manifest *PluginManifest, returnError error) {
 	key := CacheKey(imageRef)
-	manifest, err := LoadCachedManifest(cacheDirectory, key)
+	cachedManifest, err := LoadCachedManifest(cacheDirectory, key)
 	if err == nil {
-		return manifest, nil
+		return cachedManifest, nil
 	}
 
 	describeContext, cancel := context.WithTimeout(ctx, describeTimeout)
@@ -225,7 +251,16 @@ func DescribeContainer(ctx context.Context, scope *tasks.TaskContext, cacheDirec
 	}
 	defer func() {
 		if closeError := closer.Close(); closeError != nil {
-			scoped.Log(ctx).V(2).Info("failed to close plugin client during describe", "error", closeError)
+			var leakError *ContainerLeakError
+			if errors.As(closeError, &leakError) {
+				scoped.Log(ctx).Error(closeError, "failed to clean up plugin container")
+				returnError = errors.Join(returnError, closeError)
+				if returnError != nil {
+					manifest = nil
+				}
+			} else {
+				scoped.Log(ctx).V(2).Info("failed to close plugin client during describe", "error", closeError)
+			}
 		}
 	}()
 
@@ -455,7 +490,7 @@ func (task *ContainerTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 	return nil
 }
 
-func (task *ContainerTask) run(ctx context.Context, scope *tasks.TaskContext) error {
+func (task *ContainerTask) run(ctx context.Context, scope *tasks.TaskContext) (returnError error) {
 	if task.Manifest.Network && !task.Declaration.Network {
 		return fmt.Errorf("requires network access, but network is not authorized in .ap/plugins.yaml")
 	}
@@ -468,7 +503,13 @@ func (task *ContainerTask) run(ctx context.Context, scope *tasks.TaskContext) er
 	}
 	defer func() {
 		if closeError := closer.Close(); closeError != nil {
-			scoped.Log(ctx).V(2).Info("failed to close plugin client", "error", closeError)
+			var leakError *ContainerLeakError
+			if errors.As(closeError, &leakError) {
+				scoped.Log(ctx).Error(closeError, "failed to clean up plugin container")
+				returnError = errors.Join(returnError, closeError)
+			} else {
+				scoped.Log(ctx).V(2).Info("failed to close plugin client", "error", closeError)
+			}
 		}
 	}()
 

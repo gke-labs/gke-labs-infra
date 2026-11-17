@@ -1383,6 +1383,10 @@ if [ "$CMD" = "run" ]; then
       ;;
   esac
 elif [ "$CMD" = "kill" ]; then
+  if [ -f "$STATE_DIR/fail-kill" ]; then
+    echo "kill error" >&2
+    exit 1
+  fi
   echo "$1" >> "$STATE_DIR/killed"
   exit 0
 fi
@@ -1503,6 +1507,36 @@ func TestStartDockerPlugin_ContainerCleanup(t *testing.T) {
 
 		if killedName != startedName {
 			t.Errorf("killed container name %q does not match started container name %q", killedName, startedName)
+		}
+	})
+
+	t.Run("failed docker kill returns error naming container and instruction", func(t *testing.T) {
+		fakeDocker, stateDir := setupFakeDockerForCleanup(t)
+		if err := os.WriteFile(filepath.Join(stateDir, "fail-kill"), []byte("1"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		repoRoot := t.TempDir()
+		tree, err := sourcetree.Open(repoRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope := tasks.NewTaskContext(repoRoot, repoRoot, tree).WithTool("docker", fakeDocker)
+
+		_, closer, err := plugins.StartDockerPlugin(t.Context(), scope, "hang", false, nil)
+		if err != nil {
+			t.Fatalf("StartDockerPlugin: %v", err)
+		}
+
+		closeError := closer.Close()
+		if closeError == nil {
+			t.Fatal("expected closer.Close to return error when docker kill failed, got nil")
+		}
+		errorString := closeError.Error()
+		if !strings.Contains(errorString, "failed to kill plugin container") {
+			t.Errorf("expected error to mention failed to kill container, got: %s", errorString)
+		}
+		if !strings.Contains(errorString, "docker kill") {
+			t.Errorf("expected error to mention 'docker kill' instruction, got: %s", errorString)
 		}
 	})
 }
