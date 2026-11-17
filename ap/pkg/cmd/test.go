@@ -20,7 +20,6 @@ import (
 	"path/filepath"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
-	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
@@ -106,11 +105,5 @@ func RunTest(ctx context.Context, opt TestOptions) error {
 		}
 	}
 
-	if opt.Race {
-		for _, task := range allTasks {
-			golang.SetRace(task, true)
-		}
-	}
-
-	return tasks.Run(ctx, tasks.NewTaskContext(opt.RepoRoot, opt.RepoRoot, r), allTasks, tasks.RunOptions{DryRun: opt.DryRun, ContinueOnError: true})
+	return tasks.Run(ctx, tasks.NewTaskContext(opt.RepoRoot, opt.RepoRoot, r).WithRace(opt.Race), allTasks, tasks.RunOptions{DryRun: opt.DryRun, ContinueOnError: true})
 }

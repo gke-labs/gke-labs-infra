@@ -171,15 +171,14 @@ func RunDroppedErrors(ctx context.Context, cmd *cobra.Command, opt DroppedErrors
 	}
 
 	task := &golang.AnalyzersTask{
-		Dir:           cwd,
-		RepoRoot:      repoRoot,
-		Enabled:       map[string]codestyle.Mode{"droppederrors": codestyle.Mode(mode)},
-		Policies:      map[string]fileset.Policy{"droppederrors": policy},
-		Settings:      map[string]*config.AnalyzerConfig{"droppederrors": droppedErrorsSettings},
-		Analyzers:     []*analysis.Analyzer{analyzer},
-		GOOS:          goosList,
-		WriteBaseline: opt.WriteBaseline,
-		BaselinePath:  opt.Baseline,
+		Dir:          cwd,
+		RepoRoot:     repoRoot,
+		Enabled:      map[string]codestyle.Mode{"droppederrors": codestyle.Mode(mode)},
+		Policies:     map[string]fileset.Policy{"droppederrors": policy},
+		Settings:     map[string]*config.AnalyzerConfig{"droppederrors": droppedErrorsSettings},
+		Analyzers:    []*analysis.Analyzer{analyzer},
+		GOOS:         goosList,
+		BaselinePath: opt.Baseline,
 	}
 
 	if opt.RepoRoot == "" {
@@ -190,5 +189,5 @@ func RunDroppedErrors(ctx context.Context, cmd *cobra.Command, opt DroppedErrors
 		return err
 	}
 
-	return task.Run(ctx, tasks.NewTaskContext(repoRoot, cwd, r))
+	return task.Run(ctx, tasks.NewTaskContext(repoRoot, cwd, r).WithWriteBaseline(opt.WriteBaseline))
 }

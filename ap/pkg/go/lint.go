@@ -116,17 +116,16 @@ func (t *GoTidyTask) GetChildren() []tasks.Task {
 
 // AnalyzersTask represents a task to run enabled code style analyzers in-process.
 type AnalyzersTask struct {
-	Dir           string
-	RepoRoot      string
-	Analyzers     []*analysis.Analyzer
-	Enabled       map[string]codestyle.Mode
-	Policies      map[string]fileset.Policy
-	Settings      map[string]*config.AnalyzerConfig
-	GOOS          []string
-	HostGOOS      string
-	LoadCount     int
-	WriteBaseline bool
-	BaselinePath  string
+	Dir          string
+	RepoRoot     string
+	Analyzers    []*analysis.Analyzer
+	Enabled      map[string]codestyle.Mode
+	Policies     map[string]fileset.Policy
+	Settings     map[string]*config.AnalyzerConfig
+	GOOS         []string
+	HostGOOS     string
+	LoadCount    int
+	BaselinePath string
 }
 
 // SkipGenerated reports whether skipGenerated is enabled for the named analyzer.
@@ -317,7 +316,7 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.TaskContext) error
 			RepoRoot:        t.RepoRoot,
 			Dir:             t.Dir,
 			ConfiguredPath:  configured,
-			WriteBaseline:   t.WriteBaseline,
+			WriteBaseline:   scope.WriteBaseline(),
 			AllCheckedFiles: allCheckedFiles,
 			Mode:            mode,
 			Stdout:          scope.Stdout(),
@@ -330,20 +329,6 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.TaskContext) error
 
 	errs = append(errs, actionErrors...)
 	return errors.Join(errs...)
-}
-
-type writeBaselineSetter interface {
-	SetWriteBaseline(bool)
-}
-
-// SetWriteBaseline recursively sets WriteBaseline on any task supporting it in the task tree.
-func SetWriteBaseline(t tasks.Task, writeBaseline bool) {
-	if wb, ok := t.(writeBaselineSetter); ok {
-		wb.SetWriteBaseline(writeBaseline)
-	}
-	for _, child := range t.GetChildren() {
-		SetWriteBaseline(child, writeBaseline)
-	}
 }
 
 func relPath(base, target string) string {
@@ -363,10 +348,6 @@ func (t *AnalyzersTask) GetName() string {
 
 func (t *AnalyzersTask) GetChildren() []tasks.Task {
 	return nil
-}
-
-func (t *AnalyzersTask) SetWriteBaseline(wb bool) {
-	t.WriteBaseline = wb
 }
 
 func determineTargetGOOS(r *sourcetree.SourceTree, dir string, skipGlobs []string, hostGOOS string) []string {

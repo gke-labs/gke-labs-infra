@@ -118,17 +118,22 @@ func TestHasGoTests(t *testing.T) {
 	}
 }
 
-func TestSetRace(t *testing.T) {
-	task := &GoTestTask{}
-	group := &tasks.Group{
-		Tasks: []tasks.Task{task},
+func TestRace(t *testing.T) {
+	tmpDir := t.TempDir()
+	tree, err := sourcetree.Open(tmpDir)
+	if err != nil {
+		t.Fatal(err)
 	}
-	SetRace(group, true)
-	if !task.Race {
-		t.Errorf("expected task.Race to be true after SetRace")
+	scope := tasks.NewTaskContext(tmpDir, tmpDir, tree)
+	if scope.Race() {
+		t.Errorf("expected scope.Race() to be false by default")
 	}
-	SetRace(group, false)
-	if task.Race {
-		t.Errorf("expected task.Race to be false after SetRace(false)")
+	scope = scope.WithRace(true)
+	if !scope.Race() {
+		t.Errorf("expected scope.Race() to be true after WithRace(true)")
+	}
+	scope = scope.WithRace(false)
+	if scope.Race() {
+		t.Errorf("expected scope.Race() to be false after WithRace(false)")
 	}
 }
