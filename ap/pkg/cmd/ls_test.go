@@ -243,7 +243,7 @@ plugins:
 	if err != nil {
 		t.Fatalf("DockerfilePluginCacheKey failed: %v", err)
 	}
-	cachedBuildRecord := plugins.DockerfilePluginCachePath(cacheDirectory, "demo", "tools/demo/Dockerfile")
+	cachedBuildRecord := plugins.DockerfilePluginCachePath(cacheDirectory, repoRoot, "demo", "tools/demo/Dockerfile")
 	recordData, err := os.ReadFile(cachedBuildRecord)
 	if err != nil {
 		t.Errorf("expected cached build record at %s: %v", cachedBuildRecord, err)

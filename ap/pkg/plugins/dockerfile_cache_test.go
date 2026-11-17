@@ -290,7 +290,7 @@ func TestEnsureDockerfilePluginImage(t *testing.T) {
 			t.Fatalf("expected build count 1 on cold run, got %d", atomic.LoadInt64(&buildCount))
 		}
 
-		recordPath := plugins.DockerfilePluginCachePath(cacheDirectory, pluginName, dockerfilePath)
+		recordPath := plugins.DockerfilePluginCachePath(cacheDirectory, repoRoot, pluginName, dockerfilePath)
 		recordData, err := os.ReadFile(recordPath)
 		if err != nil {
 			t.Fatalf("expected record file at %s: %v", recordPath, err)
@@ -382,7 +382,7 @@ func TestEnsureDockerfilePluginImage(t *testing.T) {
 		}
 		scope := tasks.NewTaskContext(repoRoot, repoRoot, tree)
 
-		recordPath := plugins.DockerfilePluginCachePath(cacheDirectory, pluginName, dockerfilePath)
+		recordPath := plugins.DockerfilePluginCachePath(cacheDirectory, repoRoot, pluginName, dockerfilePath)
 		if err := os.MkdirAll(filepath.Dir(recordPath), 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -474,6 +474,112 @@ func TestEnsureDockerfilePluginImage(t *testing.T) {
 		}
 		if atomic.LoadInt64(&buildCount) != 2 {
 			t.Errorf("expected build count 2 after context file change, got %d", atomic.LoadInt64(&buildCount))
+		}
+	})
+
+	t.Run("distinct checkouts keep separate records", func(t *testing.T) {
+		repoRootA := setupTestRepo(t)
+		repoRootB := setupTestRepo(t)
+		cacheDirectory := t.TempDir()
+
+		sourcetree.ResetCache()
+		treeA, err := sourcetree.Open(repoRootA)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scopeA := tasks.NewTaskContext(repoRootA, repoRootA, treeA)
+
+		sourcetree.ResetCache()
+		treeB, err := sourcetree.Open(repoRootB)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scopeB := tasks.NewTaskContext(repoRootB, repoRootB, treeB)
+
+		var buildCountA, buildCountB int64
+		fakeBuild := func(_ context.Context, scope *tasks.TaskContext, _, _, _ string) (string, error) {
+			if scope.RepoRoot() == repoRootA {
+				atomic.AddInt64(&buildCountA, 1)
+				return "sha256:image-a", nil
+			}
+			atomic.AddInt64(&buildCountB, 1)
+			return "sha256:image-b", nil
+		}
+		fakeLookup := func(_ context.Context, _ *tasks.TaskContext, _ string) (bool, error) {
+			return true, nil
+		}
+
+		options := plugins.ContainerPluginOptions{
+			CacheDirectory: cacheDirectory,
+			BuildImage:     fakeBuild,
+			ImageLookup:    fakeLookup,
+		}
+
+		// Build in checkout A
+		imageIDA, err := plugins.EnsureDockerfilePluginImage(t.Context(), scopeA, pluginName, dockerfilePath, options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if imageIDA != "sha256:image-a" {
+			t.Errorf("expected 'sha256:image-a', got %s", imageIDA)
+		}
+		if atomic.LoadInt64(&buildCountA) != 1 {
+			t.Errorf("expected buildCountA = 1, got %d", atomic.LoadInt64(&buildCountA))
+		}
+
+		// Build in checkout B
+		imageIDB, err := plugins.EnsureDockerfilePluginImage(t.Context(), scopeB, pluginName, dockerfilePath, options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if imageIDB != "sha256:image-b" {
+			t.Errorf("expected 'sha256:image-b', got %s", imageIDB)
+		}
+		if atomic.LoadInt64(&buildCountB) != 1 {
+			t.Errorf("expected buildCountB = 1, got %d", atomic.LoadInt64(&buildCountB))
+		}
+
+		// Verify distinct record files were created
+		recordPathA := plugins.DockerfilePluginCachePath(cacheDirectory, repoRootA, pluginName, dockerfilePath)
+		recordPathB := plugins.DockerfilePluginCachePath(cacheDirectory, repoRootB, pluginName, dockerfilePath)
+		if recordPathA == recordPathB {
+			t.Fatalf("expected different record paths for different checkouts, both were %s", recordPathA)
+		}
+
+		recordDataA, err := os.ReadFile(recordPathA)
+		if err != nil {
+			t.Fatalf("reading record A: %v", err)
+		}
+		var recordA plugins.DockerfilePluginBuildRecord
+		if err := json.Unmarshal(recordDataA, &recordA); err != nil {
+			t.Fatalf("parsing record A: %v", err)
+		}
+		if recordA.ImageID != "sha256:image-a" {
+			t.Errorf("expected record A image ID 'sha256:image-a', got %s", recordA.ImageID)
+		}
+
+		// Re-run in checkout A: should use cached record A and NOT rebuild
+		cachedIDA, err := plugins.EnsureDockerfilePluginImage(t.Context(), scopeA, pluginName, dockerfilePath, options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cachedIDA != "sha256:image-a" {
+			t.Errorf("expected 'sha256:image-a', got %s", cachedIDA)
+		}
+		if atomic.LoadInt64(&buildCountA) != 1 {
+			t.Errorf("expected buildCountA to remain 1 (no rebuild after checkout B ran), got %d", atomic.LoadInt64(&buildCountA))
+		}
+
+		// Re-run in checkout B: should use cached record B and NOT rebuild
+		cachedIDB, err := plugins.EnsureDockerfilePluginImage(t.Context(), scopeB, pluginName, dockerfilePath, options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cachedIDB != "sha256:image-b" {
+			t.Errorf("expected 'sha256:image-b', got %s", cachedIDB)
+		}
+		if atomic.LoadInt64(&buildCountB) != 1 {
+			t.Errorf("expected buildCountB to remain 1, got %d", atomic.LoadInt64(&buildCountB))
 		}
 	})
 }

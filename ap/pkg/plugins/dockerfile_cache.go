@@ -93,10 +93,19 @@ func DockerfilePluginCacheKey(tree *sourcetree.SourceTree, dockerfilePath, build
 	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
+func repoRootHash(repoRoot string) string {
+	absoluteRoot, err := filepath.Abs(repoRoot)
+	if err != nil {
+		absoluteRoot = filepath.Clean(repoRoot)
+	}
+	hash := sha256.Sum256([]byte(absoluteRoot))
+	return hex.EncodeToString(hash[:])[:12]
+}
+
 // DockerfilePluginCachePath returns the file path where the build record for a Dockerfile plugin is stored under cacheDirectory.
-func DockerfilePluginCachePath(cacheDirectory, pluginName, dockerfilePath string) string {
+func DockerfilePluginCachePath(cacheDirectory, repoRoot, pluginName, dockerfilePath string) string {
 	sanitizedPath := strings.ReplaceAll(filepath.ToSlash(filepath.Clean(dockerfilePath)), "/", "-")
-	filename := fmt.Sprintf("%s-%s.json", sanitizedPath, pluginName)
+	filename := fmt.Sprintf("%s-%s-%s.json", sanitizedPath, pluginName, repoRootHash(repoRoot))
 	return filepath.Join(cacheDirectory, "plugins", "builds", filename)
 }
 
@@ -132,7 +141,7 @@ func EnsureDockerfilePluginImage(
 		return "", fmt.Errorf("computing plugin cache key for %s (%s): %w", pluginName, dockerfilePath, err)
 	}
 
-	recordPath := DockerfilePluginCachePath(options.CacheDirectory, pluginName, dockerfilePath)
+	recordPath := DockerfilePluginCachePath(options.CacheDirectory, scope.RepoRoot(), pluginName, dockerfilePath)
 
 	recordData, readErr := os.ReadFile(recordPath)
 	if readErr != nil {
