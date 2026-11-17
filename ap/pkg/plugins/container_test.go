@@ -1272,3 +1272,234 @@ func TestContainerVerifyMode(t *testing.T) {
 		}
 	})
 }
+
+type hangingPluginServer struct {
+	api.UnimplementedPluginServiceServer
+}
+
+func (s *hangingPluginServer) Describe(ctx context.Context, _ *api.DescribeRequest) (*api.DescribeResponse, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestDescribeContainer_Deadline(t *testing.T) {
+	restore := plugins.SetDescribeTimeoutForTest(100 * time.Millisecond)
+	defer restore()
+
+	repoRoot := t.TempDir()
+	cacheDir := t.TempDir()
+	tree, err := sourcetree.Open(repoRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := tasks.NewTaskContext(repoRoot, repoRoot, tree)
+
+	hangingStarter := func(ctx context.Context, scope *tasks.TaskContext, imageRef string, allowNetwork bool, stderr io.Writer) (api.PluginServiceClient, io.Closer, error) {
+		serverReader, clientWriter := io.Pipe()
+		clientReader, serverWriter := io.Pipe()
+
+		serverListener := stdio.NewListener(serverReader, serverWriter)
+		clientConnection := stdio.NewConn(clientReader, clientWriter)
+
+		grpcServer := grpc.NewServer()
+		api.RegisterPluginServiceServer(grpcServer, &hangingPluginServer{})
+
+		go func() {
+			_ = grpcServer.Serve(serverListener)
+		}()
+
+		client, closer, dialErr := plugins.DialStdioConn(ctx, clientConnection)
+		if dialErr != nil {
+			_ = serverListener.Close()
+			return nil, nil, dialErr
+		}
+		wrappedCloser := closerFunc(func() error {
+			grpcServer.Stop()
+			return errors.Join(closer.Close(), serverListener.Close())
+		})
+		return client, wrappedCloser, nil
+	}
+
+	pluginName := "sleepy"
+	imageRef := "sleepy-image:latest"
+
+	_, err = plugins.DescribeContainer(t.Context(), scope, cacheDir, pluginName, imageRef, hangingStarter)
+	if err == nil {
+		t.Fatal("expected DescribeContainer to fail due to deadline, got nil")
+	}
+	errStr := err.Error()
+	if !strings.Contains(errStr, pluginName) {
+		t.Errorf("expected error to contain plugin name %q, got: %s", pluginName, errStr)
+	}
+	if !strings.Contains(errStr, imageRef) {
+		t.Errorf("expected error to contain image ref %q, got: %s", imageRef, errStr)
+	}
+}
+
+func setupFakeDockerForCleanup(t *testing.T) (string, string) {
+	t.Helper()
+	stateDir := t.TempDir()
+	binDir := t.TempDir()
+
+	script := fmt.Sprintf(`#!/bin/sh
+STATE_DIR=%q
+
+CMD="$1"
+shift
+
+if [ "$CMD" = "run" ]; then
+  CONTAINER_NAME=""
+  IMAGE_REF=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --name)
+        CONTAINER_NAME="$2"
+        shift 2
+        ;;
+      --network)
+        shift 2
+        ;;
+      -*)
+        shift
+        ;;
+      *)
+        IMAGE_REF="$1"
+        shift
+        ;;
+    esac
+  done
+  echo "$CONTAINER_NAME" > "$STATE_DIR/started"
+  case "$IMAGE_REF" in
+    clean)
+      cat > /dev/null
+      exit 0
+      ;;
+    hang)
+      sleep 30
+      exit 0
+      ;;
+  esac
+elif [ "$CMD" = "kill" ]; then
+  echo "$1" >> "$STATE_DIR/killed"
+  exit 0
+fi
+`, stateDir)
+
+	fakeDockerPath := filepath.Join(binDir, "docker")
+	if err := os.WriteFile(fakeDockerPath, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	return fakeDockerPath, stateDir
+}
+
+func TestStartDockerPlugin_ContainerCleanup(t *testing.T) {
+	t.Run("exited cleanly does not call docker kill", func(t *testing.T) {
+		fakeDocker, stateDir := setupFakeDockerForCleanup(t)
+		repoRoot := t.TempDir()
+		tree, err := sourcetree.Open(repoRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope := tasks.NewTaskContext(repoRoot, repoRoot, tree).WithTool("docker", fakeDocker)
+
+		_, closer, err := plugins.StartDockerPlugin(t.Context(), scope, "clean", false, nil)
+		if err != nil {
+			t.Fatalf("StartDockerPlugin: %v", err)
+		}
+
+		if err := closer.Close(); err != nil {
+			t.Fatalf("closer.Close: %v", err)
+		}
+
+		if _, err := os.Stat(filepath.Join(stateDir, "killed")); !os.IsNotExist(err) {
+			t.Error("expected docker kill not to be called for cleanly exited plugin")
+		}
+
+		startedBytes, err := os.ReadFile(filepath.Join(stateDir, "started"))
+		if err != nil {
+			t.Fatalf("reading started container name: %v", err)
+		}
+		startedName := strings.TrimSpace(string(startedBytes))
+		if !strings.HasPrefix(startedName, "ap-plugin-") {
+			t.Errorf("expected container name to start with ap-plugin-, got: %s", startedName)
+		}
+	})
+
+	t.Run("client killed after grace period triggers docker kill", func(t *testing.T) {
+		fakeDocker, stateDir := setupFakeDockerForCleanup(t)
+		repoRoot := t.TempDir()
+		tree, err := sourcetree.Open(repoRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope := tasks.NewTaskContext(repoRoot, repoRoot, tree).WithTool("docker", fakeDocker)
+
+		_, closer, err := plugins.StartDockerPlugin(t.Context(), scope, "hang", false, nil)
+		if err != nil {
+			t.Fatalf("StartDockerPlugin: %v", err)
+		}
+
+		closeErr := closer.Close()
+		if closeErr == nil {
+			t.Fatal("expected closer.Close to return error when process had to be killed, got nil")
+		}
+
+		killedBytes, err := os.ReadFile(filepath.Join(stateDir, "killed"))
+		if err != nil {
+			t.Fatalf("expected docker kill to be called: %v", err)
+		}
+		killedName := strings.TrimSpace(string(killedBytes))
+
+		startedBytes, err := os.ReadFile(filepath.Join(stateDir, "started"))
+		if err != nil {
+			t.Fatalf("reading started container name: %v", err)
+		}
+		startedName := strings.TrimSpace(string(startedBytes))
+
+		if killedName != startedName {
+			t.Errorf("killed container name %q does not match started container name %q", killedName, startedName)
+		}
+	})
+
+	t.Run("context cancelled triggers docker kill", func(t *testing.T) {
+		fakeDocker, stateDir := setupFakeDockerForCleanup(t)
+		repoRoot := t.TempDir()
+		tree, err := sourcetree.Open(repoRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope := tasks.NewTaskContext(repoRoot, repoRoot, tree).WithTool("docker", fakeDocker)
+
+		ctx, cancel := context.WithCancel(t.Context())
+		_, closer, err := plugins.StartDockerPlugin(ctx, scope, "hang", false, nil)
+		if err != nil {
+			t.Fatalf("StartDockerPlugin: %v", err)
+		}
+
+		for i := 0; i < 100; i++ {
+			if _, statErr := os.Stat(filepath.Join(stateDir, "started")); statErr == nil {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+
+		cancel()
+		_ = closer.Close()
+
+		killedBytes, err := os.ReadFile(filepath.Join(stateDir, "killed"))
+		if err != nil {
+			t.Fatalf("expected docker kill to be called on cancelled context: %v", err)
+		}
+		killedName := strings.TrimSpace(string(killedBytes))
+
+		startedBytes, err := os.ReadFile(filepath.Join(stateDir, "started"))
+		if err != nil {
+			t.Fatalf("reading started container name: %v", err)
+		}
+		startedName := strings.TrimSpace(string(startedBytes))
+
+		if killedName != startedName {
+			t.Errorf("killed container name %q does not match started container name %q", killedName, startedName)
+		}
+	})
+}

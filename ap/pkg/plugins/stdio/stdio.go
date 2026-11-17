@@ -183,6 +183,7 @@ type CommandConn struct {
 	waitDone   chan struct{}
 	waitError  error
 	closed     atomic.Bool
+	killed     atomic.Bool
 }
 
 // NewCommandConn returns a net.Conn over a started command's stdin and stdout pipes.
@@ -273,6 +274,7 @@ func (commandConnection *CommandConn) Close() error {
 		case <-commandConnection.waitDone:
 			closeErrors = append(closeErrors, commandConnection.waitError)
 		case <-time.After(closeGracePeriod):
+			commandConnection.killed.Store(true)
 			killError := commandConnection.command.Process.Kill()
 			<-commandConnection.waitDone
 			if killError != nil && !errors.Is(killError, os.ErrProcessDone) {
@@ -292,6 +294,12 @@ func (commandConnection *CommandConn) Close() error {
 		commandConnection.closeError = errors.Join(closeErrors...)
 	})
 	return commandConnection.closeError
+}
+
+// Killed reports whether the child process had to be forcefully killed by Close
+// after failing to exit within the grace period.
+func (commandConnection *CommandConn) Killed() bool {
+	return commandConnection.killed.Load()
 }
 
 var _ net.Conn = (*CommandConn)(nil)

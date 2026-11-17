@@ -172,6 +172,9 @@ func TestRoundTrip_ChildProcess(t *testing.T) {
 	if err := connection.Close(); err != nil {
 		t.Fatalf("connection.Close: %v", err)
 	}
+	if connection.Killed() {
+		t.Fatal("expected Killed() to be false for cleanly exited child")
+	}
 }
 
 func TestChildProcess_EarlyExit(t *testing.T) {
@@ -234,6 +237,9 @@ func TestChildProcess_IgnoresStdinClose(t *testing.T) {
 	}
 	if elapsed > 4*time.Second {
 		t.Fatalf("Close took too long (%v), expected bounded wait (< 4s)", elapsed)
+	}
+	if !connection.Killed() {
+		t.Fatal("expected Killed() to be true for killed child")
 	}
 }
 

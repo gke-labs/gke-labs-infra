@@ -17,6 +17,8 @@ package plugins
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +29,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
@@ -50,7 +54,13 @@ func StartDockerPlugin(ctx context.Context, scope *tasks.TaskContext, imageRef s
 		return nil, nil, fmt.Errorf("plugin requires a container runtime (docker): %w", err)
 	}
 
-	commandArguments := []string{"run", "-i", "--rm"}
+	var nameBytes [8]byte
+	if _, err := rand.Read(nameBytes[:]); err != nil {
+		return nil, nil, fmt.Errorf("generating container name: %w", err)
+	}
+	containerName := "ap-plugin-" + hex.EncodeToString(nameBytes[:])
+
+	commandArguments := []string{"run", "-i", "--rm", "--name", containerName}
 	if !allowNetwork {
 		commandArguments = append(commandArguments, "--network", "none")
 	}
@@ -71,7 +81,37 @@ func StartDockerPlugin(ctx context.Context, scope *tasks.TaskContext, imageRef s
 	}
 
 	commandConnection := stdio.NewCommandConn(command, stdinPipe, stdoutPipe)
-	return DialStdioConn(ctx, commandConnection)
+	grpcClient, connCloser, err := DialStdioConn(ctx, commandConnection)
+
+	killContainer := func() {
+		killCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		killCmd := exec.CommandContext(killCtx, dockerPath, "kill", containerName)
+		killCmd.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(dockerPath))
+		if killErr := killCmd.Run(); killErr != nil {
+			scoped.Log(ctx).V(2).Info("failed to kill plugin container", "container", containerName, "error", killErr)
+		}
+	}
+
+	if err != nil {
+		if commandConnection.Killed() || ctx.Err() != nil {
+			killContainer()
+		}
+		return nil, nil, err
+	}
+
+	var closeOnce sync.Once
+	var closeError error
+	closer := closerFunc(func() error {
+		closeOnce.Do(func() {
+			closeError = connCloser.Close()
+			if commandConnection.Killed() || ctx.Err() != nil {
+				killContainer()
+			}
+		})
+		return closeError
+	})
+	return grpcClient, closer, nil
 }
 
 // DialStdioConn establishes a gRPC client connection over the given net.Conn.
@@ -155,6 +195,8 @@ func inspectImageID(ctx context.Context, dockerBin, fullImageName string) (strin
 	return imageID, nil
 }
 
+var describeTimeout = 30 * time.Second
+
 // DescribeContainer runs Describe RPC on the plugin container on cold runs and caches the manifest.
 func DescribeContainer(ctx context.Context, scope *tasks.TaskContext, cacheDirectory, pluginName, imageRef string, starter StartPluginFunc) (*PluginManifest, error) {
 	key := CacheKey(imageRef)
@@ -163,10 +205,13 @@ func DescribeContainer(ctx context.Context, scope *tasks.TaskContext, cacheDirec
 		return manifest, nil
 	}
 
+	describeContext, cancel := context.WithTimeout(ctx, describeTimeout)
+	defer cancel()
+
 	var stderrBuffer bytes.Buffer
-	client, closer, err := starter(ctx, scope, imageRef, false, &stderrBuffer)
+	client, closer, err := starter(describeContext, scope, imageRef, false, &stderrBuffer)
 	if err != nil {
-		return nil, fmt.Errorf("starting plugin %q for describe: %w", pluginName, err)
+		return nil, fmt.Errorf("starting plugin %q (%s) for describe: %w", pluginName, imageRef, err)
 	}
 	defer func() {
 		if closeError := closer.Close(); closeError != nil {
@@ -174,13 +219,13 @@ func DescribeContainer(ctx context.Context, scope *tasks.TaskContext, cacheDirec
 		}
 	}()
 
-	response, err := client.Describe(ctx, &api.DescribeRequest{})
+	response, err := client.Describe(describeContext, &api.DescribeRequest{})
 	if err != nil {
 		stderrOutput := strings.TrimSpace(stderrBuffer.String())
 		if stderrOutput != "" {
-			return nil, fmt.Errorf("running describe for plugin %q: %w (%s)", pluginName, err, stderrOutput)
+			return nil, fmt.Errorf("running describe for plugin %q (%s): %w (%s)", pluginName, imageRef, err, stderrOutput)
 		}
-		return nil, fmt.Errorf("running describe for plugin %q: %w", pluginName, err)
+		return nil, fmt.Errorf("running describe for plugin %q (%s): %w", pluginName, imageRef, err)
 	}
 
 	parsedManifest := &PluginManifest{
