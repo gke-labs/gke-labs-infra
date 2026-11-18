@@ -28,19 +28,29 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/spec"
 )
 
+var buildctlDigests = map[string]string{
+	"linux-amd64":  "sha256:bc5a158c97c1f7ace1af81c375e8c28bd27e6afeb283fc5b3bfb10777f48fc83",
+	"linux-arm64":  "sha256:02a6f8c1ea519b11d312ea2fb2f45cf3a7a34814a0e61d55d2532adb211ce400",
+	"darwin-arm64": "sha256:122805479a56fea85ba7b4f571190b9a5e331b262f3c6f01de985624f70abb69",
+}
+
 func ensureBuildctl(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("buildctl"); err == nil {
 		return
 	}
 
+	platform := runtime.GOOS + "-" + runtime.GOARCH
+	expectedDigest, ok := buildctlDigests[platform]
+	if !ok {
+		t.Fatalf("unsupported platform for buildctl e2e download: %s (expected linux-amd64, linux-arm64, or darwin-arm64)", platform)
+	}
+
 	ctx := t.Context()
-	goos := runtime.GOOS
-	goarch := runtime.GOARCH
 	version := "v0.28.0"
-	downloadURL := fmt.Sprintf("https://github.com/moby/buildkit/releases/download/%s/buildkit-%s.%s-%s.tar.gz", version, version, goos, goarch)
+	downloadURL := fmt.Sprintf("https://github.com/moby/buildkit/releases/download/%s/buildkit-%s.%s-%s.tar.gz", version, version, runtime.GOOS, runtime.GOARCH)
 	tmpDir := t.TempDir()
-	archivePath, err := fetch.Download(ctx, downloadURL, "", tmpDir)
+	archivePath, err := fetch.Download(ctx, downloadURL, expectedDigest, tmpDir)
 	if err != nil {
 		t.Fatalf("failed to download buildctl: %v", err)
 	}
@@ -120,41 +130,12 @@ metadata:
 	t.Setenv("IMAGE_PREFIX", "images.local")
 	t.Setenv("IMAGE_TAG", "e2e")
 
-	origWd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		_ = os.Chdir(origWd)
-	}()
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatal(err)
-	}
+	t.Chdir(tmpDir)
 
 	// Build and push through the in-cluster BuildKit
 	h.RunCmd(apBin, "build", "--push", "--buildkit-host", "k8s://autodeploy-system/buildkit")
 
-	// Verify the image is in the in-cluster registry by creating a pod from it (as the registry test does)
-	podManifest := fmt.Sprintf(`apiVersion: v1
-kind: Pod
-metadata:
-  name: test-buildkit-pod
-  namespace: %s
-spec:
-  containers:
-  - name: test
-    image: images.local/tiny:e2e
-    command: ["/bin/sh", "-c", "echo hello"]
-`, h.Namespace())
-	h.KubectlApplyContent(podManifest)
-
-	image := h.RunCmd(h.KubectlCommand(), "get", "pod", "test-buildkit-pod", "-n", h.Namespace(), "-o", "jsonpath={.spec.containers[0].image}")
-	expectedImage := "images.local/tiny:e2e"
-	if image != expectedImage {
-		t.Errorf("expected image %q, got %q", expectedImage, image)
-	}
-
-	// Also verify that the image repository and tag exist in the registry API
+	// Verify that the image repository and tag exist in the in-cluster registry
 	tagsOutput := h.RunCmd(h.KubectlCommand(), "exec", "-n", "in-cluster-image-registry-system", "in-cluster-image-registry-0", "--", "wget", "-qO-", "http://localhost:5000/v2/tiny/tags/list")
 	if !strings.Contains(tagsOutput, `"name":"tiny"`) || !strings.Contains(tagsOutput, `"e2e"`) {
 		t.Errorf("expected in-cluster registry to have tiny:e2e, got: %s", tagsOutput)
