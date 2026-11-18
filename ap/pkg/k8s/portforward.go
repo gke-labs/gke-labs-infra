@@ -147,7 +147,7 @@ func (t *PortForwardTask) Run(ctx context.Context, scope *tasks.TaskContext) (re
 	}
 
 	if !ready {
-		scoped.Log(ctx).Error(nil, "port-forward did not become ready", "namespace", t.Namespace, "service", t.Service)
+		scoped.Log(ctx).Error("port-forward did not become ready", "namespace", t.Namespace, "service", t.Service)
 		logPortForwardOutput(ctx, &stdout, &stderr)
 		return fmt.Errorf("port-forward did not become ready")
 	}
@@ -181,7 +181,7 @@ func PickFreePort() (int, error) {
 	}
 	defer func() {
 		if err := l.Close(); err != nil {
-			scoped.Log(context.Background()).Info("failed to close listener", "level", "warning", "error", err)
+			scoped.Log(context.Background()).Warn("failed to close listener", "error", err)
 		}
 	}()
 	return l.Addr().(*net.TCPAddr).Port, nil
@@ -189,10 +189,10 @@ func PickFreePort() (int, error) {
 
 func logPortForwardOutput(ctx context.Context, stdout, stderr *syncBuffer) {
 	if s := stdout.String(); s != "" {
-		scoped.Log(ctx).Error(nil, "kubectl port-forward stdout", "output", s)
+		scoped.Log(ctx).Error("kubectl port-forward stdout", "output", s)
 	}
 	if s := stderr.String(); s != "" {
-		scoped.Log(ctx).Error(nil, "kubectl port-forward stderr", "output", s)
+		scoped.Log(ctx).Error("kubectl port-forward stderr", "output", s)
 	}
 }
 

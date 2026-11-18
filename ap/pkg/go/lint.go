@@ -94,7 +94,7 @@ type GoTidyTask struct {
 }
 
 func (t *GoTidyTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
-	scoped.Log(ctx).V(1).Info("running go mod tidy -diff", "dir", t.Dir)
+	scoped.Log(ctx).Debug("running go mod tidy -diff", "dir", t.Dir)
 	if _, err := scope.RunCommand(ctx, tasks.Command{
 		Program: "go",
 		Args:    []string{"mod", "tidy", "-diff"},
@@ -213,7 +213,7 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.TaskContext) error
 		for _, pkg := range pkgs {
 			for _, err := range pkg.Errors {
 				if _, writeErr := fmt.Fprintln(scope.Stderr(), err); writeErr != nil {
-					scoped.Log(ctx).V(2).Info("failed to write package error", "error", writeErr)
+					scoped.Log(ctx).Debug("failed to write package error", "error", writeErr)
 				}
 				pkgErrors++
 			}

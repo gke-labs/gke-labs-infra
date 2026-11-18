@@ -16,6 +16,7 @@ package cmd
 
 import (
 	"bytes"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -301,9 +302,13 @@ func TestDiscoverScopes_ScriptAndGoE2e(t *testing.T) {
 	}
 
 	var logBuf bytes.Buffer
-	klog.SetLoggerWithOptions(tasks.NewLogger(&logBuf), klog.ContextualLogger(true))
+	testLogger := tasks.NewLogger(&logBuf)
+	slog.SetDefault(testLogger)
+	klog.SetSlogLogger(testLogger)
 	defer func() {
-		klog.SetLoggerWithOptions(tasks.NewLogger(os.Stderr), klog.ContextualLogger(true))
+		defaultLogger := tasks.NewLogger(os.Stderr)
+		slog.SetDefault(defaultLogger)
+		klog.SetSlogLogger(defaultLogger)
 	}()
 
 	rootOpt := RootOptions{RepoRoot: tempDir, DryRun: true}

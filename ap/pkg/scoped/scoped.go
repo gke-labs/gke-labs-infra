@@ -16,6 +16,7 @@ package scoped
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -28,6 +29,7 @@ type contextKey int
 const (
 	httpClientKey contextKey = iota
 	nowKey
+	logKey
 )
 
 var defaultHTTPClient = func() *http.Client {
@@ -51,14 +53,18 @@ func HTTPClient(ctx context.Context) *http.Client {
 }
 
 // WithLog returns a copy of ctx carrying the logger.
-func WithLog(ctx context.Context, log logr.Logger) context.Context {
-	return klog.NewContext(ctx, log)
+func WithLog(ctx context.Context, log *slog.Logger) context.Context {
+	ctx = context.WithValue(ctx, logKey, log)
+	return klog.NewContext(ctx, logr.FromSlogHandler(log.Handler()))
 }
 
 // Log returns the logger associated with ctx, or the default logger
 // if none was set.
-func Log(ctx context.Context) logr.Logger {
-	return klog.FromContext(ctx)
+func Log(ctx context.Context) *slog.Logger {
+	if l, ok := ctx.Value(logKey).(*slog.Logger); ok {
+		return l
+	}
+	return slog.Default()
 }
 
 // WithNow returns a copy of ctx carrying the clock function now.

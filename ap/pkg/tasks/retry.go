@@ -19,14 +19,15 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
-	"github.com/go-logr/logr"
 	"k8s.io/klog/v2"
 )
 
@@ -90,89 +91,92 @@ func RunTask(ctx context.Context, scope *TaskContext, task Task) error {
 
 var runnerMu sync.Mutex
 
-type bufferSink struct {
-	writer io.Writer
-	parent logr.LogSink
-	name   string
-	values []any
+type bufferHandler struct {
+	writer   io.Writer
+	warnings *syncBuffer
+	prefix   string
+	attrs    []slog.Attr
 }
 
-var _ logr.LogSink = bufferSink{}
-var _ logr.CallDepthLogSink = bufferSink{}
+var _ slog.Handler = (*bufferHandler)(nil)
 
-func (s bufferSink) Init(info logr.RuntimeInfo) {}
-
-func (s bufferSink) Enabled(level int) bool {
-	if s.parent != nil {
-		return s.parent.Enabled(level)
+func (h *bufferHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	if level >= slog.LevelInfo {
+		return true
 	}
-	return klog.V(klog.Level(level)).Enabled()
+	return klog.V(1).Enabled()
 }
 
-func (s bufferSink) Info(level int, msg string, keysAndValues ...any) {
-	allKeysAndValues := make([]any, 0, len(s.values)+len(keysAndValues))
-	allKeysAndValues = append(allKeysAndValues, s.values...)
-	allKeysAndValues = append(allKeysAndValues, keysAndValues...)
-	s.writeLine(msg, allKeysAndValues)
-}
-
-func (s bufferSink) Error(err error, msg string, keysAndValues ...any) {
-	allKeysAndValues := make([]any, 0, 2+len(s.values)+len(keysAndValues))
-	allKeysAndValues = append(allKeysAndValues, "error", err)
-	allKeysAndValues = append(allKeysAndValues, s.values...)
-	allKeysAndValues = append(allKeysAndValues, keysAndValues...)
-	s.writeLine(msg, allKeysAndValues)
-}
-
-func (s bufferSink) WithValues(keysAndValues ...any) logr.LogSink {
-	newValues := make([]any, 0, len(s.values)+len(keysAndValues))
-	newValues = append(newValues, s.values...)
-	newValues = append(newValues, keysAndValues...)
-	return bufferSink{
-		writer: s.writer,
-		parent: s.parent,
-		name:   s.name,
-		values: newValues,
+func (h *bufferHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	if len(attrs) == 0 {
+		return h
 	}
+	clone := *h
+	clone.attrs = append(slices.Clip(h.attrs), attrs...)
+	return &clone
 }
 
-func (s bufferSink) WithName(name string) logr.LogSink {
-	if s.name != "" {
-		name = s.name + "/" + name
+func (h *bufferHandler) WithGroup(name string) slog.Handler {
+	if name == "" {
+		return h
 	}
-	return bufferSink{
-		writer: s.writer,
-		parent: s.parent,
-		name:   name,
-		values: s.values,
-	}
-}
-
-func (s bufferSink) WithCallDepth(depth int) logr.LogSink {
-	return s
-}
-
-func (s bufferSink) writeLine(msg string, keysAndValues []any) {
-	var parts []string
-	if msg != "" {
-		parts = append(parts, msg)
-	}
-	for i := 0; i < len(keysAndValues); i += 2 {
-		key := fmt.Sprint(keysAndValues[i])
-		var value any
-		if i+1 < len(keysAndValues) {
-			value = keysAndValues[i+1]
-		} else {
-			value = "<no-value>"
-		}
-		parts = append(parts, fmt.Sprintf("%s=%s", key, formatValue(value)))
-	}
-	line := strings.Join(parts, " ")
-	if s.name != "" {
-		writef(s.writer, "%s: %s\n", s.name, line)
+	clone := *h
+	if clone.prefix != "" {
+		clone.prefix = clone.prefix + "/" + name
 	} else {
-		writef(s.writer, "%s\n", line)
+		clone.prefix = name
 	}
+	return &clone
+}
+
+func (h *bufferHandler) Handle(ctx context.Context, r slog.Record) error {
+	var parts []string
+	if r.Message != "" {
+		parts = append(parts, r.Message)
+	}
+
+	if r.Level == slog.LevelWarn {
+		parts = append(parts, "level=warning")
+	}
+
+	for _, a := range h.attrs {
+		appendAttr(&parts, a)
+	}
+
+	r.Attrs(func(a slog.Attr) bool {
+		appendAttr(&parts, a)
+		return true
+	})
+
+	line := strings.Join(parts, " ")
+	if h.prefix != "" {
+		line = h.prefix + ": " + line
+	}
+
+	writef(h.writer, "%s\n", line)
+	if h.warnings != nil && r.Level == slog.LevelWarn {
+		writef(h.warnings, "%s\n", line)
+	}
+	return nil
+}
+
+func appendAttr(parts *[]string, a slog.Attr) {
+	a.Value = a.Value.Resolve()
+	if a.Equal(slog.Attr{}) {
+		return
+	}
+	if a.Value.Kind() == slog.KindGroup {
+		for _, child := range a.Value.Group() {
+			appendAttr(parts, slog.Attr{
+				Key:   a.Key + "." + child.Key,
+				Value: child.Value,
+			})
+		}
+		return
+	}
+	key := a.Key
+	val := formatValue(a.Value.Any())
+	*parts = append(*parts, fmt.Sprintf("%s=%s", key, val))
 }
 
 func formatValue(value any) string {
@@ -184,16 +188,16 @@ func formatValue(value any) string {
 }
 
 // NewLogger returns a plain logger that formats log entries as 'message key=value'.
-func NewLogger(writer io.Writer) logr.Logger {
-	return logr.New(bufferSink{
+func NewLogger(writer io.Writer) *slog.Logger {
+	return slog.New(&bufferHandler{
 		writer: writer,
 	})
 }
 
-func newBufferLogger(writer io.Writer, parent logr.Logger) logr.Logger {
-	return logr.New(bufferSink{
-		writer: writer,
-		parent: parent.GetSink(),
+func newBufferLogger(writer io.Writer, warnings *syncBuffer) *slog.Logger {
+	return slog.New(&bufferHandler{
+		writer:   writer,
+		warnings: warnings,
 	})
 }
 
@@ -235,6 +239,7 @@ func deriveTaskLogPath(scope *TaskContext, task Task) string {
 
 func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
 	outputBuffer := &syncBuffer{}
+	warningsBuffer := &syncBuffer{}
 	outputWriter := scope.Stdout()
 
 	var taskStdout, taskStderr io.Writer
@@ -247,7 +252,7 @@ func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
 	}
 
 	taskScope := scope.WithOutput(taskStdout, taskStderr)
-	taskLog := newBufferLogger(taskScope.Stderr(), scoped.Log(ctx))
+	taskLog := newBufferLogger(taskScope.Stderr(), warningsBuffer)
 	taskCtx := scoped.WithLog(ctx, taskLog)
 
 	var taskDirectory string
@@ -265,7 +270,7 @@ func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
 		}
 		defer func() {
 			if removeErr := os.RemoveAll(temporaryDirectory); removeErr != nil {
-				scoped.Log(ctx).Info("failed to remove temporary task directory", "level", "warning", "error", removeErr)
+				scoped.Log(ctx).Warn("failed to remove temporary task directory", "error", removeErr)
 			}
 		}()
 		taskDirectory = temporaryDirectory
@@ -286,12 +291,22 @@ func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
 
 	writef(outputWriter, "=== %s (%s, %.1fs)\n", task.GetName(), status, duration.Seconds())
 	output := outputBuffer.Bytes()
-	if !scope.PrintOutput() && (err != nil || scoped.Log(ctx).V(1).Enabled()) {
+	if !scope.PrintOutput() && (err != nil || taskLog.Enabled(taskCtx, slog.LevelDebug)) {
 		if len(output) > 0 {
 			if _, writeErr := outputWriter.Write(output); writeErr != nil {
-				scoped.Log(ctx).V(2).Info("failed to write task output", "error", writeErr)
+				taskLog.Debug("failed to write task output", "error", writeErr)
 			}
 			if !bytes.HasSuffix(output, []byte("\n")) {
+				writef(outputWriter, "\n")
+			}
+		}
+	} else if !scope.PrintOutput() {
+		warnings := warningsBuffer.Bytes()
+		if len(warnings) > 0 {
+			if _, writeErr := outputWriter.Write(warnings); writeErr != nil {
+				taskLog.Debug("failed to write task warnings", "error", writeErr)
+			}
+			if !bytes.HasSuffix(warnings, []byte("\n")) {
 				writef(outputWriter, "\n")
 			}
 		}
@@ -300,7 +315,7 @@ func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
 	if taskScope.taskLogFile != "" {
 		content := append([]byte(task.GetName()+"\n"), output...)
 		if writeErr := os.WriteFile(taskScope.taskLogFile, content, 0644); writeErr != nil {
-			scoped.Log(ctx).Info("failed to write task artifact log", "level", "warning", "file", taskScope.taskLogFile, "error", writeErr)
+			scoped.Log(ctx).Warn("failed to write task artifact log", "file", taskScope.taskLogFile, "error", writeErr)
 		}
 	}
 
@@ -325,7 +340,7 @@ func runTaskWithRetry(ctx context.Context, scope *TaskContext, task Task) error 
 		if !ok {
 			return fmt.Errorf("task %s failed: %w", task.GetName(), err)
 		}
-		scoped.Log(ctx).Info("task failed, retrying", "level", "warning", "task", task.GetName(), "attempt", attempt+1, "error", err, "wait", wait)
+		scoped.Log(ctx).Warn("task failed, retrying", "task", task.GetName(), "attempt", attempt+1, "error", err, "wait", wait)
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("task %s failed: %w", task.GetName(), ctx.Err())

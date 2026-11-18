@@ -196,7 +196,7 @@ func Run(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files [
 
 	configFile := filepath.Join(repoRoot, ".ap/headers.yaml")
 	if _, err := os.Stat(configFile); os.IsNotExist(err) {
-		log.V(2).Info("no .ap/headers.yaml found, skipping file headers")
+		log.Debug("no .ap/headers.yaml found, skipping file headers")
 		return nil
 	}
 
@@ -206,7 +206,7 @@ func Run(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files [
 	}
 
 	if config.License == "" || config.License == "none" {
-		log.V(2).Info("license is empty or 'none', skipping file headers")
+		log.Debug("license is empty or 'none', skipping file headers")
 		return nil
 	}
 	if config.License != "apache-2.0" {
@@ -230,13 +230,13 @@ func Run(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files [
 	for _, absPath := range expandedFiles {
 		relPath, err := filepath.Rel(repoRoot, absPath)
 		if err != nil {
-			log.Error(err, "skipping file outside repo root", "file", absPath)
+			log.Error("skipping file outside repo root", "error", err, "file", absPath)
 			errs = append(errs, fmt.Errorf("skipping file outside repo root %s: %w", absPath, err))
 			continue
 		}
 
 		if err := processor.processFile(ctx, absPath, relPath); err != nil {
-			log.Error(err, "error processing file", "file", absPath)
+			log.Error("error processing file", "error", err, "file", absPath)
 			errs = append(errs, fmt.Errorf("error processing %s: %w", absPath, err))
 		}
 	}

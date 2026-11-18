@@ -31,7 +31,7 @@ func IsInCluster() bool {
 	}
 	exists, err := fileutils.FileExists(serviceAccountTokenPath)
 	if err != nil {
-		scoped.Log(context.Background()).Info("failed to check for service account token", "level", "warning", "path", serviceAccountTokenPath, "error", err)
+		scoped.Log(context.Background()).Warn("failed to check for service account token", "path", serviceAccountTokenPath, "error", err)
 		return false
 	}
 	return exists

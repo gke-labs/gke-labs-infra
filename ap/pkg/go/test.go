@@ -213,7 +213,7 @@ func RunGoTest(ctx context.Context, scope *tasks.TaskContext, dir string, result
 	}
 	defer func() {
 		if closeErr := file.Close(); closeErr != nil {
-			log.V(2).Info("failed to close test output file", "error", closeErr)
+			log.Debug("failed to close test output file", "error", closeErr)
 		}
 	}()
 
@@ -224,7 +224,7 @@ func RunGoTest(ctx context.Context, scope *tasks.TaskContext, dir string, result
 		var event testEvent
 		if err := decoder.Decode(&event); err != nil {
 			if err != io.EOF {
-				log.Info("failed to decode test event", "level", "warning", "error", err)
+				scoped.Log(ctx).Warn("failed to decode test event", "error", err)
 			}
 			break
 		}
@@ -261,13 +261,13 @@ func RunGoTest(ctx context.Context, scope *tasks.TaskContext, dir string, result
 		case "run", "pause", "cont", "bench", "start", "build-fail":
 			// Ignore these for pretty printing
 		default:
-			log.Info("unknown test action", "level", "warning", "action", event.Action)
+			scoped.Log(ctx).Warn("unknown test action", "action", event.Action)
 		}
 	}
 
 	if outputBuffer.Len() > 0 && opts.Stdout != nil {
 		if _, writeError := opts.Stdout.Write(outputBuffer.Bytes()); writeError != nil {
-			log.V(2).Info("failed to write test output", "error", writeError)
+			log.Debug("failed to write test output", "error", writeError)
 		}
 	}
 

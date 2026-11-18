@@ -15,11 +15,10 @@
 package scoped
 
 import (
+	"log/slog"
 	"net/http"
 	"testing"
 	"time"
-
-	"github.com/go-logr/logr"
 )
 
 func TestHTTPClient(t *testing.T) {
@@ -44,11 +43,12 @@ func TestHTTPClient(t *testing.T) {
 func TestLog(t *testing.T) {
 	// Default when unset
 	def := Log(t.Context())
-	// Default logger must be usable and not panic on Info
-	def.V(1).Info("test default log")
+	// Default logger must be usable and not panic on Info/Debug
+	def.Debug("test default debug")
+	def.Info("test default log")
 
 	// Round trip when set
-	custom := logr.Discard()
+	custom := slog.New(slog.DiscardHandler)
 	ctx := WithLog(t.Context(), custom)
 	if got := Log(ctx); got != custom {
 		t.Errorf("Log(ctx) = %v, want %v", got, custom)
