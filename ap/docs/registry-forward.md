@@ -167,7 +167,7 @@ To verify that the directory export behavior holds when `buildctl` runs on the h
 Two container management models were evaluated for `docker-container://`:
 
 #### Option 1: Reusing Buildx's Existing `ap-builder` Container
-- **Mechanism**: `ap` already ensures a multi-platform builder in `ap/pkg/images/build.go:142` using `docker buildx create --name ap-builder --driver docker-container --driver-opt network=host --use`. When booted (e.g. via `buildx inspect --bootstrap ap-builder`), Buildx creates container `buildx_buildkit_ap-builder0`.
+- **Mechanism**: `ap` already ensures a multi-platform builder in `ap/pkg/images/build.go` (`ensureMultiPlatformBuilder`) using `docker buildx create --name ap-builder --driver docker-container --driver-opt network=host --use`. When booted (e.g. via `buildx inspect --bootstrap ap-builder`), Buildx creates container `buildx_buildkit_ap-builder0`.
 - **Empirical Check**: Ran `buildctl --addr docker-container://buildx_buildkit_ap-builder0 du` from the host. BuildKit responded and dialed successfully. Inspecting the container confirmed image `moby/buildkit:buildx-stable-1`, `Privileged: true`, and persistent state stored in named Docker volume `buildx_buildkit_ap-builder0_state` mounted at `/var/lib/buildkit`.
 - **Lifecycle**: Buildx sets restart policy `unless-stopped`. If stopped by a system reboot or user command, `buildctl` will fail to connect unless `ap` checks container status and executes `docker start buildx_buildkit_ap-builder0`.
 - **Evaluation**: Reusing `ap-builder` avoids running multiple BuildKit daemons and shares build caches between single-arch and multi-platform builds. However, it relies on Buildx container naming conventions (`buildx_buildkit_<name>0`).
@@ -189,7 +189,7 @@ To prove the in-process push mechanism end-to-end, a live verification was execu
 2. **Local Build**:
    - Built an image with Dockerfile `FROM alpine:latest\nCMD ["echo", "hello-from-in-process-push"]` using `buildctl --addr docker-container://test-bk` exporting to an OCI directory (`/tmp/test-oci`).
 3. **In-Process SPDY Push Execution**:
-   - Wrote a standalone Go verification tool (`test_pusher.go`) using `k8s.io/client-go/transport/spdy` and `k8s.io/client-go/tools/portforward`.
+   - Wrote a standalone Go verification tool (`test_pusher.go`, reproduced in Appendix B) using `k8s.io/client-go` v0.37.2 and `k8s.io/client-go/tools/portforward`.
    - The tool opened a direct SPDY stream connection to pod `in-cluster-image-registry-0` on container port 5000. **No host TCP port was opened; no proxy was started.**
    - Tested HTTP client transport over the SPDY stream: `/v2/` returned HTTP 200.
    - Pushed the image from `/tmp/test-oci`:
@@ -203,7 +203,7 @@ To prove the in-process push mechanism end-to-end, a live verification was execu
    - The pod pulled the image from the in-cluster registry, started, executed, and completed (`Status: Completed`).
    - Pod logs printed: `hello-from-in-process-push`.
 
-This empirically confirms that an in-process SPDY client in `ap` can push directly from an OCI layout directory to the in-cluster registry, and Kubernetes can pull and run the resulting image with zero host listeners.
+This empirically confirms that an in-process SPDY client in `ap` can push directly from an OCI layout directory to the in-cluster registry, and Kubernetes can pull and run the resulting image with zero host listeners. The full source of the verification tool is provided in Appendix B.
 
 ---
 
@@ -289,12 +289,21 @@ The recommended implementation strategy is:
    - Export images directly to a temporary OCI layout directory using `--output type=oci,tar=false,dest=<dir>`.
    - Implement an in-process SPDY pusher in `ap` that checks existing blobs via `HEAD` and uploads missing layers and manifests directly to the registry pod.
    - Delete `PortForwardTask` and the macOS `socat` bridge container from `ap/pkg/k8s/portforward.go`.
-2. **Fallback / Alternative B (Archive Route)**:
-   - If a developer environment cannot run a privileged BuildKit container, fall back to `docker build --load` + `docker save` + in-process push, accepting the 2.0–2.4 s export penalty per build.
-3. **Optional Maintainer Setting: Default to In-Cluster BuildKit (`--buildkit-host k8s`)**:
+2. **Optional Maintainer Setting: Default to In-Cluster BuildKit (`--buildkit-host k8s`)**:
    - For non-Kind remote clusters that have `autodeploy-system/buildkit` deployed, `ap` could default to `--buildkit-host k8s`. This requires zero local building and zero host listeners, but alters default CLI behavior and requires in-cluster BuildKit deployment.
 
-### 4.2 End State After Implementation
+### 4.2 Open Question for Maintainers: Behavior When BuildKit Container Cannot Run
+
+A key product decision for maintainers is determining how `ap` should behave if starting or connecting to the containerized BuildKit daemon fails (e.g. the host environment forbids `--privileged` containers or Docker daemon security profiles restrict container creation):
+
+- **Choice 1: Fail Fast with a Clear Diagnostic Error**
+  - `ap` halts immediately and outputs actionable guidance directing the user on how to start the builder container or grant permissions.
+  - *Cost*: The command fails on locked-down hosts that restrict container creation, but it ensures deterministic performance and avoids maintaining and testing dual local build implementations in `ap`.
+- **Choice 2: Automatic Fallback to Archive Route (`--load` + `docker save`)**
+  - If the containerized BuildKit daemon fails to launch, `ap` transparently falls back to building via `docker build ... --load`, exporting with `docker save`, and pushing in-process over SPDY.
+  - *Cost*: Adds significant complexity to `ap` by requiring two separate local build engines and test matrices. It also hides a performance degradation from the user, silently imposing the 2.0–2.4 s archive export penalty on every build.
+
+### 4.3 End State After Implementation
 
 Following this change:
 1. **Host TCP Listeners**: **0**. No process will bind `localhost:5000` or any ephemeral TCP port.
@@ -305,7 +314,7 @@ Following this change:
 
 ---
 
-## Appendix: Verification Log
+## Appendix A: Verification Log
 
 | Topic / Test | Method / Setup | Result | Source / Reference |
 | :--- | :--- | :--- | :--- |
@@ -314,8 +323,8 @@ Following this change:
 | **Old Blobs Accumulation** | Three successive OCI directory exports | 11 files accumulated; requires pruning & index parsing | Checked during review |
 | **Privilege Requirement** | BuildKit container requirements | Needs `--privileged` (or rootless with unconfined) | Checked during review & BuildKit docs |
 | **Host buildctl over `docker-container://`** | Host `buildctl` v0.35.0 dialing `docker-container://test-bk` | Initial: 6.5 s; unchanged: 0.21 s (skipped); small change: 0.27 s | Measured on test setup with 200 MB layer |
-| **Buildx ap-builder Container Reuse** | Inspected `buildx_buildkit_ap-builder0` settings | Responds to `buildctl du`; state in named Docker volume | Measured on test setup; `build.go:142` |
-| **In-Process SPDY Push & Cluster Pull** | Go script dialing registry pod port 5000 via SPDY | Pushed blobs/manifest; pulled & ran in Kind pod | Measured end-to-end in live Kind cluster |
+| **Buildx ap-builder Container Reuse** | Inspected `buildx_buildkit_ap-builder0` settings | Responds to `buildctl du`; state in named Docker volume | Measured on test setup; `build.go` (`ensureMultiPlatformBuilder`) |
+| **In-Process SPDY Push & Cluster Pull** | Go script dialing registry pod port 5000 via SPDY | Pushed blobs/manifest; pulled & ran in Kind pod | Measured end-to-end in live Kind cluster (Appendix B) |
 | **Classic Docker Driver OCI Refusal** | `docker buildx build -o type=oci` on overlay2 (no containerd store) | Refused: `OCI exporter is not supported for the docker driver` | Measured on Docker 29.10.0 DinD container |
 | **`docker save` Universal Export** | `docker build --load` followed by `docker save` | Succeeded on both classic and containerd store setups | Measured across Docker 29.9.3 and 29.10.0 |
 | **Docker Unix Socket Ref** | `docker tag alpine:latest unix:///var/run/reg.sock/img:tag` | Rejected: `invalid reference format` | Docker CLI & reference grammar |
@@ -327,3 +336,229 @@ Following this change:
 | **Kind Load Listener Check** | Codebase audit of `deploy.go` & `kindload/load.go` | Sets `push=false`, uses `docker save` & `ctr import` | Codebase audit |
 | **In-Cluster BuildKit Check** | Codebase audit of `build.go` & `naming.go` | Skips `PortForwardTask`, uses Service DNS directly | Codebase audit |
 | **Tunnel Proxy Container** | BuildKit in docker pushing to proxy container over stdio | Conceptual alternative | **Not tried** |
+
+---
+
+## Appendix B: In-Process SPDY Pusher Verification Tool (`test_pusher.go`)
+
+The following standalone Go program was used to empirically prove the in-process push mechanism described in Section 2.5. It was compiled with Go 1.27.4 using `k8s.io/client-go` v0.37.2, connected to a local Kind cluster created with Kind v0.33.0 (`kindest/node:v1.37.0`):
+
+```go
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync/atomic"
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/httpstream"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/portforward"
+	"k8s.io/client-go/transport/spdy"
+)
+
+type spdyConn struct {
+	httpstream.Stream
+	streamConnection httpstream.Connection
+}
+
+func (c *spdyConn) LocalAddr() net.Addr                { return &net.IPAddr{} }
+func (c *spdyConn) RemoteAddr() net.Addr               { return &net.IPAddr{} }
+func (c *spdyConn) SetDeadline(t time.Time) error      { return nil }
+func (c *spdyConn) SetReadDeadline(t time.Time) error  { return nil }
+func (c *spdyConn) SetWriteDeadline(t time.Time) error { return nil }
+
+func main() {
+	kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	if err != nil {
+		panic(err)
+	}
+
+	transport, upgrader, err := spdy.RoundTripperFor(config)
+	if err != nil {
+		panic(err)
+	}
+
+	reqURL, err := url.Parse(fmt.Sprintf("%s/api/v1/namespaces/in-cluster-image-registry-system/pods/in-cluster-image-registry-0/portforward", config.Host))
+	if err != nil {
+		panic(err)
+	}
+
+	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", reqURL)
+	streamConnection, protocol, err := dialer.Dial(portforward.PortForwardProtocolV1Name)
+	if err != nil {
+		panic(fmt.Sprintf("dial error: %v (protocol: %v)", err, protocol))
+	}
+	defer streamConnection.Close()
+	fmt.Printf("Connected via SPDY protocol %s\n", protocol)
+
+	var requestID atomic.Uint32
+
+	dialContext := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		reqID := requestID.Add(1)
+		headers := http.Header{}
+		headers.Set(corev1.StreamType, corev1.StreamTypeError)
+		headers.Set(corev1.PortHeader, "5000")
+		headers.Set(corev1.PortForwardRequestIDHeader, strconv.FormatUint(uint64(reqID), 10))
+
+		errorStream, err := streamConnection.CreateStream(headers)
+		if err != nil {
+			return nil, err
+		}
+		_ = errorStream.Close()
+
+		headers.Set(corev1.StreamType, corev1.StreamTypeData)
+		dataStream, err := streamConnection.CreateStream(headers)
+		if err != nil {
+			return nil, err
+		}
+
+		return &spdyConn{Stream: dataStream, streamConnection: streamConnection}, nil
+	}
+
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			DialContext: dialContext,
+		},
+	}
+
+	// Verify registry connectivity
+	resp, err := httpClient.Get("http://registry/v2/")
+	if err != nil {
+		panic(err)
+	}
+	defer resp.Body.Close()
+	fmt.Printf("Registry /v2/ response code: %d\n", resp.StatusCode)
+
+	// Read OCI layout from specified directory
+	ociDir := "/tmp/test-oci"
+	indexData, err := os.ReadFile(filepath.Join(ociDir, "index.json"))
+	if err != nil {
+		panic(err)
+	}
+
+	var index struct {
+		Manifests []struct {
+			Digest    string `json:"digest"`
+			MediaType string `json:"mediaType"`
+			Size      int64  `json:"size"`
+		} `json:"manifests"`
+	}
+	if err := json.Unmarshal(indexData, &index); err != nil {
+		panic(err)
+	}
+
+	manifestDigest := index.Manifests[0].Digest
+	fmt.Printf("Found manifest digest: %s\n", manifestDigest)
+
+	manifestPath := filepath.Join(ociDir, "blobs", "sha256", strings.TrimPrefix(manifestDigest, "sha256:"))
+	manifestData, err := os.ReadFile(manifestPath)
+	if err != nil {
+		panic(err)
+	}
+
+	var manifest struct {
+		Config struct {
+			Digest string `json:"digest"`
+		} `json:"config"`
+		Layers []struct {
+			Digest string `json:"digest"`
+		} `json:"layers"`
+	}
+	if err := json.Unmarshal(manifestData, &manifest); err != nil {
+		panic(err)
+	}
+
+	repoName := "testapp"
+
+	pushBlob := func(digest string) {
+		hex := strings.TrimPrefix(digest, "sha256:")
+		blobPath := filepath.Join(ociDir, "blobs", "sha256", hex)
+		blobData, err := os.ReadFile(blobPath)
+		if err != nil {
+			panic(err)
+		}
+
+		// HEAD check: skip blobs already present in the registry
+		headResp, err := httpClient.Head(fmt.Sprintf("http://registry/v2/%s/blobs/%s", repoName, digest))
+		if err == nil && headResp.StatusCode == http.StatusOK {
+			fmt.Printf("Blob %s already exists (HEAD 200)\n", digest[:19])
+			return
+		}
+
+		postResp, err := httpClient.Post(fmt.Sprintf("http://registry/v2/%s/blobs/uploads/", repoName), "", nil)
+		if err != nil {
+			panic(err)
+		}
+		defer postResp.Body.Close()
+		location := postResp.Header.Get("Location")
+		if location == "" {
+			panic("no Location header in POST blobs/uploads")
+		}
+
+		separator := "?"
+		if strings.Contains(location, "?") {
+			separator = "&"
+		}
+		uploadURL := location
+		if !strings.HasPrefix(uploadURL, "http") {
+			uploadURL = "http://registry" + location
+		}
+		uploadURL += separator + "digest=" + digest
+
+		putReq, err := http.NewRequest(http.MethodPut, uploadURL, bytes.NewReader(blobData))
+		if err != nil {
+			panic(err)
+		}
+		putReq.Header.Set("Content-Type", "application/octet-stream")
+		putResp, err := httpClient.Do(putReq)
+		if err != nil {
+			panic(err)
+		}
+		defer putResp.Body.Close()
+		if putResp.StatusCode != http.StatusCreated {
+			body, _ := io.ReadAll(putResp.Body)
+			panic(fmt.Sprintf("failed to PUT blob %s: status %d (%s)", digest, putResp.StatusCode, string(body)))
+		}
+		fmt.Printf("Uploaded blob %s (status 201)\n", digest[:19])
+	}
+
+	// Push config blob
+	pushBlob(manifest.Config.Digest)
+
+	// Push layer blobs
+	for _, l := range manifest.Layers {
+		pushBlob(l.Digest)
+	}
+
+	// Push manifest
+	putManifestReq, err := http.NewRequest(http.MethodPut, fmt.Sprintf("http://registry/v2/%s/manifests/v1", repoName), bytes.NewReader(manifestData))
+	if err != nil {
+		panic(err)
+	}
+	putManifestReq.Header.Set("Content-Type", index.Manifests[0].MediaType)
+	putManifestResp, err := httpClient.Do(putManifestReq)
+	if err != nil {
+		panic(err)
+	}
+	defer putManifestResp.Body.Close()
+	if putManifestResp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(putManifestResp.Body)
+		panic(fmt.Sprintf("failed to PUT manifest: status %d (%s)", putManifestResp.StatusCode, string(body)))
+	}
+	fmt.Printf("Manifest successfully pushed as v1 (status 201)!\n")
+}
+```
