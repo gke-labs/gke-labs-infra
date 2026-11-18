@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
+	"log/slog"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/httpstream"
 	"k8s.io/client-go/tools/portforward"
@@ -71,6 +72,14 @@ type fakeDialer struct {
 
 func (d *fakeDialer) Dial(_ ...string) (httpstream.Connection, string, error) {
 	return d.conn, portforward.PortForwardProtocolV1Name, nil
+}
+
+func newBuildkitForwarderWithDialer(logger *slog.Logger, dialer httpstream.Dialer, remotePort int) (*BuildkitForwarder, error) {
+	forwarder, err := NewPodPortForwarderWithDialer(logger, dialer, "fake-buildkit-pod", remotePort)
+	if err != nil {
+		return nil, err
+	}
+	return newBuildkitForwarder(logger, forwarder)
 }
 
 func TestBuildkitForwarder(t *testing.T) {

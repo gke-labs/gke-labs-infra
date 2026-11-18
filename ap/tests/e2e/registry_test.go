@@ -20,6 +20,13 @@ import (
 	"testing"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/e2e"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/registrypush"
+	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/google/go-containerregistry/pkg/v1/empty"
+	"github.com/google/go-containerregistry/pkg/v1/layout"
+	"github.com/google/go-containerregistry/pkg/v1/random"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
 )
 
 func TestInClusterRegistry(t *testing.T) {
@@ -100,5 +107,59 @@ spec:
 	expectedImage := "images.local/examples-helloworld:e2e"
 	if image != expectedImage {
 		t.Errorf("expected image %q, got %q", expectedImage, image)
+	}
+}
+
+func TestRegistryPush(t *testing.T) {
+	if os.Getenv("RUN_E2E") == "" {
+		t.Skip("RUN_E2E not set, skipping e2e test")
+	}
+
+	h := e2e.NewHarness(t, e2e.Options{ClusterName: "ap-registry-e2e"})
+	h.SetupRegistry()
+
+	image, err := random.Image(1024, 1)
+	if err != nil {
+		t.Fatalf("random.Image failed: %v", err)
+	}
+	expectedDigest, err := image.Digest()
+	if err != nil {
+		t.Fatalf("image.Digest failed: %v", err)
+	}
+
+	directory := t.TempDir()
+	layoutPath, err := layout.Write(directory, empty.Index)
+	if err != nil {
+		t.Fatalf("layout.Write failed: %v", err)
+	}
+	if err := layoutPath.AppendImage(image); err != nil {
+		t.Fatalf("layoutPath.AppendImage failed: %v", err)
+	}
+
+	cluster := k8s.CurrentCluster()
+	forwarder, err := k8s.NewPodPortForwarder(t.Context(), cluster, registrypush.DefaultNamespace, registrypush.DefaultService, registrypush.DefaultPort)
+	if err != nil {
+		t.Fatalf("NewPodPortForwarder failed: %v", err)
+	}
+	defer forwarder.Close()
+
+	if err := registrypush.Push(t.Context(), forwarder.Transport(), directory, "registrypush-e2e", "v1"); err != nil {
+		t.Fatalf("Push failed: %v", err)
+	}
+
+	imageTag, err := name.NewTag("images.local/registrypush-e2e:v1", name.Insecure)
+	if err != nil {
+		t.Fatalf("name.NewTag failed: %v", err)
+	}
+	pulledImage, err := remote.Image(imageTag, remote.WithTransport(forwarder.Transport()), remote.WithContext(t.Context()))
+	if err != nil {
+		t.Fatalf("remote.Image failed: %v", err)
+	}
+	pulledDigest, err := pulledImage.Digest()
+	if err != nil {
+		t.Fatalf("pulledImage.Digest failed: %v", err)
+	}
+	if pulledDigest != expectedDigest {
+		t.Errorf("expected digest %s, got %s", expectedDigest, pulledDigest)
 	}
 }
