@@ -27,7 +27,7 @@ limitations under the License.
 
 Currently, one TCP listener remains in `ap`: when container images are pushed to the in-cluster registry (`in-cluster-image-registry`), `ap` forwards the registry service to `localhost:5000` (`ap/pkg/images/build.go`, `ap/pkg/k8s/portforward.go`, `ap/pkg/imageref/naming.go`).
 
-This report investigates the necessity of this remaining port-forward, tests potential non-listener alternatives, evaluates hardening strategies if a listener were retained, and provides concrete recommendations for eliminating it.
+This report investigates the build paths that use this listener, tests alternative zero-listener communication models, evaluates containerized BuildKit with OCI directory export and in-process pushing, and outlines concrete recommendations.
 
 ---
 
@@ -99,203 +99,209 @@ References to `5000` and registry forwarding in `ap` are centralized in three pa
 
 ---
 
-## 2. Alternatives to a TCP Listener for Local Host Programs
+## 2. Recommended Approach: Containerized BuildKit with OCI Directory Export and In-Process Push
 
-Four alternative communication models were evaluated: Unix domain socket reference handling and image archive export across different Docker storage drivers were empirically tested, while daemon proxy configuration is an architectural analysis and the in-process SPDY pusher workflow is an untried conceptual design.
+### 2.1 Architecture Overview
 
-### 2.1 Unix Domain Sockets (`unix:///path/to/socket`)
+To eliminate the `localhost:5000` listener entirely while avoiding per-build archive export bottlenecks, the recommended design structures local builds as follows:
 
-- **Hypothesis**: Replace the TCP listener with a private Unix domain socket (identical to the BuildKit forwarder pattern in `ap/pkg/k8s/buildkit_forward.go`).
-- **Empirical Test**:
-  Executed against Docker CLI and daemon:
-  ```bash
-  docker tag alpine:latest unix:///var/run/registry.sock/myimage:tag
-  ```
-- **Observed Result**:
-  ```
-  error parsing reference: "unix:///var/run/registry.sock/myimage:tag" is not a valid repository/tag: invalid reference format
-  ```
-- **Technical Analysis**:
-  The OCI distribution specification and Docker reference grammar (in `github.com/distribution/reference` and `docker/reference`) strictly mandate the format `[domain[:port]/]path[:tag|@digest]`. A filesystem path or `unix://` scheme is rejected at reference parse time. Furthermore, the registry HTTP transport in Moby (`registry/transport.go`) initializes a standard `http.Transport` dialing TCP without support for Unix domain socket schemes (inferred from Moby source code; not verified by patching or reconfiguring dockerd). Docker cannot be configured to dial an image registry over a Unix domain socket.
-- **Verdict**: **Infeasible** for Docker.
-
-### 2.2 Daemon Proxy Settings (`HTTP_PROXY` / `HTTPS_PROXY`) — *Analysis Only*
-
-- **Hypothesis**: Configure `dockerd` to route registry requests through an HTTP proxy without opening a local port.
-- **Technical Analysis** (*not empirically tested*):
-  1. Standard Go HTTP transports (used throughout Docker and Moby) automatically append loopback addresses (`127.0.0.1`, `localhost`) to the default `NO_PROXY` list. Bypassing this requires non-standard hostnames.
-  2. Modifying `dockerd` proxy configuration requires root/administrative access to edit `/etc/docker/daemon.json` or systemd drop-in units and requires restarting the daemon. This disrupts developer environments and cannot be performed dynamically per CLI execution.
-  3. The proxy itself would still need to accept connections from `dockerd`. If the proxy listens on a TCP port, the TCP listener is not eliminated; it is merely moved from `kubectl` to the proxy. If the proxy listened on a Unix socket, Docker's proxy client does not support Unix sockets for proxy destinations.
-  4. On macOS, proxy configuration must be injected into the Docker Desktop VM settings, which cannot be automated transparently per command.
-- **Verdict**: **Infeasible**; operational friction is prohibitive and fails to eliminate the listener.
-
-### 2.3 `docker save` / OCI Archive Plus In-Process SPDY Push
-
-- **Hypothesis**: Decouple the local build from the registry push. Have Docker build and export an image archive locally, and have `ap` stream the image layers and manifest directly to the registry using an in-process Kubernetes port-forward (SPDY connection).
-- **Status of In-Process Pusher Workflow**: **Not tried (conceptual design and estimate)**.
-  The workflow described below was analyzed conceptually based on existing Kubernetes SPDY primitives in `ap` (`ap/pkg/k8s/buildkit_forward.go`), but **was not executed or implemented on a live cluster in this investigation**.
-- **Conceptual Workflow**:
-  1. **Build & Export**: `ap` invokes Docker to build locally and export an archive (`docker save` or OCI layout).
-  2. **In-Process Forwarder**: `ap` resolves the `in-cluster-image-registry` pod using its existing `client-go` connection and opens a SPDY port-forward data stream directly to container port `5000` (replicating `newBuildkitForwarderWithDialer` from `ap/pkg/k8s/buildkit_forward.go`).
-  3. **In-Process Push**: An internal Go HTTP client in `ap` dials through the SPDY stream via a custom `http.Transport.DialContext`. `ap` sends standard OCI Distribution API v2 calls (`POST /v2/<name>/blobs/uploads/`, `PUT ...`, `PUT /v2/<name>/manifests/<tag>`) directly over the in-memory stream.
-
-- **Empirical Tests on Image Export Across Docker Drivers and Image Stores**:
-  Because the export step determines how images are extracted from Docker, two different Docker setups were tested:
-
-  1. **Setup 1: Docker driver with containerd image store**:
-     - *Configuration*: Docker Engine 29.9.3, `Storage Driver: overlayfs`, `driver-type: io.containerd.snapshotter.v1`, default buildx builder (driver: `docker`, BuildKit v0.34.2).
-     - *Command*: `docker buildx build -t test-img:latest -o type=oci,dest=/tmp/testbuild/image.tar /tmp/testbuild`
-     - *Result*: Succeeded. Produced a valid OCI layout archive containing:
-       ```
-       blobs/sha256/<hash> (layers and config)
-       index.json
-       oci-layout
-       ```
-  2. **Setup 2: Default `docker` driver with classic storage (no containerd image store)**:
-     - *Configuration*: Docker Engine 29.10.0, `Storage Driver: overlay2` (classic graphdriver, no containerd snapshotter), default buildx builder (driver: `docker`, BuildKit v0.39.0).
-     - *Command*: `docker buildx build -t test:latest -o type=oci,dest=/tmp/image.tar /tmp/build`
-     - *Result*: **Refused**. Failed with explicit error:
-       ```
-       ERROR: failed to build: OCI exporter is not supported for the docker driver.
-       Switch to a different driver, or turn on the containerd image store, and try again.
-       Learn more at https://docs.docker.com/go/build-exporters/
-       ```
-  3. **Universal Alternative: `docker build --load` followed by `docker save`**:
-     - *Configuration*: Tested on both Setup 1 and Setup 2.
-     - *Command*: `docker buildx build -t test:latest --load /tmp/build && docker save -o /tmp/image.tar test:latest`
-     - *Result*: **Succeeded on both setups**. Produced an image tarball containing `manifest.json`, `index.json`, `oci-layout`, and layer tar archives.
-
-- **Implications for Archive Export**:
-  An in-process push design cannot rely exclusively on `buildx -o type=oci` because users with the classic `docker` driver (overlay2 without containerd image store) will receive an exporter error. To support all Docker environments without requiring users to reconfigure their daemon or switch builders, the exporter must use `docker save` (or pipe `docker save` stdout directly into the pusher), matching the established pattern used by `KindLoadTask` in `ap/pkg/kindload/load.go`.
-
-- **Advantages (if implemented)**:
-  - **Zero TCP Listeners**: Absolutely no TCP port is opened on the host (`127.0.0.1` or otherwise).
-  - **Eliminates macOS Socat Bridge**: Because `dockerd` never connects to a remote network endpoint, the macOS `socat` bridge container, `host.docker.internal` resolution, and dual-port allocation are **100% eliminated**.
-  - **Security**: Port-forwarding is completely isolated within the authenticated, TLS-encrypted Kubernetes API server SPDY stream.
-
-- **Costs & Trade-offs (Estimated)**:
-  - Requires adding a lightweight OCI registry pusher in `ap` (estimated at ~200 lines in `ap/pkg/k8s/` or `ap/pkg/images/` using client-go SPDY streams, or importing `google/go-containerregistry`).
-  - Layer caching: Direct `docker push` checks existing blobs on the registry (`HEAD /v2/<name>/blobs/<digest>`) and skips pushing cached layers. An in-process pusher in `ap` must perform this same `HEAD` check to avoid re-uploading unchanged layers over the Kubernetes API tunnel.
-
-- **Verdict**: **Viable architectural alternative; workflow not yet implemented or run.**
-
-### 2.4 `buildctl` with OCI Output Plus In-Process Push
-
-- **Hypothesis**: For developers using a local BuildKit daemon, have `buildctl` export an OCI archive and push it in-process.
-- **Empirical Test**:
-  Inspected `buildctl build --help` (BuildKit v0.35.0):
-  ```bash
-  buildctl build --frontend dockerfile.v0 --local context=. --local dockerfile=. --output type=oci,dest=/tmp/image.tar
-  ```
-  BuildKit natively supports `--output type=oci` and `--output type=docker`. `ap` already implements `Load: true` archive exporting in `ap/pkg/images/build.go` (line 205).
-- **Verdict**: **Viable**, though unnecessary for the standard in-cluster BuildKit path (`k8s://...`), which already pushes inside the cluster.
+1. **Build Daemon**: `ap` builds using a BuildKit daemon running inside a local Docker container. The host `buildctl` binary communicates with the container using `buildctl --addr docker-container://<name>`, multiplexing gRPC commands directly over container stdio (`docker exec`). **No TCP port is opened on the host or inside the container.**
+2. **OCI Layout Directory Export**: BuildKit exports the build result directly to an **OCI layout directory on the host** using `--output type=oci,tar=false,dest=<dir>`. It does not create tar archives or invoke `docker save`.
+3. **In-Process Registry Push**: `ap` pushes the image from the OCI layout directory to the in-cluster registry **in-process**. Using client-go's SPDY transport, `ap` dials container port 5000 on the `in-cluster-image-registry` pod directly over the authenticated Kubernetes API server connection. Before uploading each layer, `ap` issues an HTTP `HEAD /v2/<name>/blobs/<digest>` request and transmits only missing blobs, followed by the manifest.
+4. **Zero Host Listeners, Zero macOS Proxies**: No local port is bound on loopback, and no `alpine/socat` proxy container or `host.docker.internal` bridge is required on macOS.
 
 ---
 
-## 3. Hardening and Narrowing the Listener (If Retained)
+### 2.2 Facts Established During Review (Attributed as "Checked During Review")
 
-If an in-process pusher is not immediately implemented and a TCP listener must temporarily be retained for local Docker builds, the listener should be narrowed to minimize exposure.
+The following properties were verified and documented during review:
 
-### 3.1 Random Free Ephemeral Port
-
-- **Mechanism**: Instead of hardcoding `LocalPort: 5000`, `ap` dynamically allocates an ephemeral loopback port (e.g. via `net.Listen("tcp", "127.0.0.1:0")` or `k8s.PickFreePort()`). The image is tagged `127.0.0.1:<randomPort>/<name>:<tag>`.
-- **Empirical Test**:
-  1. Verified default Docker daemon insecure registry configuration (`docker info`):
-     ```
-     Insecure Registries:
-      127.0.0.0/8
-      ::1/128
-     ```
-     Docker treats the entire IPv4 loopback block (`127.0.0.0/8`) and IPv6 loopback (`::1/128`) on **any port** as insecure by default.
-  2. Started `registry:2` listening on random ephemeral port `49153`.
-  3. Executed `docker buildx build -t 127.0.0.1:49153/test:latest --push /tmp/testbuild` and `-t localhost:49153/test:latest --push`.
-  - **Measurement**: Both builds and pushes succeeded without requiring daemon configuration or flags.
-- **Manifest Reference Independence**:
-  In-cluster image pulling is completely unaffected by the port used to push. The in-cluster node agent (`in-cluster-image-registry-node-agent`) configures containerd's `certs.d` to mirror `images.local` to the Service ClusterIP on port 80. The push port is ephemeral and client-side only.
-- **Benefits**:
-  - Eliminates collisions with macOS AirPlay (port 5000).
-  - Eliminates collisions between concurrent `ap` builds.
-  - Eliminates predictable, static target ports for local port scanners.
-
-### 3.2 Binding Strictly to `127.0.0.1`
-
-- **Current Behavior**: `PortForwardTask.buildArgs()` invokes:
-  `kubectl port-forward -n in-cluster-image-registry-system svc/in-cluster-image-registry <port>:80`
-  As documented in `kubectl port-forward --help`:
-  ```
-  --address=[localhost]:
-      Addresses to listen on (comma separated). Only accepts IP addresses or localhost as a value.
-      When localhost is supplied, kubectl will try to bind on both 127.0.0.1 and ::1 and will fail
-      if neither of these addresses are available to bind.
-  ```
-  Without `--address`, `kubectl` defaults to `localhost` and binds both loopback addresses.
-- **Narrowing**: Explicitly append `--address 127.0.0.1` to the `kubectl` arguments in `PortForwardTask.buildArgs()`. This restricts the socket strictly to the IPv4 loopback interface.
-
-### 3.3 Temporal Scoping (Push-Only Window)
-
-- **Current Behavior**: `PortForwardTask` wraps the entire `build-images` task group. The TCP port-forward (and macOS socat container) is established before compilation and stays open for the entire duration of all image builds.
-- **Narrowing**: Separate the build phase from the push phase:
-  1. Build all images locally to the local daemon/cache without pushing.
-  2. Open the ephemeral port-forward.
-  3. Push images in rapid succession.
-  4. Immediately terminate the port-forward and clean up.
-- **Exposure Reduction**: Reduces listener lifetime from minutes (multi-image build/compilation duration) to seconds (push duration).
-
-### 3.4 Requirements for the macOS `socat` Bridge Under Narrowing
-
-On macOS, Docker Desktop runs inside a Linux hypervisor. Pushing to `localhost:<port>` dials the VM's loopback, not the macOS host.
-If a random port is used with the existing socat container bridge architecture:
-1. **Dual-Port Allocation**:
-   - `docker run -p 127.0.0.1:<vmPort>:<vmPort>` publishes `<vmPort>` in the VM and simultaneously binds `127.0.0.1:<vmPort>` on the macOS host via `com.docker.backend`.
-   - Therefore, `kubectl port-forward` **cannot** bind `<vmPort>` on the host.
-   - `ap` must pick **two** distinct free ports: `vmPort` (for Docker inside the VM) and `hostPort` (for `kubectl port-forward` on the host).
-2. **Socat Bridge Invocation**:
-   Socat must be launched with:
-   ```bash
-   docker run -d --name ap-registry-proxy-<uniqueID> \
-     -p 127.0.0.1:<vmPort>:<vmPort> alpine/socat \
-     TCP-LISTEN:<vmPort>,fork,reuseaddr TCP:host.docker.internal:<hostPort>
-   ```
-3. **Container Name Isolation**:
-   The proxy container name must incorporate a unique execution ID or PID to prevent collisions during concurrent runs.
-
-**Assessment**: While narrowing to a random ephemeral port solves port collisions and AirPlay interference, it does **not** eliminate the security risk of a local TCP listener and retains the fragile macOS dual-port socat bridge.
+- **Export Cost of Archive Routes**:
+  Running `docker save` on an image that Docker lists at 973 MB (302 MB compressed archive) required **2.0–2.4 s** per run with no changes to the image. This overhead is incurred unconditionally on every single build, making tar archive export unsuited as the primary local build path.
+- **Directory Exporter Skips Unchanged Layers**:
+  Tested using a throwaway `moby/buildkit:buildx-stable-1` container (BuildKit v0.34.2) and a test image with a 200 MB layer. Exporting via `--output type=oci,tar=false` across three runs showed:
+  - First export: 2.6 s.
+  - Rebuild with no changes: reported "exporting layers done" in 0.0 s; the 200 MB layer blob's inode and modification timestamp were completely unchanged.
+  - Rebuild with a small changed top layer: reported 0.0 s; the 200 MB blob remained untouched, and only the new small layer blobs were written.
+  *(Limits of that initial review check: `buildctl` was executed from inside the BuildKit container; evaluated against one BuildKit version).*
+- **Old Blobs Accumulate**:
+  In the OCI layout output directory, old layer and manifest blobs accumulate across builds (e.g. 11 files present after three builds). Consequently:
+  - The push step must strictly parse the active `index.json` and manifest to push only currently referenced blobs.
+  - The output directory requires periodic pruning or clean-up.
+- **Privilege Requirements**:
+  A BuildKit container requires `--privileged` (or the rootless image with seccomp and AppArmor set to unconfined, as documented in BuildKit's documentation; the rootless configuration was not empirically run). This requirement is not new: the `docker-container` driver in Docker Buildx operates identically, and any workstation that has executed `ap`'s multi-platform build path already runs such a container (`buildx_buildkit_ap-builder0` with `privileged=true`).
 
 ---
 
-## 4. Recommendations and Options
+### 2.3 Host `buildctl` Export Verification over `docker-container://`
 
-### 4.1 The Smallest Change That Removes the Listener (In-Process Push for Local Builds)
+To verify that the directory export behavior holds when `buildctl` runs on the host and communicates over Docker stdio, an empirical test was conducted using BuildKit v0.35.0 (`/tmp/buildctl`) on the host connected to container `test-bk` (`moby/buildkit:buildx-stable-1`):
 
-The smallest surgical change that preserves `ap`'s current command-line behavior and user expectations—without imposing new cluster requirements—is implementing an in-process pusher for local Docker builds:
+- **Setup**: A Dockerfile containing a base `alpine:latest` stage and a 200 MB random layer (`COPY bigfile /bigfile`, 209,715,200 bytes).
+- **Execution Command**:
+  ```bash
+  PATH=".../docker/bin:$PATH" buildctl --addr docker-container://test-bk build \
+    --frontend dockerfile.v0 \
+    --local context=/tmp/btest/context --local dockerfile=/tmp/btest/context \
+    --output type=oci,tar=false,dest=/tmp/btest/out
+  ```
+- **Observations & Measured Timings**:
+  1. **First Build**:
+     - Completed in **6.5 s** (transferred 209.75 MB context, resolved Alpine base, created layer blob).
+     - Produced 200 MB layer blob `04bfbab4264b8168eae1dc1236f5f4231d82368483549b1ea6f1510efe6b36b7` (inode `53620841`, size `209,779,374` bytes), along with base layer, config, and manifest blobs (4 files total in `blobs/sha256/`).
+  2. **Unchanged Rebuild**:
+     - Completed in **0.21 s** (`real 0m0.211s`, user `0.043s`, sys `0.037s`).
+     - BuildKit reported `#6 COPY bigfile /bigfile CACHED` and `#7 exporting layers done` in 0.0 s.
+     - Inode inspection confirmed blob `04bfbab...` retained inode `53620841` and its original modification timestamp. Unchanged blobs were skipped completely.
+  3. **Small Change Rebuild**:
+     - Added a small file `smallfile` (12 bytes) and `COPY smallfile /smallfile` to the Dockerfile.
+     - Completed in **0.27 s** (`real 0m0.272s`, user `0.045s`, sys `0.047s`).
+     - BuildKit cached the 200 MB layer (`#6 COPY bigfile /bigfile CACHED`) and exported layers in 0.0 s.
+     - Inode inspection confirmed the 200 MB blob `04bfbab...` retained inode `53620841`. Only the new 118-byte layer (`37566b1...`), new config, and new manifest were written.
+     - Total files in `blobs/sha256/` grew from 4 to 7 files, confirming that previous blobs are retained on disk and require selective pushing via `index.json`.
 
-1. **Build locally with Docker**:
-   Use `docker build ... --load` (or buildx with `--load`), followed by `docker save` (or piping `docker save` stdout). As demonstrated in Section 2.3, `docker save` works universally across classic `overlay2` and containerd image stores without requiring user-side daemon changes.
-2. **Push in-process over SPDY**:
-   Open an in-process port-forward stream directly to the `in-cluster-image-registry` pod on container port `5000` via client-go's SPDY dialer (replicating the pattern in `ap/pkg/k8s/buildkit_forward.go`). A minimal Go HTTP transport inside `ap` streams the layers and manifest over this connection.
-3. **Delete the host listener and macOS bridge**:
-   Remove `PortForwardTask` and the `alpine/socat` container bridge from `ap/pkg/k8s/portforward.go`.
+---
 
-**Cost / Trade-off**: Requires implementing and testing the in-process OCI upload logic in `ap` (estimated at ~200 lines, or utilizing an established client like `google/go-containerregistry`).
+### 2.4 Container Reuse vs. Dedicated `ap` BuildKit Container
 
-### 4.2 Alternative Option for Maintainer Consideration: Default to In-Cluster BuildKit (`--buildkit-host k8s`)
+Two container management models were evaluated for `docker-container://`:
 
-An alternative operational path is to make in-cluster BuildKit the default for remote cluster deployments:
+#### Option 1: Reusing Buildx's Existing `ap-builder` Container
+- **Mechanism**: `ap` already ensures a multi-platform builder in `ap/pkg/images/build.go:142` using `docker buildx create --name ap-builder --driver docker-container --driver-opt network=host --use`. When booted (e.g. via `buildx inspect --bootstrap ap-builder`), Buildx creates container `buildx_buildkit_ap-builder0`.
+- **Empirical Check**: Ran `buildctl --addr docker-container://buildx_buildkit_ap-builder0 du` from the host. BuildKit responded and dialed successfully. Inspecting the container confirmed image `moby/buildkit:buildx-stable-1`, `Privileged: true`, and persistent state stored in named Docker volume `buildx_buildkit_ap-builder0_state` mounted at `/var/lib/buildkit`.
+- **Lifecycle**: Buildx sets restart policy `unless-stopped`. If stopped by a system reboot or user command, `buildctl` will fail to connect unless `ap` checks container status and executes `docker start buildx_buildkit_ap-builder0`.
+- **Evaluation**: Reusing `ap-builder` avoids running multiple BuildKit daemons and shares build caches between single-arch and multi-platform builds. However, it relies on Buildx container naming conventions (`buildx_buildkit_<name>0`).
 
-- **Concept**: When deploying to a non-Kind cluster with `IMAGE_PREFIX=images.local`, `ap deploy` could default to `--buildkit-host k8s` (`k8s://autodeploy-system/buildkit`).
-- **Advantage**: Requires almost zero new networking code in `ap`. The `k8s://` BuildKit path already exists, uses private Unix domain sockets on the host, and pushes directly to `in-cluster-image-registry...svc.cluster.local:80` inside the cluster (already 100% listener-free).
-- **Costs & Trade-offs**:
-  1. **Changes Default Behavior**: Alters how `ap deploy` operates by default for non-Kind clusters.
-  2. **Requires In-Cluster BuildKit**: Mandates that the target Kubernetes cluster has a BuildKit deployment running (`autodeploy-system/buildkit`). If the cluster does not have BuildKit installed, the deployment fails unless the user falls back to local building.
+#### Option 2: Running a Dedicated `ap-buildkit` Container
+- **Mechanism**: `ap` starts its own container:
+  `docker run -d --name ap-buildkit --privileged -v ap-buildkit-cache:/var/lib/buildkit moby/buildkit:buildx-stable-1`
+- **Lifecycle**: `ap` inspects `docker inspect ap-buildkit`. If absent, it creates and starts it; if stopped, it runs `docker start ap-buildkit`. The container remains running with restart policy `unless-stopped` until explicitly stopped (e.g. `ap clean`).
+- **Evaluation**: Gives `ap` total control over flags, lifecycle, and versioning without depending on Buildx CLI conventions. Cache lives in a dedicated Docker named volume (`ap-buildkit-cache`). The trade-off is running an additional container alongside any existing Buildx instances.
 
-### 4.3 What Would Be Left Under the Recommended Change
+---
 
-Once the in-process push change (Section 4.1) is implemented:
-1. **Local TCP Listeners**: **0**. No process will listen on `localhost:5000`, `127.0.0.1`, or any ephemeral TCP port.
-2. **Private Unix Domain Sockets**: Only the BuildKit forwarder socket (`/tmp/ap-bk-*/buildkit.sock`, permissions `0700`), active only during `buildctl` invocations.
-3. **macOS Bridge Containers**: **0**. `alpine/socat` and `host.docker.internal` workarounds are completely deleted.
-4. **AirPlay / Port Collision Workarounds**: Completely obsolete and removed.
-5. **Applied Kubernetes Manifests**: Unchanged. Manifests continue to reference `images.local/<image>:<tag>@sha256:...`, which containerd pulls via the in-cluster node agent mirror.
+### 2.5 End-to-End Proof of In-Process Push and In-Cluster Pull
+
+To prove the in-process push mechanism end-to-end, a live verification was executed in a Kind cluster (`test-reg`):
+
+1. **Cluster and Registry Setup**:
+   - Deployed `in-cluster-image-registry` (StatefulSet running `registry:2` on container port 5000, exposed by Service on port 80).
+2. **Local Build**:
+   - Built an image with Dockerfile `FROM alpine:latest\nCMD ["echo", "hello-from-in-process-push"]` using `buildctl --addr docker-container://test-bk` exporting to an OCI directory (`/tmp/test-oci`).
+3. **In-Process SPDY Push Execution**:
+   - Wrote a standalone Go verification tool (`test_pusher.go`) using `k8s.io/client-go/transport/spdy` and `k8s.io/client-go/tools/portforward`.
+   - The tool opened a direct SPDY stream connection to pod `in-cluster-image-registry-0` on container port 5000. **No host TCP port was opened; no proxy was started.**
+   - Tested HTTP client transport over the SPDY stream: `/v2/` returned HTTP 200.
+   - Pushed the image from `/tmp/test-oci`:
+     - Queried `HEAD /v2/testapp/blobs/<digest>` for each layer and config blob.
+     - Uploaded missing blobs via `POST /v2/testapp/blobs/uploads/` and `PUT`.
+     - Uploaded manifest to `PUT /v2/testapp/manifests/v1`.
+   - **Cache Verification**: Re-running the push immediately afterwards checked `HEAD` for all blobs, received HTTP 200 for each, skipped re-uploading layers, and updated the manifest.
+4. **In-Cluster Node Pull and Execution**:
+   - Configured the Kind node containerd mirror (`/etc/containerd/certs.d/images.local/hosts.toml` pointing to the registry Service ClusterIP `http://10.96.173.18:80`).
+   - Ran pod `pod-test` with `image: images.local/testapp:v1`.
+   - The pod pulled the image from the in-cluster registry, started, executed, and completed (`Status: Completed`).
+   - Pod logs printed: `hello-from-in-process-push`.
+
+This empirically confirms that an in-process SPDY client in `ap` can push directly from an OCI layout directory to the in-cluster registry, and Kubernetes can pull and run the resulting image with zero host listeners.
+
+---
+
+### 2.6 Impact on Current Working Build Paths
+
+Adopting containerized BuildKit for the local build path has the following effects across `ap` workflows:
+
+1. **Local Docker Path (Non-Kind Cluster, No BuildKit Host)**:
+   - **Builder Change**: Switches from `docker buildx build` (host daemon) to `buildctl` targeting the containerized BuildKit daemon over stdio.
+   - **Cache Isolation**: Build cache resides in the BuildKit container's volume (`/var/lib/buildkit`) rather than Docker daemon's storage.
+   - **Image Store**: Built images are exported to the OCI directory on the host and pushed in-process to the cluster registry. They are not stored in the host Docker daemon's local image list (`docker images`) unless explicitly requested (e.g. `--load`).
+   - **Listener Impact**: Completely eliminates `localhost:5000`, `PortForwardTask`, and the macOS `socat` proxy container.
+2. **Kind Load Path (`tc.IsKind() == true`)**:
+   - **Remains Unchanged**: Continues building locally with `--load` and importing via `docker save` + `ctr images import`. It opens no listeners today and has no reason to change.
+3. **Remote In-Cluster BuildKit Path (`--buildkit-host k8s`)**:
+   - **Remains Unchanged**: Continues communicating with the in-cluster daemon over a private Unix domain socket and pushing directly within the cluster network. It is already 100% listener-free.
+4. **External Registry Path (`IMAGE_PREFIX != "images.local"`)**:
+   - Continues pushing directly to external registry endpoints over standard HTTPS.
+
+---
+
+## 3. Evaluated Alternatives
+
+The following alternatives were analyzed and are ranked in order of viability:
+
+### 3.1 Alternative A: BuildKit in Docker Pushing to a Stdio-Tunneled Proxy Container (*Not Tried*)
+
+- **Concept**:
+  - Run BuildKit in a Docker container on a private, isolated Docker network (`bridge`).
+  - Run a lightweight proxy container on that same Docker network (e.g. `ap-registry-tunnel`) listening on `registry.local:5000`.
+  - The proxy container attaches to `ap` over container stdio (`docker exec` or `docker attach`), tunneling HTTP traffic to `ap`.
+  - `ap` forwards that tunneled traffic over SPDY to the in-cluster registry.
+  - BuildKit builds with `--output type=image,name=registry.local:5000/image:tag,push=true`.
+- **Advantages**:
+  - Eliminates the OCI export step entirely; layers are streamed during the build.
+  - Leaves zero files on the host disk (no OCI directory to prune).
+- **Disadvantages & Why It Is Not First**:
+  - **Not tried**: Requires authoring and maintaining a custom proxy container image that bridges TCP on the private container network to stdio.
+  - Adds multi-container lifecycle complexity and custom protocol multiplexing.
+
+### 3.2 Alternative B: `--load` + `docker save` + In-Process SPDY Push
+
+- **Concept**:
+  - Build locally with standard Docker (`docker build ... --load`), export via `docker save`, and stream the tarball layers in-process over SPDY to the in-cluster registry.
+- **Empirical Findings**:
+  - **Universally Supported**: Tested across both containerd snapshotter storage (Docker 29.9.3) and classic graphdriver storage (`overlay2` without containerd store in Docker 29.10.0). Both successfully export `docker save` archives.
+  - (In contrast, direct `docker buildx build -o type=oci,dest=...` was empirically **refused** on classic overlay2 storage with error: `OCI exporter is not supported for the docker driver. Switch to a different driver, or turn on the containerd image store`).
+- **Disadvantage & Why It Is Not First**:
+  - Incurs the **2.0–2.4 s** archive export penalty on every build, even when nothing has changed.
+
+### 3.3 Alternative C: Narrowing the Existing TCP Listener
+
+If a TCP listener were temporarily retained, it could be hardened:
+1. **Random Ephemeral Loopback Port**:
+   - Dynamically allocate a free port (`net.Listen("tcp", "127.0.0.1:0")` or `PickFreePort()`).
+   - Empirically verified: Docker's default configuration lists `127.0.0.0/8` and `::1/128` as insecure registries (`docker info`). Tested pushing to random port `49153`; Docker pushed successfully without configuration changes.
+   - Solves port collisions with macOS AirPlay (`*:5000`) and concurrent builds.
+2. **Explicit Loopback Binding**:
+   - Append `--address 127.0.0.1` to `kubectl port-forward` (documented in `kubectl port-forward --help` to avoid binding `::1` or non-loopback addresses).
+3. **Temporal Scoping**:
+   - Keep the forwarder open only during the push phase rather than across the entire build.
+- **Why It Is Not Recommended**:
+  - Does not eliminate the host TCP listener.
+  - On macOS, Docker VM loopback isolation still requires dual-port allocation and the `alpine/socat` proxy container bridge.
+
+### 3.4 Non-Viable Alternatives
+
+- **Unix Domain Socket References**:
+  Tested `docker tag alpine:latest unix:///var/run/registry.sock/test:tag`. Rejected by Docker reference grammar (`invalid reference format`). Moby's distribution client initializes standard TCP `http.Transport` instances without socket support (inferred from Moby source code; not verified by patching).
+- **Daemon HTTP Proxy Configuration**:
+  Requires modifying host `/etc/docker/daemon.json` and restarting the daemon. Cannot be managed transparently per CLI invocation, and loopback destinations bypass standard proxy transports by default.
+
+---
+
+## 4. Recommendations and Implementation Roadmap
+
+### 4.1 Recommended Implementation Order
+
+The recommended implementation strategy is:
+
+1. **Adopt Containerized BuildKit with OCI Directory Export (Approach 1)**:
+   - Configure `ap` to invoke `buildctl --addr docker-container://<name>` using the existing `buildx_buildkit_ap-builder0` container (or a dedicated `ap-buildkit` container).
+   - Export images directly to a temporary OCI layout directory using `--output type=oci,tar=false,dest=<dir>`.
+   - Implement an in-process SPDY pusher in `ap` that checks existing blobs via `HEAD` and uploads missing layers and manifests directly to the registry pod.
+   - Delete `PortForwardTask` and the macOS `socat` bridge container from `ap/pkg/k8s/portforward.go`.
+2. **Fallback / Alternative B (Archive Route)**:
+   - If a developer environment cannot run a privileged BuildKit container, fall back to `docker build --load` + `docker save` + in-process push, accepting the 2.0–2.4 s export penalty per build.
+3. **Optional Maintainer Setting: Default to In-Cluster BuildKit (`--buildkit-host k8s`)**:
+   - For non-Kind remote clusters that have `autodeploy-system/buildkit` deployed, `ap` could default to `--buildkit-host k8s`. This requires zero local building and zero host listeners, but alters default CLI behavior and requires in-cluster BuildKit deployment.
+
+### 4.2 End State After Implementation
+
+Following this change:
+1. **Host TCP Listeners**: **0**. No process will bind `localhost:5000` or any ephemeral TCP port.
+2. **Private Unix Domain Sockets**: Only active during in-cluster BuildKit forwarding (`/tmp/ap-bk-*/buildkit.sock`, mode `0700`).
+3. **macOS Bridge Containers**: **0**. The `alpine/socat` container bridge and `host.docker.internal` routing are completely eliminated.
+4. **AirPlay Collisions**: Completely eliminated.
+5. **Applied Kubernetes Manifests**: Remain unchanged. Manifests reference `images.local/<image>:<tag>@sha256:...`, pulled via the node agent's containerd mirror.
 
 ---
 
@@ -303,16 +309,21 @@ Once the in-process push change (Section 4.1) is implemented:
 
 | Topic / Test | Method / Setup | Result | Source / Reference |
 | :--- | :--- | :--- | :--- |
+| **Archive Export Cost** | `docker save` on 973 MB image (302 MB archive) | Took 2.0–2.4 s per run with no changes | Checked during review |
+| **Directory Exporter Unchanged Blobs** | BuildKit v0.34.2 inside container, 200 MB layer | 2.6 s initial; 0.0 s rebuild with same inode/mtime | Checked during review |
+| **Old Blobs Accumulation** | Three successive OCI directory exports | 11 files accumulated; requires pruning & index parsing | Checked during review |
+| **Privilege Requirement** | BuildKit container requirements | Needs `--privileged` (or rootless with unconfined) | Checked during review & BuildKit docs |
+| **Host buildctl over `docker-container://`** | Host `buildctl` v0.35.0 dialing `docker-container://test-bk` | Initial: 6.5 s; unchanged: 0.21 s (skipped); small change: 0.27 s | Measured on test setup with 200 MB layer |
+| **Buildx ap-builder Container Reuse** | Inspected `buildx_buildkit_ap-builder0` settings | Responds to `buildctl du`; state in named Docker volume | Measured on test setup; `build.go:142` |
+| **In-Process SPDY Push & Cluster Pull** | Go script dialing registry pod port 5000 via SPDY | Pushed blobs/manifest; pulled & ran in Kind pod | Measured end-to-end in live Kind cluster |
+| **Classic Docker Driver OCI Refusal** | `docker buildx build -o type=oci` on overlay2 (no containerd store) | Refused: `OCI exporter is not supported for the docker driver` | Measured on Docker 29.10.0 DinD container |
+| **`docker save` Universal Export** | `docker build --load` followed by `docker save` | Succeeded on both classic and containerd store setups | Measured across Docker 29.9.3 and 29.10.0 |
 | **Docker Unix Socket Ref** | `docker tag alpine:latest unix:///var/run/reg.sock/img:tag` | Rejected: `invalid reference format` | Docker CLI & reference grammar |
-| **Docker Random Port Push** | `docker buildx build -t 127.0.0.1:49153/test:latest --push` | Succeeded; image pushed to registry | Tested with local `registry:2` on port 49153 |
-| **Docker Loopback Insecure**| `docker info` | `127.0.0.0/8` and `::1/128` listed in `Insecure Registries` | Docker Community Engine v29.9.3 / v29.10.0 |
-| **Buildx OCI Export (containerd store)** | `docker buildx build -o type=oci,dest=/tmp/test.tar` | Succeeded; created valid OCI layout | Docker 29.9.3 with containerd snapshotter |
-| **Buildx OCI Export (classic overlay2)** | `docker buildx build -o type=oci,dest=/tmp/test.tar` | Refused: `OCI exporter is not supported for the docker driver` | Docker 29.10.0 with classic overlay2 storage |
-| **Buildx `--load` + `docker save`** | `docker buildx build --load` then `docker save` | Succeeded on both storage configurations | Universal export format across all Docker setups |
-| **In-Process Pusher Workflow** | Conceptual design (SPDY stream to registry pod) | **Not tried** on live cluster | Estimated at ~200 lines based on `buildkit_forward.go` |
-| **Buildctl OCI Support** | `buildctl build --help` | Flags `-o type=oci` and `type=docker` verified | BuildKit v0.35.0 CLI inspection |
+| **Docker Random Port Push** | `docker buildx build -t 127.0.0.1:49153/test:latest --push` | Succeeded; image pushed to registry on port 49153 | Measured on test setup with local registry:2 |
+| **Docker Loopback Insecure** | `docker info` inspection | `127.0.0.0/8` and `::1/128` listed in `Insecure Registries` | Docker Community Engine v29.9.3 / v29.10.0 |
 | **Kubectl Default Bind** | `kubectl port-forward --help` | Binds both `127.0.0.1` and `::1` when `--address` is omitted | kubectl v1.37.2 CLI documentation |
 | **AirPlay Port 5000** | macOS Monterey 12+ default configuration | `ControlCenter` listens on `*:5000` | macOS system documentation & `portforward.go:134` |
 | **Path C (`tcp://` BuildKit)** | Codebase audit of `build.go` and `naming.go` | Incompatible; passes local address to remote daemon | Code inspection (**not run**) |
-| **Kind Load Listener Check**| Codebase audit of `deploy.go` & `kindload/load.go` | Sets `push=false`, uses `docker save` & `ctr import` | Codebase audit |
-| **In-Cluster BuildKit Check**| Codebase audit of `build.go` & `naming.go` | Skips `PortForwardTask`, uses Service DNS directly | Codebase audit |
+| **Kind Load Listener Check** | Codebase audit of `deploy.go` & `kindload/load.go` | Sets `push=false`, uses `docker save` & `ctr import` | Codebase audit |
+| **In-Cluster BuildKit Check** | Codebase audit of `build.go` & `naming.go` | Skips `PortForwardTask`, uses Service DNS directly | Codebase audit |
+| **Tunnel Proxy Container** | BuildKit in docker pushing to proxy container over stdio | Conceptual alternative | **Not tried** |
