@@ -70,7 +70,7 @@ func TestGetApCommand(t *testing.T) {
 				if err := os.MkdirAll(filepath.Join(root, ".ap"), 0755); err != nil {
 					t.Fatal(err)
 				}
-				if err := fileutils.WriteFileAtomic(filepath.Join(root, ".ap", "ap.yaml"), []byte(tc.apYAML+"\n"), 0644); err != nil {
+				if err := fileutils.WriteFileAtomic(t.Context(), filepath.Join(root, ".ap", "ap.yaml"), []byte(tc.apYAML+"\n"), 0644); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -134,7 +134,7 @@ presubmits:
 				if err := os.MkdirAll(filepath.Join(root, ".ap"), 0755); err != nil {
 					t.Fatal(err)
 				}
-				if err := fileutils.WriteFileAtomic(filepath.Join(root, ".ap", "ap.yaml"), []byte(tc.apYAML+"\n"), 0644); err != nil {
+				if err := fileutils.WriteFileAtomic(t.Context(), filepath.Join(root, ".ap", "ap.yaml"), []byte(tc.apYAML+"\n"), 0644); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -172,7 +172,7 @@ func writeTestHeadersConfig(t *testing.T, root string) {
 		t.Fatal(err)
 	}
 	headersYAML := "license: apache-2.0\ncopyrightHolder: Google LLC\n"
-	if err := fileutils.WriteFileAtomic(filepath.Join(root, ".ap", "headers.yaml"), []byte(headersYAML), 0644); err != nil {
+	if err := fileutils.WriteFileAtomic(t.Context(), filepath.Join(root, ".ap", "headers.yaml"), []byte(headersYAML), 0644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -207,7 +207,7 @@ func TestPresubmitScriptsWithSkipConfig(t *testing.T) {
   - docs/*
   - README.md
 `
-	if err := fileutils.WriteFileAtomic(filepath.Join(root, ".ap", "ap.yaml"), []byte(apYAML), 0644); err != nil {
+	if err := fileutils.WriteFileAtomic(t.Context(), filepath.Join(root, ".ap", "ap.yaml"), []byte(apYAML), 0644); err != nil {
 		t.Fatal(err)
 	}
 	r, err := sourcetree.Open(root)
@@ -267,7 +267,7 @@ func TestGithubActionsWorkflowArtifactUpload(t *testing.T) {
 	// Create presubmit scripts: one without test/e2e in name (e.g. ap-posix or ap-lint), one with.
 	for _, script := range []string{"ap-posix", "ap-test"} {
 		path := filepath.Join(presubmitsDir, script)
-		if err := fileutils.WriteFileAtomic(path, []byte("#!/bin/bash\nexit 0\n"), 0755); err != nil {
+		if err := fileutils.WriteFileAtomic(t.Context(), path, []byte("#!/bin/bash\nexit 0\n"), 0755); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -326,7 +326,7 @@ func TestPresubmitScriptsWithLicenseNone(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, ".ap"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := fileutils.WriteFileAtomic(filepath.Join(root, ".ap", "headers.yaml"), []byte("license: none\n"), 0644); err != nil {
+	if err := fileutils.WriteFileAtomic(t.Context(), filepath.Join(root, ".ap", "headers.yaml"), []byte("license: none\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	r, err := sourcetree.Open(root)
@@ -368,7 +368,7 @@ func TestGenerateTasks_DevTasks(t *testing.T) {
 	if err := os.MkdirAll(tasksDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := fileutils.WriteFileAtomic(filepath.Join(tasksDir, "generate-foo"), []byte("#!/bin/sh\n"), 0755); err != nil {
+	if err := fileutils.WriteFileAtomic(t.Context(), filepath.Join(tasksDir, "generate-foo"), []byte("#!/bin/sh\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -392,10 +392,10 @@ func TestGenerateIdempotence(t *testing.T) {
 	root := t.TempDir()
 
 	// Set up a repo with a Go module and no generated presubmit scripts
-	if err := fileutils.WriteFileAtomic(filepath.Join(root, "go.mod"), []byte("module example.com/test\n\ngo 1.26\n"), 0644); err != nil {
+	if err := fileutils.WriteFileAtomic(t.Context(), filepath.Join(root, "go.mod"), []byte("module example.com/test\n\ngo 1.26\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := fileutils.WriteFileAtomic(filepath.Join(root, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
+	if err := fileutils.WriteFileAtomic(t.Context(), filepath.Join(root, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	writeTestHeadersConfig(t, root)
@@ -405,7 +405,7 @@ func TestGenerateIdempotence(t *testing.T) {
 	if err := os.MkdirAll(presubmitsDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := fileutils.WriteFileAtomic(filepath.Join(presubmitsDir, "check-foo"), []byte("#!/bin/bash\nexit 0\n"), 0755); err != nil {
+	if err := fileutils.WriteFileAtomic(t.Context(), filepath.Join(presubmitsDir, "check-foo"), []byte("#!/bin/bash\nexit 0\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
 

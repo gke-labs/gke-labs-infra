@@ -654,7 +654,7 @@ func TestToolInstall(t *testing.T) {
 	t.Setenv("REPO_ROOT", "")
 	cacheDir := t.TempDir()
 	t.Setenv("AP_CACHE_DIR", cacheDir)
-	installedDir, err := tool.Install(tool.InstallOptions{
+	installedDir, err := tool.Install(t.Context(), tool.InstallOptions{
 		Stdout: buf,
 	})
 	if err != nil {

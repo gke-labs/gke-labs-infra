@@ -233,14 +233,14 @@ func (s *TaskContext) Tool(ctx context.Context, name string) (string, error) {
 
 // ScriptEnv returns an environment slice with the tool bin directory prepended to PATH,
 // populated once per task context using tool.ScriptEnv and memoized.
-func (s *TaskContext) ScriptEnv() ([]string, error) {
+func (s *TaskContext) ScriptEnv(ctx context.Context) ([]string, error) {
 	scriptEnvResolveMu.Lock()
 	defer scriptEnvResolveMu.Unlock()
 	if s.scriptEnv != nil {
 		return s.scriptEnv, nil
 	}
 
-	env, err := tool.ScriptEnv(s.repoRoot)
+	env, err := tool.ScriptEnv(ctx, s.repoRoot)
 	if err != nil {
 		return nil, err
 	}

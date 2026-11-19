@@ -58,7 +58,7 @@ func (t *LegacyScriptTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 	scoped.Log(ctx).Info("running legacy generate script", "name", t.Name)
 	cmd := exec.CommandContext(ctx, t.Path)
 	cmd.Dir = t.Dir
-	env, err := scope.ScriptEnv()
+	env, err := scope.ScriptEnv(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to prepare script environment for %s: %w", t.Name, err)
 	}
@@ -309,7 +309,7 @@ if [[ -n $(git status --porcelain) ]]; then
   exit 1
 fi
 `, headerBlock, skipGuard, apCmd, apCmd, apCmd)
-	if err := r.WriteFile(targetFile, []byte(content), 0755); err != nil {
+	if err := r.WriteFile(ctx, targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
 
@@ -375,7 +375,7 @@ cd "${REPO_ROOT}"
 # Run audit mode (strict in CI)
 %s generate --audit-generated --strict //...
 `, headerBlock, skipGuard, apCmd)
-	if err := r.WriteFile(targetFile, []byte(content), 0755); err != nil {
+	if err := r.WriteFile(ctx, targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
 
@@ -429,7 +429,7 @@ cd "${REPO_ROOT}"
 # Run tests
 %s test //...
 `, headerBlock, skipGuard, apCmd)
-	if err := r.WriteFile(targetFile, []byte(content), 0755); err != nil {
+	if err := r.WriteFile(ctx, targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
 
@@ -483,7 +483,7 @@ cd "${REPO_ROOT}"
 # Run linting
 %s lint //...
 `, headerBlock, skipGuard, apCmd)
-	if err := r.WriteFile(targetFile, []byte(content), 0755); err != nil {
+	if err := r.WriteFile(ctx, targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
 
@@ -570,7 +570,7 @@ cd "${REPO_ROOT}"
 # Run build
 %s build //...
 `, headerBlock, skipGuard, apCmd)
-	if err := r.WriteFile(targetFile, []byte(content), 0755); err != nil {
+	if err := r.WriteFile(ctx, targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
 
@@ -738,7 +738,7 @@ cd "${REPO_ROOT}"
 # Run e2e tests
 %s e2e %s
 `, headerBlock, skipGuard, apCmd, tgt.target)
-		if err := r.WriteFile(targetFile, []byte(content), 0755); err != nil {
+		if err := r.WriteFile(ctx, targetFile, []byte(content), 0755); err != nil {
 			return fmt.Errorf("failed to write %s: %w", targetFile, err)
 		}
 	}
@@ -866,7 +866,7 @@ jobs:
 		return fmt.Errorf("failed to create workflows dir: %w", err)
 	}
 
-	if err := r.WriteFile(outputFile, []byte(sb.String()), 0644); err != nil {
+	if err := r.WriteFile(ctx, outputFile, []byte(sb.String()), 0644); err != nil {
 		return fmt.Errorf("failed to write %s: %w", outputFile, err)
 	}
 

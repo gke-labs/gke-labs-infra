@@ -160,7 +160,7 @@ func readCacheEntry(rawURL string) (*cacheEntry, string, error) {
 	return &entry, p, nil
 }
 
-func writeCacheEntry(p, rawURL, etag string, body []byte) error {
+func writeCacheEntry(ctx context.Context, p, rawURL, etag string, body []byte) error {
 	entry := cacheEntry{
 		URL:       rawURL,
 		ETag:      etag,
@@ -172,7 +172,7 @@ func writeCacheEntry(p, rawURL, etag string, body []byte) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal cache entry: %w", err)
 	}
-	if err := fileutils.WriteFileAtomic(p, data, 0644); err != nil {
+	if err := fileutils.WriteFileAtomic(ctx, p, data, 0644); err != nil {
 		return fmt.Errorf("failed to write cache file %s: %w", p, err)
 	}
 	return nil
@@ -231,7 +231,7 @@ func Do(ctx context.Context, req *http.Request) (*http.Response, error) {
 					}
 					resp.Body = io.NopCloser(bytes.NewReader(body))
 
-					if err := writeCacheEntry(p, req.URL.String(), etag, body); err != nil {
+					if err := writeCacheEntry(ctx, p, req.URL.String(), etag, body); err != nil {
 						klog.V(2).Infof("failed to write github cache: %v", err)
 					}
 				}

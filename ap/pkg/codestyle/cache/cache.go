@@ -88,7 +88,7 @@ func (m *Manager) load() error {
 	return errors.Join(errs...)
 }
 
-func (m *Manager) Save() error {
+func (m *Manager) Save(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -98,7 +98,7 @@ func (m *Manager) Save() error {
 	m.removeLegacyFile(filepath.Join(m.dir, "gofmt.json"))
 
 	doneBinPath := filepath.Join(m.dir, "done.bin")
-	if err := m.done.Save(doneBinPath); err != nil {
+	if err := m.done.Save(ctx, doneBinPath); err != nil {
 		return err
 	}
 	return nil

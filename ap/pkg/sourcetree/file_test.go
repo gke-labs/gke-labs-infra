@@ -182,7 +182,7 @@ func TestFile_HashAndRefresh(t *testing.T) {
 	}
 
 	// Save hash cache to hashes.bin
-	if err := r.Save(); err != nil {
+	if err := r.Save(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 

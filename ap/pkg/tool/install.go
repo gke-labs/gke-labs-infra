@@ -15,6 +15,7 @@
 package tool
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -58,7 +59,7 @@ func findGitRoot() string {
 // Install creates or refreshes symlinks for all registered tools pointing at the ap executable.
 // On Windows, it copies ap.exe into targetDir and skips creating symlinks.
 // It returns the directory path that it installed into.
-func Install(opt InstallOptions) (string, error) {
+func Install(ctx context.Context, opt InstallOptions) (string, error) {
 	targetDir := opt.TargetDir
 	if targetDir == "" {
 		repoRoot := opt.RepoRoot
@@ -125,7 +126,7 @@ func Install(opt InstallOptions) (string, error) {
 			}
 		}
 		if shouldCopy {
-			if err := fileutils.CopyFile(execPath, targetApPath, 0755); err != nil {
+			if err := fileutils.CopyFile(ctx, execPath, targetApPath, 0755); err != nil {
 				return "", fmt.Errorf("failed to copy ap to %s: %w", targetApPath, err)
 			}
 		}
@@ -161,8 +162,8 @@ func Install(opt InstallOptions) (string, error) {
 
 // ScriptEnv ensures the managed-tool symlinks exist for repoRoot and returns an environment
 // slice with that tool bin directory prepended to PATH and REPO_ROOT set.
-func ScriptEnv(repoRoot string) ([]string, error) {
-	binDir, err := Install(InstallOptions{
+func ScriptEnv(ctx context.Context, repoRoot string) ([]string, error) {
+	binDir, err := Install(ctx, InstallOptions{
 		RepoRoot: repoRoot,
 		Stdout:   io.Discard,
 	})

@@ -56,7 +56,7 @@ func Run(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files [
 		log.Fine("failed to initialize cache", "error", err)
 	} else {
 		defer func() {
-			if err := cm.Save(); err != nil {
+			if err := cm.Save(ctx); err != nil {
 				log.Error("failed to save cache", "error", err)
 			}
 		}()

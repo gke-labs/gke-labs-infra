@@ -125,7 +125,7 @@ func Update(ctx context.Context, repoRoot string, opts ...UpdateOptions) error {
 		return fmt.Errorf("failed to marshal versions data: %w", err)
 	}
 
-	if err := fileutils.WriteFileAtomic(targetPath, data, 0644); err != nil {
+	if err := fileutils.WriteFileAtomic(ctx, targetPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetPath, err)
 	}
 

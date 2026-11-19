@@ -22,6 +22,7 @@ package sourcetree
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -615,7 +616,7 @@ func (r *SourceTree) Remove(path string) error {
 // WriteFile writes content to path atomically. If the file already exists with
 // identical content, it is left untouched so mtime is preserved. The repo tree
 // is updated to reflect the new file state.
-func (r *SourceTree) WriteFile(path string, content []byte, perm os.FileMode) error {
+func (r *SourceTree) WriteFile(ctx context.Context, path string, content []byte, perm os.FileMode) error {
 	clean := filepath.Clean(path)
 	if !filepath.IsAbs(clean) {
 		clean = filepath.Join(r.root, clean)
@@ -624,7 +625,7 @@ func (r *SourceTree) WriteFile(path string, content []byte, perm os.FileMode) er
 	if err == nil && bytes.Equal(existing, content) {
 		return nil
 	}
-	if err := fileutils.WriteFileAtomic(clean, content, perm); err != nil {
+	if err := fileutils.WriteFileAtomic(ctx, clean, content, perm); err != nil {
 		return err
 	}
 	r.mu.Lock()
@@ -638,12 +639,12 @@ func (r *SourceTree) WriteFile(path string, content []byte, perm os.FileMode) er
 }
 
 // WriteFileAtomic writes data to path atomically and ensures the file is tracked in the repo tree.
-func (r *SourceTree) WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
+func (r *SourceTree) WriteFileAtomic(ctx context.Context, path string, data []byte, perm os.FileMode) error {
 	clean := filepath.Clean(path)
 	if !filepath.IsAbs(clean) {
 		clean = filepath.Join(r.root, clean)
 	}
-	if err := fileutils.WriteFileAtomic(clean, data, perm); err != nil {
+	if err := fileutils.WriteFileAtomic(ctx, clean, data, perm); err != nil {
 		return err
 	}
 	r.mu.Lock()
@@ -657,12 +658,12 @@ func (r *SourceTree) WriteFileAtomic(path string, data []byte, perm os.FileMode)
 }
 
 // CopyFile copies a file from src to dst atomically and ensures dst is tracked in the repo tree.
-func (r *SourceTree) CopyFile(src, dst string, perm os.FileMode) error {
+func (r *SourceTree) CopyFile(ctx context.Context, src, dst string, perm os.FileMode) error {
 	cleanDst := filepath.Clean(dst)
 	if !filepath.IsAbs(cleanDst) {
 		cleanDst = filepath.Join(r.root, cleanDst)
 	}
-	if err := fileutils.CopyFile(src, cleanDst, perm); err != nil {
+	if err := fileutils.CopyFile(ctx, src, cleanDst, perm); err != nil {
 		return err
 	}
 	r.mu.Lock()
@@ -935,11 +936,11 @@ func (r *SourceTree) Under(dir string) *SourceTree {
 }
 
 // Save persists pending record entries (such as hashes.bin) atomically.
-func (r *SourceTree) Save() error {
+func (r *SourceTree) Save(ctx context.Context) error {
 	if r == nil || r.hashIndex == nil || r.hashPath == "" {
 		return nil
 	}
-	return r.hashIndex.Save(r.hashPath)
+	return r.hashIndex.Save(ctx, r.hashPath)
 }
 
 // Glob returns absolute file paths matching the given glob pattern.

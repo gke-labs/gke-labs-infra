@@ -16,6 +16,7 @@ package recordfile
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -340,8 +341,8 @@ func (f *File) encodeLocked() ([]byte, error) {
 	return out, nil
 }
 
-// Save atomically writes the updated recordfile to path.
-func (f *File) Save(path string) error {
+// Save encodes the File and writes it to path atomically using fileutils.WriteFileAtomic.
+func (f *File) Save(ctx context.Context, path string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -359,7 +360,7 @@ func (f *File) Save(path string) error {
 		return err
 	}
 
-	if err := fileutils.WriteFileAtomic(path, data, 0644); err != nil {
+	if err := fileutils.WriteFileAtomic(ctx, path, data, 0644); err != nil {
 		return err
 	}
 

@@ -229,19 +229,19 @@ func EnsureDockerfilePluginImage(
 		return "", fmt.Errorf("marshaling build record for plugin %q: %w", pluginName, err)
 	}
 
-	if err := recordCachedImage(recordPath, marshaledRecord); err != nil {
+	if err := recordCachedImage(ctx, recordPath, marshaledRecord); err != nil {
 		return "", fmt.Errorf("recording cached image for plugin %q: %w", pluginName, err)
 	}
 
 	return imageID, nil
 }
 
-func recordCachedImage(destinationPath string, recordData []byte) error {
+func recordCachedImage(ctx context.Context, destinationPath string, recordData []byte) error {
 	temporaryFile, err := fileutils.CreateTempFile(destinationPath)
 	if err != nil {
 		return fmt.Errorf("creating temp file for %s: %w", destinationPath, err)
 	}
-	defer temporaryFile.Cleanup()
+	defer temporaryFile.Cleanup(ctx)
 
 	if _, err := temporaryFile.Write(recordData); err != nil {
 		return fmt.Errorf("writing to %s: %w", destinationPath, err)

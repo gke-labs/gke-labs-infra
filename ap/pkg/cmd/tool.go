@@ -82,7 +82,7 @@ func BuildToolInstallCommand(rootOpt *RootOptions) *cobra.Command {
 			if len(args) > 0 {
 				dir = args[0]
 			}
-			_, err := tool.Install(tool.InstallOptions{
+			_, err := tool.Install(cmd.Context(), tool.InstallOptions{
 				RepoRoot:  rootOpt.RepoRoot,
 				TargetDir: dir,
 				Stdout:    cmd.OutOrStdout(),

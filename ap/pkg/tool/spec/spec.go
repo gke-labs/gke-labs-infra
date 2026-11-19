@@ -41,18 +41,18 @@ import (
 
 // Archive defines the packaging layout and extraction of a tool distribution.
 type Archive interface {
-	Extract(archivePath, binary, dest string) error
+	Extract(ctx context.Context, archivePath, binary, dest string) error
 }
 
 // Bare represents an uncompressed binary release asset.
 type Bare struct{}
 
 // Extract copies the uncompressed binary from archivePath to dest.
-func (Bare) Extract(archivePath, binary, dest string) error {
+func (Bare) Extract(ctx context.Context, archivePath, binary, dest string) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
 		return fmt.Errorf("failed to create directory %s: %w", filepath.Dir(dest), err)
 	}
-	if err := fileutils.CopyFile(archivePath, dest, 0755); err != nil {
+	if err := fileutils.CopyFile(ctx, archivePath, dest, 0755); err != nil {
 		return fmt.Errorf("failed to install binary %s: %w", dest, err)
 	}
 	return nil
@@ -62,11 +62,11 @@ func (Bare) Extract(archivePath, binary, dest string) error {
 type TarGz struct{}
 
 // Extract extracts the binary from a .tar.gz archive to dest.
-func (TarGz) Extract(archivePath, binary, dest string) error {
-	return extractTarGz(archivePath, binary, dest)
+func (TarGz) Extract(ctx context.Context, archivePath, binary, dest string) error {
+	return extractTarGz(ctx, archivePath, binary, dest)
 }
 
-func extractTarGz(archivePath, binary, dest string) error {
+func extractTarGz(ctx context.Context, archivePath, binary, dest string) error {
 	archiveFile, err := os.Open(archivePath)
 	if err != nil {
 		return fmt.Errorf("failed to open archive %s: %w", archivePath, err)
@@ -98,18 +98,18 @@ func extractTarGz(archivePath, binary, dest string) error {
 		}
 		cleanName := filepath.Clean(header.Name)
 		if (header.Typeflag == tar.TypeReg || header.Typeflag == tar.TypeRegA) && (cleanName == binary || filepath.Base(cleanName) == binary) {
-			return extractStreamToFile(tarReader, dest)
+			return extractStreamToFile(ctx, tarReader, dest)
 		}
 	}
 	return fmt.Errorf("target binary %q not found in archive %s", binary, archivePath)
 }
 
-func extractStreamToFile(r io.Reader, dest string) error {
+func extractStreamToFile(ctx context.Context, r io.Reader, dest string) error {
 	tempFile, err := fileutils.CreateTempFile(dest)
 	if err != nil {
 		return err
 	}
-	defer tempFile.Cleanup()
+	defer tempFile.Cleanup(ctx)
 
 	if _, err := io.Copy(tempFile, r); err != nil {
 		return err
@@ -562,7 +562,7 @@ func Ensure(ctx context.Context, spec *Spec, version string) (string, error) {
 		}
 	}()
 
-	if err := spec.Archive.Extract(tmpFile, binName, binPath); err != nil {
+	if err := spec.Archive.Extract(ctx, tmpFile, binName, binPath); err != nil {
 		return "", fmt.Errorf("failed to extract %s: %w", spec.Name, err)
 	}
 
@@ -735,7 +735,7 @@ func Update(ctx context.Context, spec *Spec, repoRoot string) error {
 		targetPath = filepath.Join(repoRoot, targetPath)
 	}
 
-	if err := fileutils.WriteFileAtomic(targetPath, data, 0644); err != nil {
+	if err := fileutils.WriteFileAtomic(ctx, targetPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetPath, err)
 	}
 

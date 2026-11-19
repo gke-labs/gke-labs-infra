@@ -53,7 +53,7 @@ func TestDoneIndex_HeaderRoundTrip(t *testing.T) {
 		t.Fatalf("MarkDone(StepGofmt) failed: %v", err)
 	}
 
-	if err := idx.Save(binPath); err != nil {
+	if err := idx.Save(t.Context(), binPath); err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
 
@@ -186,7 +186,7 @@ func TestDoneIndex_MergePending(t *testing.T) {
 	if err := idx.MarkDone(StepGofmt, hashC); err != nil {
 		t.Fatal(err)
 	}
-	if err := idx.Save(binPath); err != nil {
+	if err := idx.Save(t.Context(), binPath); err != nil {
 		t.Fatal(err)
 	}
 
@@ -235,7 +235,7 @@ func TestDoneIndex_MergePending(t *testing.T) {
 		t.Errorf("pending lookup hashEnd failed")
 	}
 
-	if err := loaded.Save(binPath); err != nil {
+	if err := loaded.Save(t.Context(), binPath); err != nil {
 		t.Fatal(err)
 	}
 
@@ -300,7 +300,7 @@ func TestDoneIndex_LookupHitMiss(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	binPath := filepath.Join(tmpDir, "done.bin")
-	if err := idx.Save(binPath); err != nil {
+	if err := idx.Save(t.Context(), binPath); err != nil {
 		t.Fatal(err)
 	}
 
