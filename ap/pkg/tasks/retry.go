@@ -104,7 +104,7 @@ func (h *bufferHandler) Enabled(ctx context.Context, level slog.Level) bool {
 	if level >= slog.LevelInfo {
 		return true
 	}
-	return klog.V(1).Enabled()
+	return klog.V(klog.Level(-level)).Enabled()
 }
 
 func (h *bufferHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
@@ -187,15 +187,20 @@ func formatValue(value any) string {
 	return formatted
 }
 
-// NewLogger returns a plain logger that formats log entries as 'message key=value'.
-func NewLogger(writer io.Writer) *slog.Logger {
-	return slog.New(&bufferHandler{
+// NewHandler returns an slog.Handler that formats log entries as 'message key=value'.
+func NewHandler(writer io.Writer) slog.Handler {
+	return &bufferHandler{
 		writer: writer,
-	})
+	}
 }
 
-func newBufferLogger(writer io.Writer, warnings *syncBuffer) *slog.Logger {
-	return slog.New(&bufferHandler{
+// NewLogger returns a plain logger that formats log entries as 'message key=value'.
+func NewLogger(writer io.Writer) scoped.Logger {
+	return scoped.NewLogger(NewHandler(writer))
+}
+
+func newBufferLogger(writer io.Writer, warnings *syncBuffer) scoped.Logger {
+	return scoped.NewLogger(&bufferHandler{
 		writer:   writer,
 		warnings: warnings,
 	})
@@ -291,10 +296,10 @@ func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
 
 	writef(outputWriter, "=== %s (%s, %.1fs)\n", task.GetName(), status, duration.Seconds())
 	output := outputBuffer.Bytes()
-	if !scope.PrintOutput() && (err != nil || taskLog.Enabled(taskCtx, slog.LevelDebug)) {
+	if !scope.PrintOutput() && (err != nil || klog.V(1).Enabled()) {
 		if len(output) > 0 {
 			if _, writeErr := outputWriter.Write(output); writeErr != nil {
-				taskLog.Debug("failed to write task output", "error", writeErr)
+				taskLog.Fine("failed to write task output", "error", writeErr)
 			}
 			if !bytes.HasSuffix(output, []byte("\n")) {
 				writef(outputWriter, "\n")
@@ -304,7 +309,7 @@ func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
 		warnings := warningsBuffer.Bytes()
 		if len(warnings) > 0 {
 			if _, writeErr := outputWriter.Write(warnings); writeErr != nil {
-				taskLog.Debug("failed to write task warnings", "error", writeErr)
+				taskLog.Fine("failed to write task warnings", "error", writeErr)
 			}
 			if !bytes.HasSuffix(warnings, []byte("\n")) {
 				writef(outputWriter, "\n")

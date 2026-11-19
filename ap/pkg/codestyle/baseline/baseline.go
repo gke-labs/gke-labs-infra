@@ -518,7 +518,7 @@ func Apply(ctx context.Context, findings []Finding, opts ApplyOptions) ([]Findin
 			}
 			if opts.Stdout != nil {
 				if _, err := fmt.Fprintf(opts.Stdout, "Wrote %d baseline entries to %s\n", len(finalEntries), baselinePath); err != nil {
-					log.Debug("failed to write baseline message", "error", err)
+					log.Fine("failed to write baseline message", "error", err)
 				}
 			}
 		}
@@ -538,7 +538,7 @@ func Apply(ctx context.Context, findings []Finding, opts ApplyOptions) ([]Findin
 	if opts.Stdout != nil {
 		for _, stale := range staleEntries {
 			if _, err := fmt.Fprintf(opts.Stdout, "stale baseline entry: %s (remove from baseline)\n", stale); err != nil {
-				log.Debug("failed to write stale entry", "error", err)
+				log.Fine("failed to write stale entry", "error", err)
 			}
 		}
 	}
@@ -562,7 +562,7 @@ func Apply(ctx context.Context, findings []Finding, opts ApplyOptions) ([]Findin
 				log.Warn(line)
 			} else if opts.Stderr != nil {
 				if _, err := fmt.Fprintln(opts.Stderr, line); err != nil {
-					log.Debug("failed to write diagnostic", "error", err)
+					log.Fine("failed to write diagnostic", "error", err)
 				}
 			}
 		}

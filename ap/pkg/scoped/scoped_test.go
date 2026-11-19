@@ -48,7 +48,7 @@ func TestLog(t *testing.T) {
 	def.Info("test default log")
 
 	// Round trip when set
-	custom := slog.New(slog.DiscardHandler)
+	custom := NewLogger(slog.DiscardHandler)
 	ctx := WithLog(t.Context(), custom)
 	if got := Log(ctx); got != custom {
 		t.Errorf("Log(ctx) = %v, want %v", got, custom)

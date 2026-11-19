@@ -321,7 +321,7 @@ func TestApply_Reporting(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.mode, func(t *testing.T) {
 			var logBuf, errBuf bytes.Buffer
-			ctx := scoped.WithLog(t.Context(), slog.New(slog.NewTextHandler(&logBuf, nil)))
+			ctx := scoped.WithLog(t.Context(), scoped.NewLogger(slog.NewTextHandler(&logBuf, nil)))
 			opts := ApplyOptions{Name: "testcontext", RepoRoot: "/repo", Dir: "/repo", Mode: tc.mode, Stderr: &errBuf}
 			_, err := Apply(ctx, []Finding{finding}, opts)
 			if (err != nil) != tc.wantErr {

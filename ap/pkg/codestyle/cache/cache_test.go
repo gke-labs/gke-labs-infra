@@ -21,6 +21,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 )
 
 func TestManager_Load_CorruptDoneBinTreatAsEmpty(t *testing.T) {
@@ -33,7 +35,7 @@ func TestManager_Load_CorruptDoneBinTreatAsEmpty(t *testing.T) {
 	m := &Manager{
 		dir:  tmpDir,
 		done: NewDoneIndex(),
-		log:  slog.New(slog.DiscardHandler),
+		log:  scoped.NewLogger(slog.DiscardHandler),
 	}
 
 	// Corrupt done.bin must be logged at V(2) and treated as empty without returning an error
@@ -51,7 +53,7 @@ func TestManager_Load_NotExist(t *testing.T) {
 	m := &Manager{
 		dir:  tmpDir,
 		done: NewDoneIndex(),
-		log:  slog.New(slog.DiscardHandler),
+		log:  scoped.NewLogger(slog.DiscardHandler),
 	}
 
 	err := m.load()

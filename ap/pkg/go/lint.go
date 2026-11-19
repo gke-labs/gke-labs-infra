@@ -213,7 +213,7 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.TaskContext) error
 		for _, pkg := range pkgs {
 			for _, err := range pkg.Errors {
 				if _, writeErr := fmt.Fprintln(scope.Stderr(), err); writeErr != nil {
-					scoped.Log(ctx).Debug("failed to write package error", "error", writeErr)
+					scoped.Log(ctx).Fine("failed to write package error", "error", writeErr)
 				}
 				pkgErrors++
 			}

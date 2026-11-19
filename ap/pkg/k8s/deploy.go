@@ -448,7 +448,7 @@ func kustomizeBuild(ctx context.Context, scope *tasks.TaskContext, kustomization
 	}
 	if stderr.Len() > 0 {
 		if _, err := scope.Stderr().Write(stderr.Bytes()); err != nil {
-			scoped.Log(ctx).Debug("failed to write kustomize stderr", "error", err)
+			scoped.Log(ctx).Fine("failed to write kustomize stderr", "error", err)
 		}
 	}
 	return stdout.Bytes(), nil

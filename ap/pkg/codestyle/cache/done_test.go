@@ -23,6 +23,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 )
 
 func makeHexHash(prefix byte, id uint64) string {
@@ -155,7 +157,7 @@ func TestDoneIndex_TreatAsEmpty(t *testing.T) {
 			m := &Manager{
 				dir:  tmpDir,
 				done: NewDoneIndex(),
-				log:  slog.New(slog.DiscardHandler),
+				log:  scoped.NewLogger(slog.DiscardHandler),
 			}
 			if err := m.load(); err != nil {
 				t.Fatalf("expected m.load() to succeed (treat as empty) for %s, got: %v", tc.name, err)
