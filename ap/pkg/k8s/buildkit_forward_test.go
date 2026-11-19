@@ -17,6 +17,7 @@ package k8s
 import (
 	"bytes"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -24,7 +25,6 @@ import (
 	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
-	"log/slog"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/httpstream"
 	"k8s.io/client-go/tools/portforward"
