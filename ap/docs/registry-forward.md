@@ -120,7 +120,7 @@ To eliminate the `localhost:5000` listener entirely while avoiding per-build arc
 The API server service proxy route has the following operational characteristics and known limits:
 1. **RBAC Permissions**: The user's Kubernetes credentials must have permission to proxy to the service (`services/proxy` on `in-cluster-image-registry` in `in-cluster-image-registry-system`), whereas port-forwarding requires `pods/portforward`.
 2. **Per-Request Endpoint Selection**: The Kubernetes API server service proxy picks an endpoint independently per HTTP request. Because `in-cluster-image-registry` is deployed as a single-replica StatefulSet (`replicas: 1`), all requests consistently reach the single backing registry instance.
-3. **Performance on Kind**: Measured on a local Kind cluster with `ap/pkg/registrypush`: pushing two 400 MiB layers took **2.4 s**; an unchanged repeated push requires only two HTTP requests (`GET /v2/` and `HEAD` blob check) and skips re-uploading layers.
+3. **Performance on Kind**: Measured on a local Kind cluster with a standalone probe using the same route (client-go transport + a rewriting round tripper + go-containerregistry): pushing two 400 MiB layers took **2.4 s**; an unchanged repeated push was observed to take two HTTP requests and skips re-uploading layers. (The `ap/pkg/registrypush` package itself was verified via the end-to-end test `TestRegistryPush`).
 4. **Untested on Cloud Providers**: The service proxy push has been tested on Kind; it **has not been tried against GKE**.
 
 ---
@@ -298,7 +298,7 @@ Following this change:
 | **Privilege Requirement** | BuildKit container requirements | Needs `--privileged` (or rootless with unconfined) | Checked during review & BuildKit docs |
 | **Host buildctl over `docker-container://`** | Host `buildctl` v0.35.0 dialing `docker-container://test-bk` | Initial: 6.5 s; unchanged: 0.21 s (skipped); small change: 0.27 s | Measured on test setup with 200 MB layer |
 | **Buildx ap-builder Container Reuse** | Inspected `buildx_buildkit_ap-builder0` settings | Responds to `buildctl du`; state in named Docker volume | Measured on test setup; `build.go` (`ensureMultiPlatformBuilder`) |
-| **Service Proxy Push on Kind** | Pushing via `/services/...:5000/proxy` with `registrypush` | Two 400 MiB layers in 2.4 s; repeated push is 2 requests | Landed in `ap/pkg/registrypush` |
+| **Service Proxy Push on Kind** | Standalone probe on Kind using same route (client-go transport + roundtripper + go-containerregistry) | Two 400 MiB layers in 2.4 s; repeated push is 2 requests | Measured with standalone probe; TestRegistryPush verified package |
 | **Service Proxy Push on GKE** | Pushing via `/services/...:5000/proxy` against GKE cluster | Not tried against GKE | Landed in `ap/pkg/registrypush` |
 | **In-Process SPDY Push Prototype** | Go script dialing registry pod port 5000 via SPDY | Pushed blobs/manifest; pulled & ran in Kind pod | Prototyped during investigation (Appendix B) |
 | **Classic Docker Driver OCI Refusal** | `docker buildx build -o type=oci` on overlay2 (no containerd store) | Refused: `OCI exporter is not supported for the docker driver` | Measured on Docker 29.10.0 DinD container |
