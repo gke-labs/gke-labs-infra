@@ -105,17 +105,18 @@ spec:
 	// assuming it is inside the target cluster.
 	t.Setenv("KUBERNETES_SERVICE_HOST", "")
 
-	// Build and push image to in-cluster registry through the new local push path
-	h.RunCmd(apBin, "build", "autodeploy/examples/helloworld", "--push")
+	// Rename context so ap deploy targets the cluster directly and pushes images (not treated as kind load)
+	h.RunCmd(h.KubectlCommand(), "config", "rename-context", "kind-ap-registry-e2e", "ap-registry-e2e")
+	defer h.RunCmd(h.KubectlCommand(), "config", "rename-context", "ap-registry-e2e", "kind-ap-registry-e2e")
+
+	// Run ap deploy (which builds, pushes in-process, and applies in one root)
+	h.RunCmd(apBin, "deploy", "autodeploy/examples/helloworld", "--cluster=ap-registry-e2e")
 
 	// Verify image was pushed to the in-cluster registry
 	tagsOutput := h.RunCmd(h.KubectlCommand(), "exec", "-n", "in-cluster-image-registry-system", "in-cluster-image-registry-0", "--", "wget", "-qO-", "http://localhost:5000/v2/examples-helloworld/tags/list")
 	if !strings.Contains(tagsOutput, "e2e") {
 		t.Errorf("expected tags list to contain 'e2e', got %q", tagsOutput)
 	}
-
-	// Run ap deploy (which applies in one root)
-	h.RunCmd(apBin, "deploy", "autodeploy/examples/helloworld", "--cluster=kind-ap-registry-e2e")
 
 	// Verify the pod was created and has the correct image
 	image := h.RunCmd("kubectl", "get", "pod", "test-pod", "-n", "default", "-o", "jsonpath={.spec.containers[0].image}")

@@ -307,56 +307,56 @@ func TestBuildTasksForImages(t *testing.T) {
 }
 
 func TestPruneOCIDirectory(t *testing.T) {
-	dir := t.TempDir()
-	img, err := random.Image(1024, 1)
+	layoutDirectory := t.TempDir()
+	image, err := random.Image(1024, 1)
 	if err != nil {
 		t.Fatalf("random.Image: %v", err)
 	}
 
-	lp, err := layout.Write(dir, empty.Index)
+	layoutPath, err := layout.Write(layoutDirectory, empty.Index)
 	if err != nil {
 		t.Fatalf("layout.Write: %v", err)
 	}
-	if err := lp.AppendImage(img); err != nil {
+	if err := layoutPath.AppendImage(image); err != nil {
 		t.Fatalf("AppendImage: %v", err)
 	}
 
 	// Add an unreferenced stale blob
-	staleBlobPath := filepath.Join(dir, "blobs", "sha256", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	staleBlobPath := filepath.Join(layoutDirectory, "blobs", "sha256", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
 	if err := os.WriteFile(staleBlobPath, []byte("stale blob content"), 0644); err != nil {
 		t.Fatalf("WriteFile stale blob: %v", err)
 	}
 
-	if err := pruneOCIDirectory(t.Context(), dir); err != nil {
+	if err := pruneOCIDirectory(t.Context(), layoutDirectory); err != nil {
 		t.Fatalf("pruneOCIDirectory: %v", err)
 	}
 
 	// Stale blob should be deleted
 	if _, err := os.Stat(staleBlobPath); !os.IsNotExist(err) {
-		t.Errorf("expected stale blob %s to be deleted, stat err = %v", staleBlobPath, err)
+		t.Errorf("expected stale blob %s to be deleted, stat error = %v", staleBlobPath, err)
 	}
 
 	// Valid image should still be readable
-	readLP, err := layout.FromPath(dir)
+	readLayoutPath, err := layout.FromPath(layoutDirectory)
 	if err != nil {
 		t.Fatalf("layout.FromPath: %v", err)
 	}
-	idx, err := readLP.ImageIndex()
+	index, err := readLayoutPath.ImageIndex()
 	if err != nil {
-		t.Fatalf("readLP.ImageIndex: %v", err)
+		t.Fatalf("readLayoutPath.ImageIndex: %v", err)
 	}
-	im, err := idx.IndexManifest()
+	indexManifest, err := index.IndexManifest()
 	if err != nil {
-		t.Fatalf("idx.IndexManifest: %v", err)
+		t.Fatalf("index.IndexManifest: %v", err)
 	}
-	if len(im.Manifests) != 1 {
-		t.Errorf("expected 1 manifest, got %d", len(im.Manifests))
+	if len(indexManifest.Manifests) != 1 {
+		t.Errorf("expected 1 manifest, got %d", len(indexManifest.Manifests))
 	}
 }
 
 func TestEnsureBuildkitContainer_Errors(t *testing.T) {
-	origExec := execCommandContext
-	defer func() { execCommandContext = origExec }()
+	originalExec := execCommandContext
+	defer func() { execCommandContext = originalExec }()
 
 	// Mock execCommandContext to fail
 	execCommandContext = func(ctx context.Context, command string, args ...string) *exec.Cmd {
@@ -367,20 +367,20 @@ func TestEnsureBuildkitContainer_Errors(t *testing.T) {
 		ImageName: "test-img",
 	}
 
-	err := task.ensureBuildkitContainer(t.Context(), nil, "docker", "docker-buildx")
+	err := task.ensureBuildkitContainer(t.Context(), "docker-buildx")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
 
-	errMsg := err.Error()
-	if !strings.Contains(errMsg, "a BuildKit container is required") {
-		t.Errorf("expected error to contain 'a BuildKit container is required', got: %s", errMsg)
+	errorMessage := err.Error()
+	if !strings.Contains(errorMessage, "a BuildKit container is required") {
+		t.Errorf("expected error to contain 'a BuildKit container is required', got: %s", errorMessage)
 	}
-	if !strings.Contains(errMsg, "privileged containers must be allowed") {
-		t.Errorf("expected error to contain 'privileged containers must be allowed', got: %s", errMsg)
+	if !strings.Contains(errorMessage, "privileged containers must be allowed") {
+		t.Errorf("expected error to contain 'privileged containers must be allowed', got: %s", errorMessage)
 	}
-	if !strings.Contains(errMsg, "tried") {
-		t.Errorf("expected error to contain 'tried', got: %s", errMsg)
+	if !strings.Contains(errorMessage, "ran:") {
+		t.Errorf("expected error to contain 'ran:', got: %s", errorMessage)
 	}
 }
 
