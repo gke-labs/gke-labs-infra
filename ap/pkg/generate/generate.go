@@ -33,20 +33,6 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
-// GitHub Actions used in generated workflows, pinned to full commit
-// SHAs. Org security scanning (zizmor, blanket hash-pin policy)
-// rejects mutable tag refs in workflows, and consumers can't pin by
-// hand because ap-verify-generate requires byte-equality with fresh
-// generator output — so the pins must live here. The trailing
-// comment is ratchet syntax (github.com/sethvargo/ratchet), the same
-// convention Google's scan workflows use; bump by resolving the new
-// tag's commit SHA and updating both the SHA and the comment.
-const (
-	actionCheckout       = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7.0.1"
-	actionSetupGo        = "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # ratchet:actions/setup-go@v7.0.0"
-	actionUploadArtifact = "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2"
-)
-
 // LegacyScriptTask represents a task to run a legacy generate script.
 type LegacyScriptTask struct {
 	Name string

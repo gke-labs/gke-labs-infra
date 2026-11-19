@@ -44,9 +44,15 @@ updates:
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
-    directory: "/"
+    directories:
+      - "/"
+      - "/ap/pkg/generate"
     schedule:
       interval: "daily"
     open-pull-requests-limit: 50
     cooldown:
       default-days: 7
+    groups:
+      github-actions:
+        patterns:
+          - "*"

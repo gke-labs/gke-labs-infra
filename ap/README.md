@@ -39,6 +39,10 @@ The `ap generate` command generates CI presubmit scripts (e.g., `ap-test`, `ap-l
 
 The generated workflow defines a concurrency group so that a new push to a pull request cancels superseded presubmit runs, while pushes to `main` and merge queue runs are never cancelled.
 
+### Pinned Action Versions
+
+The GitHub Actions used in generated workflows (`actions/checkout`, `actions/setup-go`, `actions/upload-artifact`) are defined in `ap/pkg/generate/action.yml`, pinned to full commit SHAs with `# ratchet:` comments. Dependabot is configured in `.github/dependabot.yml` to monitor both `/` and `/ap/pkg/generate` in a single group, so a single pull request updates both `action.yml` and `.github/workflows/ci-presubmits.yaml` and no manual step is expected; if a Dependabot pull request ever updates only one of the two files, the fix is `ap generate`. When merged, `ap generate` automatically emits the updated action versions in subsequent workflow regenerations across all consuming repositories.
+
 ### Presubmit Artifacts
 
 Presubmit scripts may write anything to `$ARTIFACTS` (set to `/tmp/artifacts` in generated GitHub Actions jobs), and it is uploaded as `artifacts-<job>` upon job completion (even on failure). If no files are written, the upload step completes without producing warnings or errors. When `$ARTIFACTS` is set, `ap` also writes each leaf task's buffered output under `$ARTIFACTS/tasks/` (with subdirectories reflecting the task tree, e.g. `$ARTIFACTS/tasks/lint-repo/go-lints/go-lint-autodeploy/go-vet.log`, and numeric suffixes on name collisions); task names are free-form human-readable strings, and the first line of each log file is the task's human-readable name.
