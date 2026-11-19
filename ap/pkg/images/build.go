@@ -141,7 +141,7 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.TaskContext) err
 	// so local developer builds don't fail due to repository-wide multi-platform settings.
 	var builder string
 	if t.Push && len(platforms) > 1 {
-		if !t.supportsMultiPlatform(ctx, buildxBin) {
+		if !t.supportsMultiPlatform(ctx, buildxBin, "") {
 			if err := t.ensureMultiPlatformBuilder(ctx, buildxBin); err != nil {
 				return fmt.Errorf("failed to ensure multi-platform builder: %w", err)
 			}
@@ -288,10 +288,10 @@ func pruneOCIDirectory(ctx context.Context, directory string) error {
 	return nil
 }
 
-func (t *DockerBuildTask) supportsMultiPlatform(ctx context.Context, buildxBin string, builder ...string) bool {
+func (t *DockerBuildTask) supportsMultiPlatform(ctx context.Context, buildxBin, builder string) bool {
 	args := []string{"inspect"}
-	if len(builder) > 0 && builder[0] != "" {
-		args = append(args, "--builder", builder[0])
+	if builder != "" {
+		args = append(args, "--builder", builder)
 	}
 	cmd := execCommandContext(ctx, buildxBin, args...)
 	cmd.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(buildxBin))
@@ -466,7 +466,7 @@ func (t *DockerBuildTask) runRemoteBuildctl(ctx context.Context, scope *tasks.Ta
 	return nil
 }
 
-func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContext, buildxBin, dockerBin, root, fullImageName, actualImagePrefix, relDockerfilePath string, naming ImageNaming, platforms []string, builder ...string) error {
+func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContext, buildxBin, dockerBin, root, fullImageName, actualImagePrefix, relDockerfilePath string, naming ImageNaming, platforms []string, builder string) error {
 	start := time.Now()
 
 	metaFile := filepath.Join(os.TempDir(), fmt.Sprintf("buildx-meta-%d.json", time.Now().UnixNano()))
@@ -485,8 +485,8 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContex
 		"--metadata-file", metaFile,
 	}
 
-	if len(builder) > 0 && builder[0] != "" {
-		args = append(args, "--builder", builder[0])
+	if builder != "" {
+		args = append(args, "--builder", builder)
 	}
 
 	if t.Push {
