@@ -153,7 +153,7 @@ func RunAudit(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext,
 	// 5. Open repo in scratch tree and discover scopes & generators
 	goCfg, err := config.Load(scratchDir)
 	if err != nil && !os.IsNotExist(err) {
-		log.Debug("failed to load config", "path", scratchDir, "error", err)
+		log.Log(ctx, scoped.LevelVerbose2, "failed to load config", "path", scratchDir, "error", err)
 	}
 	var skipPatterns []string
 	if goCfg != nil {
@@ -293,7 +293,7 @@ func printAuditReport(ctx context.Context, findings []AuditFinding, skipped []st
 	}
 
 	if len(skipped) > 0 {
-		scoped.Log(ctx).Debug("skipped uncommentable or binary files", "count", len(skipped))
+		scoped.Log(ctx).Log(ctx, scoped.LevelVerbose2, "skipped uncommentable or binary files", "count", len(skipped))
 	}
 }
 
@@ -386,16 +386,16 @@ func createScratchWorktree(ctx context.Context, repoRoot string) (string, func()
 		cmd := exec.CommandContext(ctx, "git", "worktree", "add", "--detach", scratchDir, "HEAD")
 		cmd.Dir = repoRoot
 		if out, err := cmd.CombinedOutput(); err != nil {
-			log.Debug("git worktree add failed, falling back to file copy", "error", err, "output", string(out))
+			log.Log(ctx, scoped.LevelVerbose2, "git worktree add failed, falling back to file copy", "error", err, "output", string(out))
 			if copyErr := copyDirExcludingGit(repoRoot, scratchDir); copyErr != nil {
 				if rmErr := os.RemoveAll(scratchDir); rmErr != nil {
-					log.Debug("failed to remove scratch dir", "error", rmErr)
+					log.Log(ctx, scoped.LevelVerbose2, "failed to remove scratch dir", "error", rmErr)
 				}
 				return "", nil, fmt.Errorf("copy fallback failed: %w", copyErr)
 			}
 			cleanup := func() {
 				if rmErr := os.RemoveAll(scratchDir); rmErr != nil {
-					log.Debug("failed to remove scratch dir", "error", rmErr)
+					log.Log(ctx, scoped.LevelVerbose2, "failed to remove scratch dir", "error", rmErr)
 				}
 			}
 			return scratchDir, cleanup, nil
@@ -405,10 +405,10 @@ func createScratchWorktree(ctx context.Context, repoRoot string) (string, func()
 			rmCmd := exec.Command("git", "worktree", "remove", "--force", scratchDir)
 			rmCmd.Dir = repoRoot
 			if rmErr := rmCmd.Run(); rmErr != nil {
-				log.Debug("git worktree remove failed", "error", rmErr)
+				log.Log(ctx, scoped.LevelVerbose2, "git worktree remove failed", "error", rmErr)
 			}
 			if rmErr := os.RemoveAll(scratchDir); rmErr != nil {
-				log.Debug("failed to remove scratch dir", "error", rmErr)
+				log.Log(ctx, scoped.LevelVerbose2, "failed to remove scratch dir", "error", rmErr)
 			}
 		}
 		return scratchDir, cleanup, nil
@@ -417,13 +417,13 @@ func createScratchWorktree(ctx context.Context, repoRoot string) (string, func()
 	// Non-git directory (e.g. unit tests)
 	if err := copyDirExcludingGit(repoRoot, scratchDir); err != nil {
 		if rmErr := os.RemoveAll(scratchDir); rmErr != nil {
-			log.Debug("failed to remove scratch dir", "error", rmErr)
+			log.Log(ctx, scoped.LevelVerbose2, "failed to remove scratch dir", "error", rmErr)
 		}
 		return "", nil, fmt.Errorf("failed to copy files to scratch dir: %w", err)
 	}
 	cleanup := func() {
 		if rmErr := os.RemoveAll(scratchDir); rmErr != nil {
-			log.Debug("failed to remove scratch dir", "error", rmErr)
+			log.Log(ctx, scoped.LevelVerbose2, "failed to remove scratch dir", "error", rmErr)
 		}
 	}
 	return scratchDir, cleanup, nil

@@ -104,7 +104,7 @@ func (h *bufferHandler) Enabled(ctx context.Context, level slog.Level) bool {
 	if level >= slog.LevelInfo {
 		return true
 	}
-	return klog.V(1).Enabled()
+	return klog.V(klog.Level(-level)).Enabled()
 }
 
 func (h *bufferHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
@@ -291,10 +291,10 @@ func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
 
 	writef(outputWriter, "=== %s (%s, %.1fs)\n", task.GetName(), status, duration.Seconds())
 	output := outputBuffer.Bytes()
-	if !scope.PrintOutput() && (err != nil || taskLog.Enabled(taskCtx, slog.LevelDebug)) {
+	if !scope.PrintOutput() && (err != nil || taskLog.Enabled(taskCtx, scoped.LevelVerbose1)) {
 		if len(output) > 0 {
 			if _, writeErr := outputWriter.Write(output); writeErr != nil {
-				taskLog.Debug("failed to write task output", "error", writeErr)
+				taskLog.Log(taskCtx, scoped.LevelVerbose2, "failed to write task output", "error", writeErr)
 			}
 			if !bytes.HasSuffix(output, []byte("\n")) {
 				writef(outputWriter, "\n")
@@ -304,7 +304,7 @@ func runLeafTask(ctx context.Context, scope *TaskContext, task Task) error {
 		warnings := warningsBuffer.Bytes()
 		if len(warnings) > 0 {
 			if _, writeErr := outputWriter.Write(warnings); writeErr != nil {
-				taskLog.Debug("failed to write task warnings", "error", writeErr)
+				taskLog.Log(taskCtx, scoped.LevelVerbose2, "failed to write task warnings", "error", writeErr)
 			}
 			if !bytes.HasSuffix(warnings, []byte("\n")) {
 				writef(outputWriter, "\n")

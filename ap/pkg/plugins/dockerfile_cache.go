@@ -165,12 +165,12 @@ func EnsureDockerfilePluginImage(
 	recordData, readErr := os.ReadFile(recordPath)
 	if readErr != nil {
 		if !os.IsNotExist(readErr) {
-			scoped.Log(ctx).Debug("failed to read cached plugin record", "path", recordPath, "error", readErr)
+			scoped.Log(ctx).Log(ctx, scoped.LevelVerbose2, "failed to read cached plugin record", "path", recordPath, "error", readErr)
 		}
 	} else {
 		var record DockerfilePluginBuildRecord
 		if unmarshalErr := json.Unmarshal(recordData, &record); unmarshalErr != nil {
-			scoped.Log(ctx).Debug("failed to parse cached plugin record", "path", recordPath, "error", unmarshalErr)
+			scoped.Log(ctx).Log(ctx, scoped.LevelVerbose2, "failed to parse cached plugin record", "path", recordPath, "error", unmarshalErr)
 		} else if record.Key == key && record.ImageID != "" {
 			exists, lookupErr := options.ImageLookup(ctx, scope, record.ImageID)
 			if lookupErr == nil && exists {
@@ -197,7 +197,7 @@ func EnsureDockerfilePluginImage(
 		}
 		defer func() {
 			if closeErr := repoRootFS.Close(); closeErr != nil {
-				scoped.Log(ctx).Debug("failed to close clone directory root", "directory", cloneDir, "error", closeErr)
+				scoped.Log(ctx).Log(ctx, scoped.LevelVerbose2, "failed to close clone directory root", "directory", cloneDir, "error", closeErr)
 			}
 		}()
 

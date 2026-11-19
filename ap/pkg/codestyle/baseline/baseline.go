@@ -518,7 +518,7 @@ func Apply(ctx context.Context, findings []Finding, opts ApplyOptions) ([]Findin
 			}
 			if opts.Stdout != nil {
 				if _, err := fmt.Fprintf(opts.Stdout, "Wrote %d baseline entries to %s\n", len(finalEntries), baselinePath); err != nil {
-					log.Debug("failed to write baseline message", "error", err)
+					log.Log(ctx, scoped.LevelVerbose2, "failed to write baseline message", "error", err)
 				}
 			}
 		}
@@ -538,7 +538,7 @@ func Apply(ctx context.Context, findings []Finding, opts ApplyOptions) ([]Findin
 	if opts.Stdout != nil {
 		for _, stale := range staleEntries {
 			if _, err := fmt.Fprintf(opts.Stdout, "stale baseline entry: %s (remove from baseline)\n", stale); err != nil {
-				log.Debug("failed to write stale entry", "error", err)
+				log.Log(ctx, scoped.LevelVerbose2, "failed to write stale entry", "error", err)
 			}
 		}
 	}
@@ -555,11 +555,11 @@ func Apply(ctx context.Context, findings []Finding, opts ApplyOptions) ([]Findin
 				msg = f.Detail
 			}
 			if _, err := fmt.Fprintf(opts.Stderr, "%s: %s\n", f.Pos, msg); err != nil {
-				log.Debug("failed to write diagnostic", "error", err)
+				log.Log(ctx, scoped.LevelVerbose2, "failed to write diagnostic", "error", err)
 			}
 			for _, rel := range f.Related {
 				if _, err := fmt.Fprintf(opts.Stderr, "%s:\t%s\n", rel.Pos, rel.Message); err != nil {
-					log.Debug("failed to write related info", "error", err)
+					log.Log(ctx, scoped.LevelVerbose2, "failed to write related info", "error", err)
 				}
 			}
 		}

@@ -46,6 +46,8 @@ func TestLog(t *testing.T) {
 	// Default logger must be usable and not panic on Info/Debug
 	def.Debug("test default debug")
 	def.Info("test default log")
+	def.Log(t.Context(), LevelVerbose1, "test default verbose 1")
+	def.Log(t.Context(), LevelVerbose2, "test default verbose 2")
 
 	// Round trip when set
 	custom := slog.New(slog.DiscardHandler)

@@ -32,6 +32,13 @@ const (
 	logKey
 )
 
+// Logging levels for verbosity 1 and 2 (verbosity n is slog.Level(-n)).
+// Verbosity 4 is slog.LevelDebug (-4).
+const (
+	LevelVerbose1 slog.Level = -1
+	LevelVerbose2 slog.Level = -2
+)
+
 var defaultHTTPClient = func() *http.Client {
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	t.ResponseHeaderTimeout = 30 * time.Second

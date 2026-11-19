@@ -19,10 +19,13 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"k8s.io/klog/v2"
 )
@@ -324,5 +327,71 @@ func TestRetry_PassingTaskShowsRetryWarning(t *testing.T) {
 	}
 	if !strings.Contains(out, "task failed, retrying level=warning task=task-retry-pass attempt=1") {
 		t.Errorf("expected retry warning line in output:\n%s", out)
+	}
+}
+
+func TestBufferHandler_VerbosityLevels(t *testing.T) {
+	tests := []struct {
+		vLevel   int
+		wantInfo bool
+		wantV1   bool
+		wantV2   bool
+		wantV4   bool
+	}{
+		{vLevel: 0, wantInfo: true, wantV1: false, wantV2: false, wantV4: false},
+		{vLevel: 1, wantInfo: true, wantV1: true, wantV2: false, wantV4: false},
+		{vLevel: 2, wantInfo: true, wantV1: true, wantV2: true, wantV4: false},
+		{vLevel: 4, wantInfo: true, wantV1: true, wantV2: true, wantV4: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(fmt.Sprintf("v=%d", tc.vLevel), func(t *testing.T) {
+			fs := flag.NewFlagSet("klog", flag.ContinueOnError)
+			klog.InitFlags(fs)
+			if err := fs.Set("v", strconv.Itoa(tc.vLevel)); err != nil {
+				t.Fatalf("setting -v: %v", err)
+			}
+			defer fs.Set("v", "0")
+
+			var buf bytes.Buffer
+			logger := NewLogger(&buf)
+			ctx := scoped.WithLog(t.Context(), logger)
+
+			logger.Info("info line")
+			logger.Log(ctx, scoped.LevelVerbose1, "v1 line")
+			logger.Log(ctx, scoped.LevelVerbose2, "v2 line")
+			logger.Debug("v4 line")
+			klog.FromContext(ctx).V(1).Info("klog v1 line")
+			klog.FromContext(ctx).V(2).Info("klog v2 line")
+			klog.FromContext(ctx).V(4).Info("klog v4 line")
+
+			out := buf.String()
+			hasInfo := strings.Contains(out, "info line")
+			hasV1 := strings.Contains(out, "v1 line") && strings.Contains(out, "klog v1 line")
+			anyV1 := strings.Contains(out, "v1 line") || strings.Contains(out, "klog v1 line")
+			hasV2 := strings.Contains(out, "v2 line") && strings.Contains(out, "klog v2 line")
+			anyV2 := strings.Contains(out, "v2 line") || strings.Contains(out, "klog v2 line")
+			hasV4 := strings.Contains(out, "v4 line") && strings.Contains(out, "klog v4 line")
+			anyV4 := strings.Contains(out, "v4 line") || strings.Contains(out, "klog v4 line")
+
+			if hasInfo != tc.wantInfo {
+				t.Errorf("at -v=%d, hasInfo = %v, want %v", tc.vLevel, hasInfo, tc.wantInfo)
+			}
+			if tc.wantV1 && !hasV1 {
+				t.Errorf("at -v=%d, expected V(1) lines in output:\n%s", tc.vLevel, out)
+			} else if !tc.wantV1 && anyV1 {
+				t.Errorf("at -v=%d, expected no V(1) lines, got:\n%s", tc.vLevel, out)
+			}
+			if tc.wantV2 && !hasV2 {
+				t.Errorf("at -v=%d, expected V(2) lines in output:\n%s", tc.vLevel, out)
+			} else if !tc.wantV2 && anyV2 {
+				t.Errorf("at -v=%d, expected no V(2) lines, got:\n%s", tc.vLevel, out)
+			}
+			if tc.wantV4 && !hasV4 {
+				t.Errorf("at -v=%d, expected V(4) lines in output:\n%s", tc.vLevel, out)
+			} else if !tc.wantV4 && anyV4 {
+				t.Errorf("at -v=%d, expected no V(4) lines, got:\n%s", tc.vLevel, out)
+			}
+		})
 	}
 }

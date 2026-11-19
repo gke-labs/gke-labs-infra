@@ -196,7 +196,7 @@ func Run(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files [
 
 	configFile := filepath.Join(repoRoot, ".ap/headers.yaml")
 	if _, err := os.Stat(configFile); os.IsNotExist(err) {
-		log.Debug("no .ap/headers.yaml found, skipping file headers")
+		log.Log(ctx, scoped.LevelVerbose2, "no .ap/headers.yaml found, skipping file headers")
 		return nil
 	}
 
@@ -206,7 +206,7 @@ func Run(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files [
 	}
 
 	if config.License == "" || config.License == "none" {
-		log.Debug("license is empty or 'none', skipping file headers")
+		log.Log(ctx, scoped.LevelVerbose2, "license is empty or 'none', skipping file headers")
 		return nil
 	}
 	if config.License != "apache-2.0" {

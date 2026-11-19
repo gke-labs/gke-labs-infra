@@ -47,7 +47,7 @@ func TestCommandLogging(t *testing.T) {
 
 	logger := scoped.Log(cmd.Context())
 	logger.Info("command started", "component", "root", "target", "local")
-	logger.Debug("verbose debug message", "should", "hide")
+	logger.Log(cmd.Context(), scoped.LevelVerbose2, "verbose debug message", "should", "hide")
 
 	got := strings.TrimSpace(buf.String())
 	want := "command started component=root target=local"

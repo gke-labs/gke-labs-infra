@@ -61,7 +61,7 @@ func NewManagerWithDir(ctx context.Context, dir string) (*Manager, error) {
 
 func (m *Manager) removeLegacyFile(path string) {
 	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		m.log.Debug("failed to remove legacy cache file", "path", path, "error", err)
+		m.log.Log(context.Background(), scoped.LevelVerbose2, "failed to remove legacy cache file", "path", path, "error", err)
 	}
 }
 
@@ -76,11 +76,11 @@ func (m *Manager) load() error {
 	doneBinPath := filepath.Join(m.dir, "done.bin")
 	if data, err := os.ReadFile(doneBinPath); err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
-			m.log.Debug("failed to read done cache, starting with empty cache", "path", doneBinPath, "error", err)
+			m.log.Log(context.Background(), scoped.LevelVerbose2, "failed to read done cache, starting with empty cache", "path", doneBinPath, "error", err)
 		}
 		m.done = NewDoneIndex()
 	} else if idx, err := LoadDone(data); err != nil {
-		m.log.Debug("invalid done cache, starting with empty cache", "path", doneBinPath, "error", err)
+		m.log.Log(context.Background(), scoped.LevelVerbose2, "invalid done cache, starting with empty cache", "path", doneBinPath, "error", err)
 		m.done = NewDoneIndex()
 	} else {
 		m.done = idx
@@ -121,6 +121,6 @@ func (m *Manager) MarkDone(step Step, hash string) {
 		m.done = NewDoneIndex()
 	}
 	if err := m.done.MarkDone(step, hash); err != nil {
-		m.log.Debug("failed to mark done", "step", int(step), "error", err)
+		m.log.Log(context.Background(), scoped.LevelVerbose2, "failed to mark done", "step", int(step), "error", err)
 	}
 }

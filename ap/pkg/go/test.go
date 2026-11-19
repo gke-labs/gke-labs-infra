@@ -213,7 +213,7 @@ func RunGoTest(ctx context.Context, scope *tasks.TaskContext, dir string, result
 	}
 	defer func() {
 		if closeErr := file.Close(); closeErr != nil {
-			log.Debug("failed to close test output file", "error", closeErr)
+			log.Log(ctx, scoped.LevelVerbose2, "failed to close test output file", "error", closeErr)
 		}
 	}()
 
@@ -267,7 +267,7 @@ func RunGoTest(ctx context.Context, scope *tasks.TaskContext, dir string, result
 
 	if outputBuffer.Len() > 0 && opts.Stdout != nil {
 		if _, writeError := opts.Stdout.Write(outputBuffer.Bytes()); writeError != nil {
-			log.Debug("failed to write test output", "error", writeError)
+			log.Log(ctx, scoped.LevelVerbose2, "failed to write test output", "error", writeError)
 		}
 	}
 
