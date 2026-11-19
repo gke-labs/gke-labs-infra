@@ -372,7 +372,7 @@ ap <command>
 
 ### Task Output
 
-Every leaf task runs with buffered stdout/stderr. At default verbosity, `ap` prints a single status line per task (`=== <name> (ok|FAILED, 1.2s)`) and prints captured output only for tasks that failed. Use `-v=1` (or higher) to also print the output of successful tasks.
+Every leaf task runs with buffered stdout/stderr. At default verbosity, `ap` prints a single status line per task (`=== <name> (ok|FAILED, 1.2s)`) and prints captured output only for tasks that failed. For tasks that passed, warning-level log lines are printed after the per-task status line while ordinary output remains hidden. Use `-v=1` (or higher) to also print the output of successful tasks.
 
 The `ap e2e` command prints leaf task output at default verbosity, ensuring test results (such as `--- PASS` lines) remain visible in job logs.
 
@@ -380,7 +380,7 @@ When `ARTIFACTS` is set (for example, in CI workflows where it points to `/tmp/a
 
 ### Task Logging
 
-Tasks should log via `scoped.Log(ctx)`, which returns a `logr.Logger` writing into that leaf task's output buffer (command-level lines use the same form). Log messages should be constant strings with structured key/value pairs (`log.Info("msg", "key", "val")`, `log.V(n).Info(...)`, `log.Error(err, "msg")`), and warnings should be logged as `log.Info(msg, "level", "warning")`. Because task log lines and command outputs share the same buffer, log lines stay synchronized with command output and follow the unified task output policy.
+Tasks should log via `scoped.Log(ctx)`, which returns a `*slog.Logger` writing into that leaf task's output buffer (command-level lines use the same form). Log messages should be constant strings with structured key/value pairs (`log.Info("msg", "key", "val")`, `log.Debug("msg", ...)`, `log.Warn("msg", ...)`, `log.Error("msg", "error", err)`). The `-v` flag controls debug logging: at `-v=0`, Info, Warn, and Error lines appear, while `-v>=1` enables Debug logging. Because task log lines and command outputs share the same buffer, log lines stay synchronized with command output and follow the unified task output policy.
 
 For built images, `ap` logs a summary line at default verbosity: `built <image> with <builder> in <duration>; sent <bytes>`. The builder is `docker` or the buildkit host (`k8s://namespace/service`). For `buildctl`, `bytes` is the build-context transfer total sent from the workstation, parsed from its progress stream. For Docker, the bytes clause is omitted because Docker buildx does not expose pushed-layer transfer totals.
 

@@ -836,6 +836,117 @@ func TestTaskOutputPolicy(t *testing.T) {
 			t.Errorf("expected passing task text with RunOptions.PrintOutput=true, got:\n%s", rOut)
 		}
 	})
+
+	// Passing task with warning and ordinary log lines shows only the warning after the run;
+	// a passing task without warnings shows nothing extra.
+	t.Run("PassingTaskWarnings", func(t *testing.T) {
+		var warnBuf syncBuffer
+		warnScope := newScope(t, &warnBuf)
+
+		taskWithWarn := &FuncTask{
+			Name: "task-with-warn",
+			RunFn: func(ctx context.Context, s *TaskContext) error {
+				scoped.Log(ctx).Info("ordinary info line", "key", "val")
+				fmt.Fprintln(s.Stdout(), "ordinary stdout text")
+				scoped.Log(ctx).Warn("something warned", "reason", "retry")
+				return nil
+			},
+		}
+
+		if err := RunTask(t.Context(), warnScope, taskWithWarn); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		outWithWarn := warnBuf.String()
+		if !strings.Contains(outWithWarn, "=== task-with-warn (ok,") {
+			t.Errorf("expected task-with-warn status line in output:\n%s", outWithWarn)
+		}
+		if !strings.Contains(outWithWarn, "something warned level=warning reason=retry") {
+			t.Errorf("expected warning line in output:\n%s", outWithWarn)
+		}
+		if strings.Contains(outWithWarn, "ordinary info line") {
+			t.Errorf("expected ordinary log line to be hidden, got:\n%s", outWithWarn)
+		}
+		if strings.Contains(outWithWarn, "ordinary stdout text") {
+			t.Errorf("expected ordinary stdout to be hidden, got:\n%s", outWithWarn)
+		}
+
+		// A passing task without warnings shows nothing extra after the status line,
+		// raw tool output containing "level=warning" is not parsed as a warning,
+		// and a log value whose String() merely prints "warning" is not counted as a warning.
+		type warningStringer string
+
+		var noWarnBuf syncBuffer
+		noWarnScope := newScope(t, &noWarnBuf)
+
+		taskNoWarn := &FuncTask{
+			Name: "task-no-warn",
+			RunFn: func(ctx context.Context, s *TaskContext) error {
+				scoped.Log(ctx).Info("ordinary info line")
+				fmt.Fprintln(s.Stdout(), "ordinary tool output containing level=warning")
+				scoped.Log(ctx).Info("stringer log", "level", warningStringer("warning"))
+				return nil
+			},
+		}
+
+		if err := RunTask(t.Context(), noWarnScope, taskNoWarn); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		outNoWarn := strings.TrimSpace(noWarnBuf.String())
+		if !strings.HasPrefix(outNoWarn, "=== task-no-warn (ok,") || strings.Contains(outNoWarn, "\n") {
+			t.Errorf("expected only the status line and nothing extra, got:\n%s", outNoWarn)
+		}
+	})
+
+	// klog.FromContext(ctx).Info inside a passing task stays hidden; inside a failing task it is printed with its output.
+	t.Run("KlogFromContextOutput", func(t *testing.T) {
+		var passBuf syncBuffer
+		passScope := newScope(t, &passBuf)
+
+		taskPass := &FuncTask{
+			Name: "task-klog-pass",
+			RunFn: func(ctx context.Context, s *TaskContext) error {
+				klog.FromContext(ctx).Info("klog info from passing task", "key", "val")
+				return nil
+			},
+		}
+
+		if err := RunTask(t.Context(), passScope, taskPass); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		passOut := strings.TrimSpace(passBuf.String())
+		if !strings.HasPrefix(passOut, "=== task-klog-pass (ok,") || strings.Contains(passOut, "\n") {
+			t.Errorf("expected passing klog log line to be hidden, got:\n%s", passOut)
+		}
+		if strings.Contains(passOut, "klog info from passing task") {
+			t.Errorf("expected klog info from passing task to stay hidden, got:\n%s", passOut)
+		}
+
+		var failBuf syncBuffer
+		failScope := newScope(t, &failBuf)
+
+		taskFail := &FuncTask{
+			Name: "task-klog-fail",
+			RunFn: func(ctx context.Context, s *TaskContext) error {
+				klog.FromContext(ctx).Info("klog info from failing task", "key", "val")
+				return errors.New("boom")
+			},
+		}
+
+		if err := RunTask(t.Context(), failScope, taskFail); err == nil {
+			t.Fatalf("expected error from failing task")
+		}
+
+		failOut := failBuf.String()
+		if !strings.Contains(failOut, "=== task-klog-fail (FAILED,") {
+			t.Errorf("expected failed status line, got:\n%s", failOut)
+		}
+		if !strings.Contains(failOut, "klog info from failing task key=val") {
+			t.Errorf("expected klog info from failing task to be printed, got:\n%s", failOut)
+		}
+	})
 }
 
 func TestTaskOutputArtifacts(t *testing.T) {

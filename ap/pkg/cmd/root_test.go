@@ -17,6 +17,7 @@ package cmd
 import (
 	"bytes"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 	"testing"
@@ -28,9 +29,13 @@ import (
 
 func TestCommandLogging(t *testing.T) {
 	var buf bytes.Buffer
-	klog.SetLoggerWithOptions(tasks.NewLogger(&buf), klog.ContextualLogger(true))
+	testLogger := tasks.NewLogger(&buf)
+	slog.SetDefault(testLogger)
+	klog.SetSlogLogger(testLogger)
 	defer func() {
-		klog.SetLoggerWithOptions(tasks.NewLogger(os.Stderr), klog.ContextualLogger(true))
+		defaultLogger := tasks.NewLogger(os.Stderr)
+		slog.SetDefault(defaultLogger)
+		klog.SetSlogLogger(defaultLogger)
 	}()
 
 	cmd := BuildRootCommand()
@@ -42,7 +47,7 @@ func TestCommandLogging(t *testing.T) {
 
 	logger := scoped.Log(cmd.Context())
 	logger.Info("command started", "component", "root", "target", "local")
-	logger.V(2).Info("verbose debug message", "should", "hide")
+	logger.Debug("verbose debug message", "should", "hide")
 
 	got := strings.TrimSpace(buf.String())
 	want := "command started component=root target=local"
@@ -62,9 +67,8 @@ func TestCommandLogging(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bashLogger := scoped.Log(bashCmd.Context())
-	bashLogger.Info("bash is older than 4; scripts run in CI with bash 5. Install a newer bash (e.g. brew install bash) and make sure it is first on PATH.",
-		"level", "warning", "path", "/bin/bash", "version", "3.2.57(1)-release")
+	scoped.Log(bashCmd.Context()).Warn("bash is older than 4; scripts run in CI with bash 5. Install a newer bash (e.g. brew install bash) and make sure it is first on PATH.",
+		"path", "/bin/bash", "version", "3.2.57(1)-release")
 
 	gotBash := strings.TrimSpace(buf.String())
 	wantBash := "bash is older than 4; scripts run in CI with bash 5. Install a newer bash (e.g. brew install bash) and make sure it is first on PATH. level=warning path=/bin/bash version=3.2.57(1)-release"

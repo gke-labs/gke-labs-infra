@@ -448,7 +448,7 @@ func kustomizeBuild(ctx context.Context, scope *tasks.TaskContext, kustomization
 	}
 	if stderr.Len() > 0 {
 		if _, err := scope.Stderr().Write(stderr.Bytes()); err != nil {
-			scoped.Log(ctx).V(2).Info("failed to write kustomize stderr", "error", err)
+			scoped.Log(ctx).Debug("failed to write kustomize stderr", "error", err)
 		}
 	}
 	return stdout.Bytes(), nil
@@ -572,7 +572,7 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 	// If this was a CRD, wait for it to be established
 	crdNames, err := getCRDNames(content)
 	if err != nil {
-		scoped.Log(ctx).Info("failed to check if manifest is a CRD", "level", "warning", "path", relPath, "error", err)
+		scoped.Log(ctx).Warn("failed to check if manifest is a CRD", "path", relPath, "error", err)
 	} else {
 		for _, name := range crdNames {
 			scoped.Log(ctx).Info("waiting for CRD to be established", "crd", name)

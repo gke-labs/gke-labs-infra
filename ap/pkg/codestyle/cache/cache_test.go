@@ -17,6 +17,7 @@ package cache
 import (
 	"errors"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -32,6 +33,7 @@ func TestManager_Load_CorruptDoneBinTreatAsEmpty(t *testing.T) {
 	m := &Manager{
 		dir:  tmpDir,
 		done: NewDoneIndex(),
+		log:  slog.New(slog.DiscardHandler),
 	}
 
 	// Corrupt done.bin must be logged at V(2) and treated as empty without returning an error
@@ -49,6 +51,7 @@ func TestManager_Load_NotExist(t *testing.T) {
 	m := &Manager{
 		dir:  tmpDir,
 		done: NewDoneIndex(),
+		log:  slog.New(slog.DiscardHandler),
 	}
 
 	err := m.load()

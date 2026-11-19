@@ -18,6 +18,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -116,7 +117,9 @@ func (opt *RootOptions) Resolve(args []string) error {
 }
 
 func init() {
-	klog.SetLoggerWithOptions(tasks.NewLogger(os.Stderr), klog.ContextualLogger(true))
+	defaultLogger := tasks.NewLogger(os.Stderr)
+	slog.SetDefault(defaultLogger)
+	klog.SetSlogLogger(defaultLogger)
 }
 
 // BuildRootCommand constructs the root cobra command.
@@ -128,7 +131,7 @@ func BuildRootCommand() *cobra.Command {
 		Short: "ap is a tool for managing gke-labs projects",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
-			cmd.SetContext(scoped.WithLog(cmd.Context(), klog.Background()))
+			cmd.SetContext(scoped.WithLog(cmd.Context(), scoped.Log(cmd.Context())))
 			cwd, err := os.Getwd()
 			if err != nil {
 				return err

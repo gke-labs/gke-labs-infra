@@ -18,19 +18,19 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
-	"github.com/go-logr/logr"
 )
 
 type Manager struct {
 	dir  string
 	done *DoneIndex
-	log  logr.Logger
+	log  *slog.Logger
 	mu   sync.Mutex
 }
 
@@ -54,14 +54,14 @@ func NewManagerWithDir(ctx context.Context, dir string) (*Manager, error) {
 		log:  scoped.Log(ctx),
 	}
 	if err := m.load(); err != nil {
-		m.log.Info("falling back to empty codestyle cache", "level", "warning", "error", err)
+		m.log.Warn("falling back to empty codestyle cache", "error", err)
 	}
 	return m, nil
 }
 
 func (m *Manager) removeLegacyFile(path string) {
 	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		m.log.V(2).Info("failed to remove legacy cache file", "path", path, "error", err)
+		m.log.Debug("failed to remove legacy cache file", "path", path, "error", err)
 	}
 }
 
@@ -76,11 +76,11 @@ func (m *Manager) load() error {
 	doneBinPath := filepath.Join(m.dir, "done.bin")
 	if data, err := os.ReadFile(doneBinPath); err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
-			m.log.V(2).Info("failed to read done cache, starting with empty cache", "path", doneBinPath, "error", err)
+			m.log.Debug("failed to read done cache, starting with empty cache", "path", doneBinPath, "error", err)
 		}
 		m.done = NewDoneIndex()
 	} else if idx, err := LoadDone(data); err != nil {
-		m.log.V(2).Info("invalid done cache, starting with empty cache", "path", doneBinPath, "error", err)
+		m.log.Debug("invalid done cache, starting with empty cache", "path", doneBinPath, "error", err)
 		m.done = NewDoneIndex()
 	} else {
 		m.done = idx
@@ -121,6 +121,6 @@ func (m *Manager) MarkDone(step Step, hash string) {
 		m.done = NewDoneIndex()
 	}
 	if err := m.done.MarkDone(step, hash); err != nil {
-		m.log.V(2).Info("failed to mark done", "step", int(step), "error", err)
+		m.log.Debug("failed to mark done", "step", int(step), "error", err)
 	}
 }

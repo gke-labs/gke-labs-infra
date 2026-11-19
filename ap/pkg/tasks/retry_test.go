@@ -258,12 +258,13 @@ func TestRunTask_Retry(t *testing.T) {
 
 func TestBufferLogger_Rendering(t *testing.T) {
 	var buf bytes.Buffer
-	logger := newBufferLogger(&buf, klog.Background())
+	var warnings syncBuffer
+	logger := newBufferLogger(&buf, &warnings)
 
 	logger.Info("starting port-forward", "namespace", "buildkit", "service", "buildkitd")
 	logger.Info("copying file", "path", "/path with spaces/file")
-	logger.Error(errors.New("connection reset"), "failed to connect", "service", "buildkitd")
-	withValLogger := logger.WithValues("component", "portforward")
+	logger.Error("failed to connect", "error", errors.New("connection reset"), "service", "buildkitd")
+	withValLogger := logger.With("component", "portforward")
 	withValLogger.Info("ready", "port", 1234)
 
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
@@ -289,5 +290,39 @@ func TestBufferLogger_Rendering(t *testing.T) {
 	want3 := "ready component=portforward port=1234"
 	if lines[3] != want3 {
 		t.Errorf("line 3 = %q, want %q", lines[3], want3)
+	}
+
+	if warnings.String() != "" {
+		t.Errorf("expected no warnings, got %q", warnings.String())
+	}
+
+	logger.Warn("something warned", "reason", "test")
+	warnLines := strings.Split(strings.TrimSpace(warnings.String()), "\n")
+	if len(warnLines) != 1 || warnLines[0] != "something warned level=warning reason=test" {
+		t.Errorf("expected warning in warnings buffer, got %q", warnings.String())
+	}
+}
+
+func TestRetry_PassingTaskShowsRetryWarning(t *testing.T) {
+	var buf syncBuffer
+	scope := newTestScope(t).WithOutput(&buf, &buf)
+
+	task := &fakeRetryableTask{
+		name:     "task-retry-pass",
+		failTill: 1,
+		policy:   Backoff{0},
+	}
+
+	err := RunTask(t.Context(), scope, task)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "=== task-retry-pass (ok,") {
+		t.Errorf("expected status line in output:\n%s", out)
+	}
+	if !strings.Contains(out, "task failed, retrying level=warning task=task-retry-pass attempt=1") {
+		t.Errorf("expected retry warning line in output:\n%s", out)
 	}
 }

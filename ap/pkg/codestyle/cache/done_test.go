@@ -19,6 +19,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -154,6 +155,7 @@ func TestDoneIndex_TreatAsEmpty(t *testing.T) {
 			m := &Manager{
 				dir:  tmpDir,
 				done: NewDoneIndex(),
+				log:  slog.New(slog.DiscardHandler),
 			}
 			if err := m.load(); err != nil {
 				t.Fatalf("expected m.load() to succeed (treat as empty) for %s, got: %v", tc.name, err)

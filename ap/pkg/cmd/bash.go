@@ -94,8 +94,8 @@ func RunScript(ctx context.Context, script string, scriptArgs []string) error {
 	}
 
 	if bash.Major > 0 && bash.Major < 4 {
-		scoped.Log(ctx).Info("bash is older than 4; scripts run in CI with bash 5. Install a newer bash (e.g. brew install bash) and make sure it is first on PATH.",
-			"level", "warning", "path", bash.Path, "version", bash.Version)
+		scoped.Log(ctx).Warn("bash is older than 4; scripts run in CI with bash 5. Install a newer bash (e.g. brew install bash) and make sure it is first on PATH.",
+			"path", bash.Path, "version", bash.Version)
 	}
 
 	if err := os.Chdir(repoRoot); err != nil {
@@ -132,13 +132,13 @@ func resolveBash(ctx context.Context) (*bashTool, error) {
 	cmd := exec.CommandContext(ctx, binary, "--version")
 	out, err := cmd.Output()
 	if err != nil {
-		log.V(2).Info("failed to run bash --version", "binary", binary, "error", err)
+		log.Debug("failed to run bash --version", "binary", binary, "error", err)
 		return bt, nil
 	}
 
 	ver, major, err := parseBashVersion(string(out))
 	if err != nil {
-		log.V(2).Info("failed to parse bash version", "binary", binary, "error", err)
+		log.Debug("failed to parse bash version", "binary", binary, "error", err)
 		return bt, nil
 	}
 
