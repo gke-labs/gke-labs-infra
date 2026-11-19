@@ -198,6 +198,11 @@ func (t *DockerBuildTask) dockerBinary(ctx context.Context, scope *tasks.TaskCon
 }
 
 func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskContext, root, fullImageName, relDockerfilePath string, naming ImageNaming, platforms []string) (retErr error) {
+	buildctlBin, err := scope.Tool(ctx, "buildctl")
+	if err != nil {
+		return fmt.Errorf("failed to ensure buildctl: %w", err)
+	}
+
 	start := time.Now()
 
 	var output string
@@ -270,11 +275,11 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 		}
 	}
 
-	cmd := execCommandContext(ctx, "buildctl", buildctlArgs...)
+	cmd := execCommandContext(ctx, buildctlBin, buildctlArgs...)
 	cmd.Dir = root
 	cmd.Stdout = scope.Stdout()
 	cmd.Stderr = io.MultiWriter(scope.Stderr(), &progressBuf)
-	cmd.Env = append(os.Environ(), "BUILDKIT_HOST="+buildkitHost)
+	cmd.Env = append(fileutils.PrependPath(os.Environ(), filepath.Dir(buildctlBin)), "BUILDKIT_HOST="+buildkitHost)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("buildctl build failed for %s: %w", t.ImageName, err)
 	}

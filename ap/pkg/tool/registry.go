@@ -31,6 +31,7 @@ import (
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/buildctl"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/docker"
 	gotool "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/helm"
@@ -206,6 +207,7 @@ var registry = []*Tool{
 			return docker.Update(ctx, repoRoot, docker.UpdateOptions{Docker: false, Buildx: true})
 		},
 	},
+	NewTool(buildctl.Spec),
 	NewTool(helm.Spec),
 	NewTool(kind.Spec),
 	NewTool(kubectl.Spec),

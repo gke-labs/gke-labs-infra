@@ -31,6 +31,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/buildctl"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/helm"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kind"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kubectl"
@@ -287,7 +288,7 @@ func TestSpec_ColdRun_DoesNotMutateHome(t *testing.T) {
 }
 
 func TestSpec_VersionsYAML(t *testing.T) {
-	for _, s := range []*spec.Spec{helm.Spec, kind.Spec, kubectl.Spec, kustomize.Spec} {
+	for _, s := range []*spec.Spec{buildctl.Spec, helm.Spec, kind.Spec, kubectl.Spec, kustomize.Spec} {
 		t.Run(s.Name, func(t *testing.T) {
 			rels, err := toolversions.Parse(s.VersionsYAML, s.Name)
 			if err != nil {

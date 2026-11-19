@@ -114,6 +114,9 @@ type ToolUpdateVersionsOptions struct {
 	Kustomize bool
 	// Helm controls updating helm versions in versions.yaml.
 	Helm bool
+
+	// Buildctl updates ap/pkg/tool/buildctl/versions.yaml.
+	Buildctl bool
 }
 
 // BuildToolUpdateVersionsCommand constructs the cobra command for "tool update-versions".

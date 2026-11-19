@@ -470,7 +470,7 @@ func TestDockerBuildTask_Platforms(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := tasks.NewTaskContext(tmpDir, tmpDir, r).WithTool("docker-buildx", "docker-buildx").WithTool("docker", "docker")
+	scope := tasks.NewTaskContext(tmpDir, tmpDir, r).WithTool("docker-buildx", "docker-buildx").WithTool("docker", "docker").WithTool("buildctl", "buildctl")
 
 	calls = nil
 	if err := task.Run(t.Context(), scope); err != nil {

@@ -950,7 +950,8 @@ plugins:
 	fakeBinDir, stateDir := setupFakeDocker(t)
 	fakeDockerPath := filepath.Join(fakeBinDir, "docker")
 	fakeBuildxPath := filepath.Join(fakeBinDir, "docker-buildx")
-	scope := tasks.NewTaskContext(repoRoot, repoRoot, tree).WithTool("docker", fakeDockerPath).WithTool("docker-buildx", fakeBuildxPath)
+	fakeBuildctlPath := filepath.Join(fakeBinDir, "buildctl")
+	scope := tasks.NewTaskContext(repoRoot, repoRoot, tree).WithTool("docker", fakeDockerPath).WithTool("docker-buildx", fakeBuildxPath).WithTool("buildctl", fakeBuildctlPath)
 
 	mockPlugin := sdk.Plugin{
 		Name:       "mockplugin",
