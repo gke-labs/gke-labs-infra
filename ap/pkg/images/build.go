@@ -239,10 +239,16 @@ func (t *DockerBuildTask) runLocalBuildkitPush(ctx context.Context, scope *tasks
 		return fmt.Errorf("creating OCI cache directory %s: %w", ociDirectory, err)
 	}
 
-	address := "docker-container://" + apBuilderContainer
-	output := "type=oci,tar=false,dest=" + ociDirectory
+	dockerBinary := t.dockerBinary(ctx, scope)
 
-	if err := t.runBuildctl(ctx, scope, root, relDockerfilePath, address, output, apBuilderName, naming, platforms); err != nil {
+	invocation := buildctlInvocation{
+		address:            "docker-container://" + apBuilderContainer,
+		output:             "type=oci,tar=false,dest=" + ociDirectory,
+		description:        apBuilderName,
+		extraPathDirectory: filepath.Dir(dockerBinary),
+	}
+
+	if err := t.runBuildctl(ctx, scope, root, relDockerfilePath, invocation, naming, platforms); err != nil {
 		return err
 	}
 
@@ -318,7 +324,14 @@ func (t *DockerBuildTask) dockerBinary(ctx context.Context, scope *tasks.TaskCon
 	return "docker"
 }
 
-func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskContext, root, relDockerfilePath, address, output, builderDescription string, naming ImageNaming, platforms []string) error {
+type buildctlInvocation struct {
+	address            string
+	output             string
+	description        string
+	extraPathDirectory string
+}
+
+func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskContext, root, relDockerfilePath string, invocation buildctlInvocation, naming ImageNaming, platforms []string) error {
 	buildctlBinary, err := scope.Tool(ctx, "buildctl")
 	if err != nil {
 		return fmt.Errorf("failed to ensure buildctl: %w", err)
@@ -343,7 +356,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 		"--opt", "build-arg:IMAGE_TAG=" + naming.Tag,
 		"--metadata-file", metadataFile,
 		"--progress=plain",
-		"--output", output,
+		"--output", invocation.output,
 	}
 
 	if len(platforms) > 0 {
@@ -357,10 +370,11 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 	command.Stdout = scope.Stdout()
 	command.Stderr = io.MultiWriter(scope.Stderr(), &progressBuffer)
 
-	dockerBinary := t.dockerBinary(ctx, scope)
-	environment := fileutils.PrependPath(os.Environ(), filepath.Dir(dockerBinary))
-	environment = fileutils.PrependPath(environment, filepath.Dir(buildctlBinary))
-	command.Env = append(environment, "BUILDKIT_HOST="+address)
+	environment := fileutils.PrependPath(os.Environ(), filepath.Dir(buildctlBinary))
+	if invocation.extraPathDirectory != "" {
+		environment = fileutils.PrependPath(environment, invocation.extraPathDirectory)
+	}
+	command.Env = append(environment, "BUILDKIT_HOST="+invocation.address)
 
 	if err := command.Run(); err != nil {
 		return fmt.Errorf("buildctl build failed for %s: %w", t.ImageName, err)
@@ -376,9 +390,9 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 		contextSize := parseContextSizeFromPlain(&progressBuffer)
 		duration := time.Since(start)
 		if contextSize != "" {
-			scoped.Log(ctx).Info(fmt.Sprintf("built %s with %s in %s; sent %s", t.ImageName, builderDescription, formatDuration(duration), contextSize))
+			scoped.Log(ctx).Info(fmt.Sprintf("built %s with %s in %s; sent %s", t.ImageName, invocation.description, formatDuration(duration), contextSize))
 		} else {
-			scoped.Log(ctx).Info(fmt.Sprintf("built %s with %s in %s", t.ImageName, builderDescription, formatDuration(duration)))
+			scoped.Log(ctx).Info(fmt.Sprintf("built %s with %s in %s", t.ImageName, invocation.description, formatDuration(duration)))
 		}
 	}
 
@@ -430,7 +444,13 @@ func (t *DockerBuildTask) runRemoteBuildctl(ctx context.Context, scope *tasks.Ta
 		}
 	}
 
-	if err := t.runBuildctl(ctx, scope, root, relDockerfilePath, buildkitHost, output, t.BuildkitHost, naming, platforms); err != nil {
+	invocation := buildctlInvocation{
+		address:     buildkitHost,
+		output:      output,
+		description: t.BuildkitHost,
+	}
+
+	if err := t.runBuildctl(ctx, scope, root, relDockerfilePath, invocation, naming, platforms); err != nil {
 		return err
 	}
 
