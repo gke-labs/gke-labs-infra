@@ -15,11 +15,15 @@
 package baseline
 
 import (
+	"bytes"
 	"go/token"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 )
 
 func TestParse(t *testing.T) {
@@ -282,5 +286,58 @@ func TestResolveBaselinePath(t *testing.T) {
 		if pConfigured != expectedCustom {
 			t.Errorf("expected configured path %s for %s, got %s", expectedCustom, a, pConfigured)
 		}
+	}
+}
+
+func TestApply_Reporting(t *testing.T) {
+	finding := Finding{
+		Pos:     token.Position{Filename: "pkg/foo/bar.go", Line: 10, Column: 5},
+		Message: "use t.Context() instead",
+		Related: []RelatedInfo{{Pos: token.Position{Filename: "pkg/foo/bar.go", Line: 5, Column: 2}, Message: "context created here"}},
+	}
+
+	tests := []struct {
+		mode       string
+		wantErr    bool
+		wantLog    []string
+		wantStderr string
+	}{
+		{
+			mode:    "warn",
+			wantErr: false,
+			wantLog: []string{
+				"level=WARN msg=\"pkg/foo/bar.go:10:5: use t.Context() instead\"",
+				"level=WARN msg=\"pkg/foo/bar.go:5:2:\\tcontext created here\"",
+				"level=WARN msg=\"check failed\" name=testcontext dir=/repo diagnostics=1",
+			},
+		},
+		{
+			mode:       "error",
+			wantErr:    true,
+			wantStderr: "pkg/foo/bar.go:10:5: use t.Context() instead\npkg/foo/bar.go:5:2:\tcontext created here\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.mode, func(t *testing.T) {
+			var logBuf, errBuf bytes.Buffer
+			ctx := scoped.WithLog(t.Context(), slog.New(slog.NewTextHandler(&logBuf, nil)))
+			opts := ApplyOptions{Name: "testcontext", RepoRoot: "/repo", Dir: "/repo", Mode: tc.mode, Stderr: &errBuf}
+			_, err := Apply(ctx, []Finding{finding}, opts)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("Apply() error = %v, wantErr %v", err, tc.wantErr)
+			}
+			for _, w := range tc.wantLog {
+				if !strings.Contains(logBuf.String(), w) {
+					t.Errorf("log output missing %q, got:\n%s", w, logBuf.String())
+				}
+			}
+			if len(tc.wantLog) == 0 && logBuf.Len() != 0 {
+				t.Errorf("expected no log output, got:\n%s", logBuf.String())
+			}
+			if errBuf.String() != tc.wantStderr {
+				t.Errorf("stderr = %q, want %q", errBuf.String(), tc.wantStderr)
+			}
+		})
 	}
 }

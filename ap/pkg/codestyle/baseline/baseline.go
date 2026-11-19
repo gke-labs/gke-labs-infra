@@ -548,28 +548,31 @@ func Apply(ctx context.Context, findings []Finding, opts ApplyOptions) ([]Findin
 		findingsToReport = findings
 	}
 
-	if opts.Stderr != nil {
-		for _, f := range findingsToReport {
-			msg := f.Message
-			if msg == "" {
-				msg = f.Detail
-			}
-			if _, err := fmt.Fprintf(opts.Stderr, "%s: %s\n", f.Pos, msg); err != nil {
-				log.Debug("failed to write diagnostic", "error", err)
-			}
-			for _, rel := range f.Related {
-				if _, err := fmt.Fprintf(opts.Stderr, "%s:\t%s\n", rel.Pos, rel.Message); err != nil {
-					log.Debug("failed to write related info", "error", err)
+	for _, f := range findingsToReport {
+		msg := f.Message
+		if msg == "" {
+			msg = f.Detail
+		}
+		lines := []string{fmt.Sprintf("%s: %s", f.Pos, msg)}
+		for _, rel := range f.Related {
+			lines = append(lines, fmt.Sprintf("%s:\t%s", rel.Pos, rel.Message))
+		}
+		for _, line := range lines {
+			if opts.Mode == "warn" {
+				log.Warn(line)
+			} else if opts.Stderr != nil {
+				if _, err := fmt.Fprintln(opts.Stderr, line); err != nil {
+					log.Debug("failed to write diagnostic", "error", err)
 				}
 			}
 		}
 	}
 
 	if len(findingsToReport) > 0 {
-		if opts.Mode == "error" || opts.Mode == "" {
-			return findingsToReport, fmt.Errorf("%s check failed in %s", opts.Name, opts.Dir)
-		} else if opts.Mode == "warn" {
+		if opts.Mode == "warn" {
 			log.Warn("check failed", "name", opts.Name, "dir", opts.Dir, "diagnostics", len(findingsToReport))
+		} else if opts.Mode == "error" || opts.Mode == "" {
+			return findingsToReport, fmt.Errorf("%s check failed in %s", opts.Name, opts.Dir)
 		}
 	}
 	return findingsToReport, nil
