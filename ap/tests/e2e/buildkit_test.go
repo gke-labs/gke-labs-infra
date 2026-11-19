@@ -15,66 +15,19 @@
 package e2e
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/e2e"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/fetch"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/spec"
 )
-
-var buildctlDigests = map[string]string{
-	"linux-amd64":  "sha256:bc5a158c97c1f7ace1af81c375e8c28bd27e6afeb283fc5b3bfb10777f48fc83",
-	"linux-arm64":  "sha256:02a6f8c1ea519b11d312ea2fb2f45cf3a7a34814a0e61d55d2532adb211ce400",
-	"darwin-arm64": "sha256:122805479a56fea85ba7b4f571190b9a5e331b262f3c6f01de985624f70abb69",
-}
-
-func ensureBuildctl(t *testing.T) {
-	t.Helper()
-	if _, err := exec.LookPath("buildctl"); err == nil {
-		return
-	}
-
-	platform := runtime.GOOS + "-" + runtime.GOARCH
-	expectedDigest, ok := buildctlDigests[platform]
-	if !ok {
-		t.Fatalf("unsupported platform for buildctl e2e download: %s (expected linux-amd64, linux-arm64, or darwin-arm64)", platform)
-	}
-
-	ctx := t.Context()
-	version := "v0.28.0"
-	downloadURL := fmt.Sprintf("https://github.com/moby/buildkit/releases/download/%s/buildkit-%s.%s-%s.tar.gz", version, version, runtime.GOOS, runtime.GOARCH)
-	tmpDir := t.TempDir()
-	archivePath, err := fetch.Download(ctx, downloadURL, expectedDigest, tmpDir)
-	if err != nil {
-		t.Fatalf("failed to download buildctl: %v", err)
-	}
-	defer func() {
-		_ = os.Remove(archivePath)
-	}()
-
-	binDir := filepath.Join(tmpDir, "bin")
-	if err := os.MkdirAll(binDir, 0755); err != nil {
-		t.Fatalf("failed to create bin dir: %v", err)
-	}
-	buildctlBin := filepath.Join(binDir, "buildctl")
-	if err := (spec.TarGz{}).Extract(archivePath, "buildctl", buildctlBin); err != nil {
-		t.Fatalf("failed to extract buildctl: %v", err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-}
 
 func TestInClusterBuildKit(t *testing.T) {
 	if os.Getenv("RUN_E2E") == "" {
 		t.Skip("RUN_E2E not set, skipping e2e test")
 	}
-
-	ensureBuildctl(t)
 
 	// If running inside a container with a Kubernetes service account, clear
 	// KUBERNETES_SERVICE_HOST so ap uses in-process port-forwarding rather than
