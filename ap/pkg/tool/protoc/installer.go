@@ -418,7 +418,7 @@ func EnsurePlugin(ctx context.Context, pluginName, requestedVer string, cfgPlugi
 	// Move staging binary to target
 	if err := os.Rename(stagingBin, targetBin); err != nil {
 		// If rename fails (e.g. cross-device), copy
-		if copyErr := fileutils.CopyFile(stagingBin, targetBin, 0755); copyErr != nil {
+		if copyErr := fileutils.CopyFile(ctx, stagingBin, targetBin, 0755); copyErr != nil {
 			return "", fmt.Errorf("failed to copy binary to cache: %w", copyErr)
 		}
 	}

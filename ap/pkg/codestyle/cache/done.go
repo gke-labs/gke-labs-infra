@@ -15,6 +15,7 @@
 package cache
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 
@@ -118,8 +119,8 @@ func (idx *DoneIndex) Encode() ([]byte, error) {
 }
 
 // Save writes the updated done.bin atomically using fileutils.WriteFileAtomic.
-func (idx *DoneIndex) Save(path string) error {
-	if err := idx.rf.Save(path); err != nil {
+func (idx *DoneIndex) Save(ctx context.Context, path string) error {
+	if err := idx.rf.Save(ctx, path); err != nil {
 		return err
 	}
 	idx.records = idx.rf.Records()

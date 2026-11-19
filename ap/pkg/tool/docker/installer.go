@@ -285,7 +285,7 @@ func EnsureDockerBuildx(ctx context.Context, version string) (string, error) {
 		return "", fmt.Errorf("failed to create directory %s: %w", filepath.Dir(binPath), err)
 	}
 
-	if err := fileutils.CopyFile(tmpFile, binPath, 0755); err != nil {
+	if err := fileutils.CopyFile(ctx, tmpFile, binPath, 0755); err != nil {
 		return "", fmt.Errorf("failed to install buildx binary %s: %w", binPath, err)
 	}
 

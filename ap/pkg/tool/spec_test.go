@@ -505,7 +505,7 @@ func TestTarGz_Extract(t *testing.T) {
 
 	// Extract binary entry
 	dest := filepath.Join(tempDir, "extracted", "bin", "mybin")
-	if err := (spec.TarGz{}).Extract(tgzPath, "mybin", dest); err != nil {
+	if err := (spec.TarGz{}).Extract(t.Context(), tgzPath, "mybin", dest); err != nil {
 		t.Fatalf("TarGz.Extract failed: %v", err)
 	}
 
@@ -522,7 +522,7 @@ func TestTarGz_Extract(t *testing.T) {
 
 	// Missing entry errors
 	missingDest := filepath.Join(tempDir, "extracted", "bin", "missing")
-	if err := (spec.TarGz{}).Extract(tgzPath, "missing", missingDest); err == nil {
+	if err := (spec.TarGz{}).Extract(t.Context(), tgzPath, "missing", missingDest); err == nil {
 		t.Fatal("expected error extracting missing binary from tar.gz, got nil")
 	}
 }

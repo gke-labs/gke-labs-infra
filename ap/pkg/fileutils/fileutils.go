@@ -15,6 +15,7 @@
 package fileutils
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -24,7 +25,7 @@ import (
 	"runtime"
 	"strings"
 
-	"k8s.io/klog/v2"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 )
 
 // FileExists reports whether the named file or directory exists.
@@ -127,30 +128,30 @@ func (t *TempFile) Rename(perm os.FileMode) error {
 
 // Cleanup closes the temporary file if still open and removes it unless it was renamed.
 // Failures to close or remove are logged. Cleanup is safe to call after Rename.
-func (t *TempFile) Cleanup() {
+func (t *TempFile) Cleanup(ctx context.Context) {
 	if t.renamed {
 		return
 	}
 	if !t.closed {
 		t.closed = true
 		if err := t.file.Close(); err != nil {
-			klog.V(2).Infof("failed to close temporary file %s: %v", t.name, err)
+			scoped.Log(ctx).Fine("failed to close temporary file", "path", t.name, "error", err)
 		}
 	}
 	if err := os.Remove(t.name); err != nil && !os.IsNotExist(err) {
-		klog.V(2).Infof("failed to remove temporary file %s: %v", t.name, err)
+		scoped.Log(ctx).Fine("failed to remove temporary file", "path", t.name, "error", err)
 	}
 }
 
 // WriteFileAtomic writes data to path atomically: write to a temp file in the target's
 // directory, set the target mode, close (error checked), then rename over the target.
 // Any failure removes the temporary file.
-func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
+func WriteFileAtomic(ctx context.Context, path string, data []byte, perm os.FileMode) error {
 	tempFile, err := CreateTempFile(path)
 	if err != nil {
 		return err
 	}
-	defer tempFile.Cleanup()
+	defer tempFile.Cleanup(ctx)
 
 	if _, err := tempFile.Write(data); err != nil {
 		return err
@@ -159,14 +160,14 @@ func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 }
 
 // CopyFile copies a file from src to dst atomically via a temporary file, preserving permissions and mtime.
-func CopyFile(src, dst string, perm os.FileMode) error {
+func CopyFile(ctx context.Context, src, dst string, perm os.FileMode) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer func() {
 		if closeErr := in.Close(); closeErr != nil {
-			klog.V(2).Infof("failed to close input file %s: %v", src, closeErr)
+			scoped.Log(ctx).Fine("failed to close input file", "path", src, "error", closeErr)
 		}
 	}()
 
@@ -179,7 +180,7 @@ func CopyFile(src, dst string, perm os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	defer tempFile.Cleanup()
+	defer tempFile.Cleanup(ctx)
 
 	if _, err := io.Copy(tempFile, in); err != nil {
 		return err
@@ -190,7 +191,7 @@ func CopyFile(src, dst string, perm os.FileMode) error {
 	}
 
 	if chtimesErr := os.Chtimes(dst, srcFi.ModTime(), srcFi.ModTime()); chtimesErr != nil {
-		klog.V(2).Infof("failed to set mtime on %s: %v", dst, chtimesErr)
+		scoped.Log(ctx).Fine("failed to set mtime", "path", dst, "error", chtimesErr)
 	}
 	return nil
 }

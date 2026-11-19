@@ -321,7 +321,7 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext
 		}
 		perturbedFiles = append(perturbedFiles, pf)
 
-		if err := r.WriteFile(f.Path, perturbed, info.Mode()); err != nil {
+		if err := r.WriteFile(ctx, f.Path, perturbed, info.Mode()); err != nil {
 			return fmt.Errorf("failed to write perturbed file %s: %w", f.Path, err)
 		}
 	}
@@ -336,7 +336,7 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext
 			}
 			undone, ok := Undo(currentData, pf.marker, pf.isBinary, pf.wasEmpty)
 			if ok {
-				if err := r.WriteFile(pf.path, undone, pf.mode); err != nil {
+				if err := r.WriteFile(ctx, pf.path, undone, pf.mode); err != nil {
 					log.Error("failed to restore file", "error", err, "path", pf.path)
 				}
 			}

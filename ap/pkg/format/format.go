@@ -64,7 +64,7 @@ func (t *LegacyFormatScriptTask) Run(ctx context.Context, scope *tasks.TaskConte
 	scoped.Log(ctx).Info("running legacy format script", "script", t.Name)
 	cmd := exec.CommandContext(ctx, t.Path)
 	cmd.Dir = scope.Dir()
-	env, err := scope.ScriptEnv()
+	env, err := scope.ScriptEnv(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to prepare script environment for %s: %w", t.Name, err)
 	}

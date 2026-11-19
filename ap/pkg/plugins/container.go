@@ -231,7 +231,7 @@ func DescribeContainer(ctx context.Context, scope *tasks.TaskContext, cacheDirec
 	if err != nil {
 		return nil, fmt.Errorf("creating temp file for %s: %w", manifestPath, err)
 	}
-	defer temporaryFile.Cleanup()
+	defer temporaryFile.Cleanup(ctx)
 
 	if _, err := temporaryFile.Write(output); err != nil {
 		return nil, fmt.Errorf("writing cached manifest %s: %w", manifestPath, err)

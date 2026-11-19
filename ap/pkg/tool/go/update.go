@@ -148,7 +148,7 @@ func Update(ctx context.Context, repoRoot string) error {
 	}
 
 	targetPath := filepath.Join(repoRoot, "ap", "pkg", "tool", "go", "versions.yaml")
-	if err := fileutils.WriteFileAtomic(targetPath, data, 0644); err != nil {
+	if err := fileutils.WriteFileAtomic(ctx, targetPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetPath, err)
 	}
 

@@ -406,7 +406,7 @@ func (t *DockerBuildTask) runRemoteBuildctl(ctx context.Context, scope *tasks.Ta
 		if err != nil {
 			return fmt.Errorf("creating temporary archive for %s: %w", t.ImageName, err)
 		}
-		defer temporaryArchive.Cleanup()
+		defer temporaryArchive.Cleanup(ctx)
 		if err := temporaryArchive.Close(); err != nil {
 			return fmt.Errorf("closing temporary archive for %s: %w", t.ImageName, err)
 		}

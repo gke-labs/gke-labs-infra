@@ -362,7 +362,7 @@ func TestRepo_WriteFileAtomic(t *testing.T) {
 	}
 
 	newContent := []byte("package main\n\nfunc UpdatedMain() {}\n")
-	if err := r.WriteFileAtomic(existingPath, newContent, 0644); err != nil {
+	if err := r.WriteFileAtomic(t.Context(), existingPath, newContent, 0644); err != nil {
 		t.Fatalf("r.WriteFileAtomic failed: %v", err)
 	}
 
@@ -379,7 +379,7 @@ func TestRepo_WriteFileAtomic(t *testing.T) {
 	if r.File(newFilePath) != nil {
 		t.Fatal("expected brand_new.txt to not exist yet")
 	}
-	if err := r.WriteFileAtomic(newFilePath, []byte("brand new content"), 0644); err != nil {
+	if err := r.WriteFileAtomic(t.Context(), newFilePath, []byte("brand new content"), 0644); err != nil {
 		t.Fatalf("r.WriteFileAtomic new file failed: %v", err)
 	}
 	newF := r.File(newFilePath)
@@ -402,7 +402,7 @@ func TestRepo_CopyFile(t *testing.T) {
 	srcPath := filepath.Join(dir, "main.go")
 	dstPath := filepath.Join(dir, "main_copy.go")
 
-	if err := r.CopyFile(srcPath, dstPath, 0644); err != nil {
+	if err := r.CopyFile(t.Context(), srcPath, dstPath, 0644); err != nil {
 		t.Fatalf("r.CopyFile failed: %v", err)
 	}
 
@@ -544,7 +544,7 @@ func TestRepo_WriteFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.WriteFile(existingPath, sameContent, 0644); err != nil {
+	if err := r.WriteFile(t.Context(), existingPath, sameContent, 0644); err != nil {
 		t.Fatalf("r.WriteFile failed: %v", err)
 	}
 	fiAfter, err := os.Stat(existingPath)
@@ -557,7 +557,7 @@ func TestRepo_WriteFile(t *testing.T) {
 
 	// 2. Calling WriteFile with new content updates file and hash
 	newContent := []byte("package main\n\nfunc UpdatedWriteFile() {}\n")
-	if err := r.WriteFile(existingPath, newContent, 0644); err != nil {
+	if err := r.WriteFile(t.Context(), existingPath, newContent, 0644); err != nil {
 		t.Fatalf("r.WriteFile failed: %v", err)
 	}
 	updatedHash, err := f.Hash()

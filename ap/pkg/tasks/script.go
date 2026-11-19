@@ -37,7 +37,7 @@ func (t *TaskScript) Run(ctx context.Context, scope *TaskContext) error {
 	scoped.Log(ctx).Info("running task", "task", t.Name)
 	cmd := exec.CommandContext(ctx, t.Path)
 	cmd.Dir = t.Root
-	env, err := scope.ScriptEnv()
+	env, err := scope.ScriptEnv(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to prepare script environment for %s: %w", t.Name, err)
 	}

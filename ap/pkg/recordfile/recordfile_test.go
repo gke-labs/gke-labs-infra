@@ -385,7 +385,7 @@ func TestRecordFile_SaveAndOpen(t *testing.T) {
 	k := makeKey("test", 1)
 	_ = rf.Set(k, []byte{1, 2, 3, 4})
 
-	if err := rf.Save(filePath); err != nil {
+	if err := rf.Save(t.Context(), filePath); err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
 

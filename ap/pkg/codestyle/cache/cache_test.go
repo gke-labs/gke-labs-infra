@@ -116,7 +116,7 @@ func TestManager_DoneCache(t *testing.T) {
 		t.Errorf("expected IsDone(StepTidy) to be true after MarkDone")
 	}
 
-	if err := m.Save(); err != nil {
+	if err := m.Save(t.Context()); err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
 

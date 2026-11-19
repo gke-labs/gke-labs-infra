@@ -91,7 +91,7 @@ func TestTempFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTempFile failed: %v", err)
 	}
-	defer tempFile.Cleanup()
+	defer tempFile.Cleanup(t.Context())
 
 	tempPath := findTempFile(t, tempDir, dest)
 	if tempPath == "" {
@@ -127,7 +127,7 @@ func TestTempFile(t *testing.T) {
 	}
 
 	// Cleanup is a no-op after Rename
-	tempFile.Cleanup()
+	tempFile.Cleanup(t.Context())
 	if _, err := os.Stat(dest); err != nil {
 		t.Errorf("destination %s should still exist after Cleanup: %v", dest, err)
 	}
@@ -147,7 +147,7 @@ func TestTempFile(t *testing.T) {
 		t.Fatalf("failed to write to temp file: %v", err)
 	}
 
-	tempFile2.Cleanup()
+	tempFile2.Cleanup(t.Context())
 
 	if _, err := os.Stat(tempPath2); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("expected temp file %s to be removed by Cleanup, got err: %v", tempPath2, err)
@@ -179,7 +179,7 @@ func TestWriteFileAtomic(t *testing.T) {
 
 	// 1. Initial write: creates file, sets mode, leaves no temp files.
 	data1 := []byte("first content")
-	if err := WriteFileAtomic(targetPath, data1, 0640); err != nil {
+	if err := WriteFileAtomic(t.Context(), targetPath, data1, 0640); err != nil {
 		t.Fatalf("WriteFileAtomic failed: %v", err)
 	}
 
@@ -202,7 +202,7 @@ func TestWriteFileAtomic(t *testing.T) {
 
 	// 2. Target replaced: replaces existing file, preserves new mode, leaves no temp files.
 	data2 := []byte("second replaced content")
-	if err := WriteFileAtomic(targetPath, data2, 0755); err != nil {
+	if err := WriteFileAtomic(t.Context(), targetPath, data2, 0755); err != nil {
 		t.Fatalf("WriteFileAtomic replace failed: %v", err)
 	}
 
@@ -228,7 +228,7 @@ func TestWriteFileAtomic(t *testing.T) {
 	if err := os.Mkdir(subDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteFileAtomic(subDir, []byte("data"), 0644); err == nil {
+	if err := WriteFileAtomic(t.Context(), subDir, []byte("data"), 0644); err == nil {
 		t.Fatalf("expected error when writing over a directory, got nil")
 	}
 	assertNoTempFiles(t, tmpDir)
@@ -252,7 +252,7 @@ func TestWriteFileAtomic_RunningScriptSelfRewrite(t *testing.T) {
 	if os.Getenv("TEST_HELPER_REWRITE") == "1" {
 		target := os.Getenv("TARGET_PATH")
 		newContent := []byte(os.Getenv("NEW_CONTENT"))
-		if err := WriteFileAtomic(target, newContent, 0755); err != nil {
+		if err := WriteFileAtomic(t.Context(), target, newContent, 0755); err != nil {
 			fmt.Fprintf(os.Stderr, "WriteFileAtomic helper failed: %v\n", err)
 			os.Exit(1)
 		}

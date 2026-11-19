@@ -73,7 +73,7 @@ func RunScript(ctx context.Context, script string, scriptArgs []string) error {
 		return err
 	}
 
-	env, err := tool.ScriptEnv(repoRoot)
+	env, err := tool.ScriptEnv(ctx, repoRoot)
 	if err != nil {
 		return err
 	}
