@@ -26,9 +26,9 @@ import (
 	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/fetch"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/github"
-	"k8s.io/klog/v2"
 )
 
 // KnownGoPlugins maps standard plugin names to their Go module paths.
@@ -131,7 +131,7 @@ func EnsureProtoc(ctx context.Context, version string) (protocBin string, includ
 		installDir := filepath.Join(cacheRoot, "tools", "protoc", normalizedVer)
 		binPath := filepath.Join(installDir, "bin", binName)
 		if fileutils.IsExecutable(binPath) {
-			klog.V(2).Infof("Using protoc %s", normalizedVer)
+			scoped.Log(ctx).Fine("Using protoc", "version", normalizedVer)
 			return binPath, filepath.Join(installDir, "include"), nil
 		}
 	}
@@ -156,7 +156,7 @@ func EnsureProtoc(ctx context.Context, version string) (protocBin string, includ
 	installDir := filepath.Join(cacheRoot, "tools", "protoc", resolvedVer)
 	binPath := filepath.Join(installDir, "bin", binName)
 	if fileutils.IsExecutable(binPath) {
-		klog.V(2).Infof("Using protoc %s", resolvedVer)
+		scoped.Log(ctx).Fine("Using protoc", "version", resolvedVer)
 		return binPath, filepath.Join(installDir, "include"), nil
 	}
 
@@ -167,12 +167,12 @@ func EnsureProtoc(ctx context.Context, version string) (protocBin string, includ
 	}
 	defer func() {
 		if rmErr := os.Remove(tmpZip); rmErr != nil && !os.IsNotExist(rmErr) {
-			klog.V(2).Infof("failed to remove temporary file %s: %v", tmpZip, rmErr)
+			scoped.Log(ctx).Fine("failed to remove temporary file", "path", tmpZip, "error", rmErr)
 		}
 	}()
 
 	// 3. Extract and install archive into installDir
-	return installProtocZip(tmpZip, installDir, binName, resolvedVer)
+	return installProtocZip(ctx, tmpZip, installDir, binName, resolvedVer)
 }
 
 func resolveProtocRelease(ctx context.Context, version string) (resolvedVer, downloadURL, expectedDigest string, err error) {
@@ -216,7 +216,7 @@ func resolveProtocRelease(ctx context.Context, version string) (resolvedVer, dow
 	}
 
 	// On a miss: warn and resolve from GitHub API
-	klog.Warningf("protoc %s is not in versions.yaml; resolving it from the GitHub API, which is rate limited; run 'ap tool update-versions' to add it", requestedVer)
+	scoped.Log(ctx).Warn("protoc is not in versions.yaml; resolving it from the GitHub API, which is rate limited; run 'ap tool update-versions' to add it", "version", requestedVer)
 	return resolvePinnedProtocRelease(ctx, requestedVer)
 }
 
@@ -273,12 +273,12 @@ func resolvePinnedProtocRelease(ctx context.Context, version string) (resolvedVe
 	return resolvedVer, asset.BrowserDownloadURL, asset.Digest, nil
 }
 
-func installProtocZip(zipPath, installDir, binName, resolvedVer string) (protocBin, includeDir string, err error) {
+func installProtocZip(ctx context.Context, zipPath, installDir, binName, resolvedVer string) (protocBin, includeDir string, err error) {
 	if err := os.MkdirAll(installDir, 0755); err != nil {
 		return "", "", fmt.Errorf("failed to create protoc directory %s: %w", installDir, err)
 	}
 
-	if err := extractZip(zipPath, installDir); err != nil {
+	if err := extractZip(ctx, zipPath, installDir); err != nil {
 		return "", "", fmt.Errorf("failed to extract protoc zip: %w", err)
 	}
 
@@ -287,7 +287,7 @@ func installProtocZip(zipPath, installDir, binName, resolvedVer string) (protocB
 		return "", "", fmt.Errorf("failed to chmod protoc binary %s: %w", protocBin, err)
 	}
 
-	klog.Infof("Installed protoc %s to %s", resolvedVer, protocBin)
+	scoped.Log(ctx).Info(fmt.Sprintf("Installed protoc %s to %s", resolvedVer, protocBin))
 	return protocBin, filepath.Join(installDir, "include"), nil
 }
 
@@ -342,7 +342,7 @@ func EnsurePlugin(ctx context.Context, pluginName, requestedVer string, cfgPlugi
 	} else if yamlVer, ok := PluginVersion(normalizedName); ok {
 		targetVer = yamlVer
 	} else {
-		klog.Warningf("plugin %s is not in versions.yaml; resolving @latest via go install; run 'ap tool update-versions' to pin it", normalizedName)
+		scoped.Log(ctx).Warn("plugin is not in versions.yaml; resolving @latest via go install; run 'ap tool update-versions' to pin it", "plugin", normalizedName)
 		targetVer = "latest"
 	}
 
@@ -355,7 +355,7 @@ func EnsurePlugin(ctx context.Context, pluginName, requestedVer string, cfgPlugi
 		targetBinDir := filepath.Join(cacheRoot, "tools", "plugins", normalizedName, ver, "bin")
 		targetBin := filepath.Join(targetBinDir, binName)
 		if fileutils.IsExecutable(targetBin) {
-			klog.V(2).Infof("Using %s %s", normalizedName, ver)
+			scoped.Log(ctx).Fine("Using plugin", "name", normalizedName, "version", ver)
 			return targetBinDir, nil
 		}
 
@@ -377,7 +377,7 @@ func EnsurePlugin(ctx context.Context, pluginName, requestedVer string, cfgPlugi
 			return "", fmt.Errorf("failed to chmod plugin binary %s: %w", targetBin, err)
 		}
 
-		klog.Infof("Installed %s %s to %s", normalizedName, ver, targetBin)
+		scoped.Log(ctx).Info(fmt.Sprintf("Installed %s %s to %s", normalizedName, ver, targetBin))
 		return targetBinDir, nil
 	}
 
@@ -386,14 +386,14 @@ func EnsurePlugin(ctx context.Context, pluginName, requestedVer string, cfgPlugi
 	stagingBin := filepath.Join(stagingBinDir, binName)
 	stagingDir := filepath.Dir(stagingBinDir)
 	if err := os.RemoveAll(stagingDir); err != nil {
-		klog.V(2).Infof("failed to remove existing staging directory %s: %v", stagingDir, err)
+		scoped.Log(ctx).Fine("failed to remove existing staging directory", "path", stagingDir, "error", err)
 	}
 	if err := os.MkdirAll(stagingBinDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create staging directory: %w", err)
 	}
 	defer func() {
 		if err := os.RemoveAll(stagingDir); err != nil {
-			klog.V(2).Infof("failed to cleanup staging directory %s: %v", stagingDir, err)
+			scoped.Log(ctx).Fine("failed to cleanup staging directory", "path", stagingDir, "error", err)
 		}
 	}()
 
@@ -426,7 +426,7 @@ func EnsurePlugin(ctx context.Context, pluginName, requestedVer string, cfgPlugi
 		return "", fmt.Errorf("failed to chmod plugin binary %s: %w", targetBin, err)
 	}
 
-	klog.Infof("Installed %s %s to %s", normalizedName, resolvedVer, targetBin)
+	scoped.Log(ctx).Info(fmt.Sprintf("Installed %s %s to %s", normalizedName, resolvedVer, targetBin))
 	return targetBinDir, nil
 }
 

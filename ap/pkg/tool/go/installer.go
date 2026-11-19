@@ -28,8 +28,8 @@ import (
 	"sync"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/fetch"
-	"k8s.io/klog/v2"
 )
 
 var goMu sync.Mutex
@@ -86,7 +86,7 @@ func EnsureGo(ctx context.Context, version string) (string, error) {
 	binPath := filepath.Join(installDir, "bin", binName)
 
 	if fileutils.IsExecutable(binPath) {
-		klog.V(2).Infof("Using Go %s from %s", resolvedVer, binPath)
+		scoped.Log(ctx).Fine("Using Go", "version", resolvedVer, "path", binPath)
 		return binPath, nil
 	}
 
@@ -99,7 +99,7 @@ func EnsureGo(ctx context.Context, version string) (string, error) {
 	if rel, ok := LookupGo(resolvedVer); ok {
 		expectedDigest = rel.Assets[plat]
 	} else {
-		klog.Warningf("Go %s is not in versions.yaml; downloading without verified digest", resolvedVer)
+		scoped.Log(ctx).Warn("Go is not in versions.yaml; downloading without verified digest", "version", resolvedVer)
 	}
 
 	if envDigest := os.Getenv("GO_DOWNLOAD_DIGEST"); envDigest != "" {
@@ -118,7 +118,7 @@ func EnsureGo(ctx context.Context, version string) (string, error) {
 	}
 	defer func() {
 		if rmErr := os.Remove(tmpArchive); rmErr != nil && !os.IsNotExist(rmErr) {
-			klog.V(2).Infof("failed to remove temporary archive %s: %v", tmpArchive, rmErr)
+			scoped.Log(ctx).Fine("failed to remove temporary archive", "path", tmpArchive, "error", rmErr)
 		}
 	}()
 
@@ -134,30 +134,30 @@ func EnsureGo(ctx context.Context, version string) (string, error) {
 	defer func() {
 		if !success {
 			if rmErr := os.RemoveAll(tmpInstallDir); rmErr != nil && !os.IsNotExist(rmErr) {
-				klog.V(2).Infof("failed to remove temporary extraction directory %s: %v", tmpInstallDir, rmErr)
+				scoped.Log(ctx).Fine("failed to remove temporary extraction directory", "path", tmpInstallDir, "error", rmErr)
 			}
 		}
 	}()
 
 	if runtime.GOOS == "windows" {
-		if err := extractGoZip(tmpArchive, tmpInstallDir); err != nil {
+		if err := extractGoZip(ctx, tmpArchive, tmpInstallDir); err != nil {
 			return "", fmt.Errorf("failed to extract Go from %s: %w", tmpArchive, err)
 		}
 	} else {
-		if err := extractGoTgz(tmpArchive, tmpInstallDir); err != nil {
+		if err := extractGoTgz(ctx, tmpArchive, tmpInstallDir); err != nil {
 			return "", fmt.Errorf("failed to extract Go from %s: %w", tmpArchive, err)
 		}
 	}
 
 	tmpBinPath := filepath.Join(tmpInstallDir, "bin", binName)
 	if err := os.Chmod(tmpBinPath, 0755); err != nil && !os.IsNotExist(err) {
-		klog.V(2).Infof("chmod on %s: %v", tmpBinPath, err)
+		scoped.Log(ctx).Fine("chmod failed", "path", tmpBinPath, "error", err)
 	}
 
 	if err := os.Rename(tmpInstallDir, installDir); err != nil {
 		if fileutils.IsExecutable(binPath) {
 			if rmErr := os.RemoveAll(tmpInstallDir); rmErr != nil && !os.IsNotExist(rmErr) {
-				klog.V(2).Infof("failed to remove temporary extraction directory %s: %v", tmpInstallDir, rmErr)
+				scoped.Log(ctx).Fine("failed to remove temporary extraction directory", "path", tmpInstallDir, "error", rmErr)
 			}
 			return binPath, nil
 		}
@@ -165,7 +165,7 @@ func EnsureGo(ctx context.Context, version string) (string, error) {
 	}
 	success = true
 
-	klog.Infof("Installed Go %s to %s", resolvedVer, binPath)
+	scoped.Log(ctx).Info(fmt.Sprintf("Installed Go %s to %s", resolvedVer, binPath))
 	return binPath, nil
 }
 
@@ -178,14 +178,14 @@ func EnsureGoForRepo(ctx context.Context, dir string) (string, error) {
 	return EnsureGo(ctx, version)
 }
 
-func extractGoTgz(tgzPath, dstDir string) error {
+func extractGoTgz(ctx context.Context, tgzPath, dstDir string) error {
 	f, err := os.Open(tgzPath)
 	if err != nil {
 		return err
 	}
 	defer func() {
 		if closeErr := f.Close(); closeErr != nil {
-			klog.V(2).Infof("failed to close %s: %v", tgzPath, closeErr)
+			scoped.Log(ctx).Fine("failed to close archive", "path", tgzPath, "error", closeErr)
 		}
 	}()
 
@@ -195,7 +195,7 @@ func extractGoTgz(tgzPath, dstDir string) error {
 	}
 	defer func() {
 		if closeErr := gzr.Close(); closeErr != nil {
-			klog.V(2).Infof("failed to close gzip reader: %v", closeErr)
+			scoped.Log(ctx).Fine("failed to close gzip reader", "error", closeErr)
 		}
 	}()
 
@@ -226,7 +226,7 @@ func extractGoTgz(tgzPath, dstDir string) error {
 				return err
 			}
 			if rmErr := os.Remove(target); rmErr != nil && !os.IsNotExist(rmErr) {
-				klog.V(2).Infof("failed to remove existing target %s: %v", target, rmErr)
+				scoped.Log(ctx).Fine("failed to remove existing target", "path", target, "error", rmErr)
 			}
 			if err := os.Symlink(hdr.Linkname, target); err != nil {
 				return err
@@ -256,14 +256,14 @@ func extractGoTgz(tgzPath, dstDir string) error {
 	return nil
 }
 
-func extractGoZip(zipPath, dstDir string) error {
+func extractGoZip(ctx context.Context, zipPath, dstDir string) error {
 	zr, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return err
 	}
 	defer func() {
 		if closeErr := zr.Close(); closeErr != nil {
-			klog.V(2).Infof("failed to close zip %s: %v", zipPath, closeErr)
+			scoped.Log(ctx).Fine("failed to close zip", "path", zipPath, "error", closeErr)
 		}
 	}()
 
@@ -286,21 +286,21 @@ func extractGoZip(zipPath, dstDir string) error {
 			return err
 		}
 
-		if err := extractZipFile(file, target); err != nil {
+		if err := extractZipFile(ctx, file, target); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func extractZipFile(file *zip.File, target string) error {
+func extractZipFile(ctx context.Context, file *zip.File, target string) error {
 	rc, err := file.Open()
 	if err != nil {
 		return err
 	}
 	defer func() {
 		if closeErr := rc.Close(); closeErr != nil {
-			klog.V(2).Infof("failed to close zip file entry %s: %v", file.Name, closeErr)
+			scoped.Log(ctx).Fine("failed to close zip file entry", "entry", file.Name, "error", closeErr)
 		}
 	}()
 

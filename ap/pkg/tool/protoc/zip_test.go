@@ -54,7 +54,7 @@ func TestExtractZip_Success(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := extractZip(zipPath, destDir); err != nil {
+	if err := extractZip(t.Context(), zipPath, destDir); err != nil {
 		t.Fatalf("extractZip failed: %v", err)
 	}
 
@@ -91,7 +91,7 @@ func TestExtractZip_IllegalPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = extractZip(zipPath, destDir)
+	err = extractZip(t.Context(), zipPath, destDir)
 	if err == nil {
 		t.Fatal("expected error on illegal path in zip, got nil")
 	}

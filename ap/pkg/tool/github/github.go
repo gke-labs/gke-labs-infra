@@ -33,7 +33,6 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
-	"k8s.io/klog/v2"
 )
 
 const (
@@ -88,10 +87,10 @@ func IsRateLimitError(err error) bool {
 }
 
 // CloseResponseBody safely closes a response body, ignoring or logging close errors.
-func CloseResponseBody(resp *http.Response) {
+func CloseResponseBody(ctx context.Context, resp *http.Response) {
 	if resp != nil && resp.Body != nil {
 		if err := resp.Body.Close(); err != nil {
-			klog.V(2).Infof("failed to close response body: %v", err)
+			scoped.Log(ctx).Fine("failed to close response body", "error", err)
 		}
 	}
 }
@@ -191,7 +190,7 @@ func Do(ctx context.Context, req *http.Request) (*http.Response, error) {
 		entry, cp, err := readCacheEntry(req.URL.String())
 		p = cp
 		if err != nil {
-			klog.V(2).Infof("cache lookup for %s: %v", req.URL.String(), err)
+			scoped.Log(ctx).Fine("cache lookup failed", "url", req.URL.String(), "error", err)
 		} else if entry != nil {
 			cachedEntry = entry
 			if reqClone.Header.Get("If-None-Match") == "" {
@@ -212,7 +211,7 @@ func Do(ctx context.Context, req *http.Request) (*http.Response, error) {
 				return nil, err
 			}
 			if isGet && resp.StatusCode == http.StatusNotModified && cachedEntry != nil {
-				CloseResponseBody(resp)
+				CloseResponseBody(ctx, resp)
 				resp.StatusCode = http.StatusOK
 				resp.Status = "200 OK"
 				resp.Body = io.NopCloser(bytes.NewReader(cachedEntry.bodyBytes()))
@@ -225,14 +224,14 @@ func Do(ctx context.Context, req *http.Request) (*http.Response, error) {
 				etag := strings.TrimSpace(resp.Header.Get("ETag"))
 				if etag != "" {
 					body, readErr := io.ReadAll(resp.Body)
-					CloseResponseBody(resp)
+					CloseResponseBody(ctx, resp)
 					if readErr != nil {
 						return nil, fmt.Errorf("failed to read response body: %w", readErr)
 					}
 					resp.Body = io.NopCloser(bytes.NewReader(body))
 
 					if err := writeCacheEntry(ctx, p, req.URL.String(), etag, body); err != nil {
-						klog.V(2).Infof("failed to write github cache: %v", err)
+						scoped.Log(ctx).Fine("failed to write github cache", "error", err)
 					}
 				}
 			}
@@ -241,8 +240,8 @@ func Do(ctx context.Context, req *http.Request) (*http.Response, error) {
 
 		if attempt == len(retryBackoffs) {
 			if rateLimited {
-				CloseResponseBody(resp)
-				return nil, buildRateLimitError(resp, "")
+				CloseResponseBody(ctx, resp)
+				return nil, buildRateLimitError(ctx, resp, "")
 			}
 			return resp, err
 		}
@@ -251,13 +250,13 @@ func Do(ctx context.Context, req *http.Request) (*http.Response, error) {
 		if rateLimited {
 			var resetIn time.Duration
 			var resetTime time.Time
-			wait, resetIn, resetTime = computeRateLimitWait(resp)
+			wait, resetIn, resetTime = computeRateLimitWait(ctx, resp)
 			if wait == 0 {
-				CloseResponseBody(resp)
-				return nil, buildRateLimitError(resp, "")
+				CloseResponseBody(ctx, resp)
+				return nil, buildRateLimitError(ctx, resp, "")
 			}
 			if deadline, hasDeadline := ctx.Deadline(); hasDeadline && time.Now().Add(wait).After(deadline) {
-				CloseResponseBody(resp)
+				CloseResponseBody(ctx, resp)
 				remain := time.Until(deadline)
 				if remain < 0 {
 					remain = 0
@@ -267,14 +266,14 @@ func Do(ctx context.Context, req *http.Request) (*http.Response, error) {
 					remainStr = remain.Round(time.Millisecond).String()
 				}
 				reason := fmt.Sprintf("resets in %s, but only %s remain before the deadline", resetIn.Round(time.Second), remainStr)
-				return nil, buildRateLimitError(resp, reason)
+				return nil, buildRateLimitError(ctx, resp, reason)
 			}
-			klog.Warningf("GitHub API rate limited; waiting %s until %s before retrying", wait, resetTime)
+			scoped.Log(ctx).Warn("GitHub API rate limited; waiting before retrying", "wait", wait, "reset", resetTime)
 		} else {
 			wait = retryBackoffs[attempt]
 		}
 
-		CloseResponseBody(resp)
+		CloseResponseBody(ctx, resp)
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -299,12 +298,12 @@ func isRateLimitedResponse(resp *http.Response) bool {
 	return false
 }
 
-func computeRateLimitWait(resp *http.Response) (wait time.Duration, resetIn time.Duration, resetTime time.Time) {
+func computeRateLimitWait(ctx context.Context, resp *http.Response) (wait time.Duration, resetIn time.Duration, resetTime time.Time) {
 	now := nowFunc()
 	if dateStr := resp.Header.Get("Date"); dateStr != "" {
 		serverTime, err := http.ParseTime(dateStr)
 		if err != nil {
-			klog.V(2).Infof("failed to parse Date header %q: %v", dateStr, err)
+			scoped.Log(ctx).Fine("failed to parse Date header", "header", dateStr, "error", err)
 		} else {
 			now = serverTime.UTC()
 		}
@@ -340,7 +339,7 @@ func computeRateLimitWait(resp *http.Response) (wait time.Duration, resetIn time
 	return 0, 0, resetTime
 }
 
-func buildRateLimitError(resp *http.Response, reason string) error {
+func buildRateLimitError(ctx context.Context, resp *http.Response, reason string) error {
 	var resetInfo string
 	if reason != "" {
 		resetInfo = fmt.Sprintf(" (%s)", reason)
@@ -351,7 +350,7 @@ func buildRateLimitError(resp *http.Response, reason string) error {
 			if dateStr := resp.Header.Get("Date"); dateStr != "" {
 				serverTime, err := http.ParseTime(dateStr)
 				if err != nil {
-					klog.V(2).Infof("failed to parse Date header %q: %v", dateStr, err)
+					scoped.Log(ctx).Fine("failed to parse Date header", "header", dateStr, "error", err)
 				} else {
 					now = serverTime.UTC()
 				}
@@ -375,12 +374,11 @@ func FetchRelease(ctx context.Context, url string) (*Release, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	resp, err := Do(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	defer CloseResponseBody(resp)
+	defer CloseResponseBody(ctx, resp)
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GET %s returned status %s", url, resp.Status)
@@ -425,7 +423,7 @@ func fetchReleasesPage(ctx context.Context, url string) ([]Release, string, erro
 	if err != nil {
 		return nil, "", err
 	}
-	defer CloseResponseBody(resp)
+	defer CloseResponseBody(ctx, resp)
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, "", fmt.Errorf("GitHub releases API returned status %s for %s", resp.Status, url)
@@ -450,7 +448,7 @@ func GetText(ctx context.Context, url string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer CloseResponseBody(resp)
+	defer CloseResponseBody(ctx, resp)
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("GET %s returned HTTP status %s", url, resp.Status)

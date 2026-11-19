@@ -28,8 +28,8 @@ import (
 	"sync"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/fetch"
-	"k8s.io/klog/v2"
 )
 
 var (
@@ -158,7 +158,7 @@ func EnsureDocker(ctx context.Context, version string) (string, error) {
 	installDir := filepath.Join(cacheRoot, "tools", "docker", resolvedVer)
 	binPath := filepath.Join(installDir, "bin", binName)
 	if fileutils.IsExecutable(binPath) {
-		klog.V(2).Infof("Using docker %s", resolvedVer)
+		scoped.Log(ctx).Fine("Using docker", "version", resolvedVer)
 		return binPath, nil
 	}
 
@@ -171,7 +171,7 @@ func EnsureDocker(ctx context.Context, version string) (string, error) {
 	if rel, ok := LookupDocker(resolvedVer); ok {
 		expectedDigest = rel.Assets[plat]
 	} else {
-		klog.Warningf("docker %s is not in versions.yaml; downloading without verified digest", resolvedVer)
+		scoped.Log(ctx).Warn("docker is not in versions.yaml; downloading without verified digest", "version", resolvedVer)
 	}
 
 	if envDigest := os.Getenv("DOCKER_DOWNLOAD_DIGEST"); envDigest != "" {
@@ -190,7 +190,7 @@ func EnsureDocker(ctx context.Context, version string) (string, error) {
 	}
 	defer func() {
 		if rmErr := os.Remove(tmpArchive); rmErr != nil && !os.IsNotExist(rmErr) {
-			klog.V(2).Infof("failed to remove temporary archive %s: %v", tmpArchive, rmErr)
+			scoped.Log(ctx).Fine("failed to remove temporary archive", "path", tmpArchive, "error", rmErr)
 		}
 	}()
 
@@ -199,11 +199,11 @@ func EnsureDocker(ctx context.Context, version string) (string, error) {
 	}
 
 	if runtime.GOOS == "windows" {
-		if err := extractDockerZip(tmpArchive, binPath, binName); err != nil {
+		if err := extractDockerZip(ctx, tmpArchive, binPath, binName); err != nil {
 			return "", fmt.Errorf("failed to extract docker from %s: %w", tmpArchive, err)
 		}
 	} else {
-		if err := extractDockerTgz(tmpArchive, binPath, binName); err != nil {
+		if err := extractDockerTgz(ctx, tmpArchive, binPath, binName); err != nil {
 			return "", fmt.Errorf("failed to extract docker from %s: %w", tmpArchive, err)
 		}
 	}
@@ -212,7 +212,7 @@ func EnsureDocker(ctx context.Context, version string) (string, error) {
 		return "", fmt.Errorf("failed to chmod docker binary %s: %w", binPath, err)
 	}
 
-	klog.Infof("Installed docker %s to %s", resolvedVer, binPath)
+	scoped.Log(ctx).Info(fmt.Sprintf("Installed docker %s to %s", resolvedVer, binPath))
 	return binPath, nil
 }
 
@@ -245,7 +245,7 @@ func EnsureDockerBuildx(ctx context.Context, version string) (string, error) {
 	installDir := filepath.Join(cacheRoot, "tools", "docker-buildx", "v"+normVer)
 	binPath := filepath.Join(installDir, "bin", binName)
 	if fileutils.IsExecutable(binPath) {
-		klog.V(2).Infof("Using docker-buildx v%s", normVer)
+		scoped.Log(ctx).Fine("Using docker-buildx", "version", normVer)
 		return binPath, nil
 	}
 
@@ -258,7 +258,7 @@ func EnsureDockerBuildx(ctx context.Context, version string) (string, error) {
 	if rel, ok := LookupBuildx(normVer); ok {
 		expectedDigest = rel.Assets[plat]
 	} else {
-		klog.Warningf("docker-buildx v%s is not in versions.yaml; downloading without verified digest", normVer)
+		scoped.Log(ctx).Warn("docker-buildx is not in versions.yaml; downloading without verified digest", "version", normVer)
 	}
 
 	if envDigest := os.Getenv("BUILDX_DOWNLOAD_DIGEST"); envDigest != "" {
@@ -277,7 +277,7 @@ func EnsureDockerBuildx(ctx context.Context, version string) (string, error) {
 	}
 	defer func() {
 		if rmErr := os.Remove(tmpFile); rmErr != nil && !os.IsNotExist(rmErr) {
-			klog.V(2).Infof("failed to remove temporary file %s: %v", tmpFile, rmErr)
+			scoped.Log(ctx).Fine("failed to remove temporary file", "path", tmpFile, "error", rmErr)
 		}
 	}()
 
@@ -289,7 +289,7 @@ func EnsureDockerBuildx(ctx context.Context, version string) (string, error) {
 		return "", fmt.Errorf("failed to install buildx binary %s: %w", binPath, err)
 	}
 
-	klog.Infof("Installed docker-buildx v%s to %s", normVer, binPath)
+	scoped.Log(ctx).Info(fmt.Sprintf("Installed docker-buildx v%s to %s", normVer, binPath))
 	return binPath, nil
 }
 
@@ -308,7 +308,7 @@ func EnsureDockerWithBuildx(ctx context.Context, dockerVer, buildxVer string) (d
 	return dockerBin, buildxBin, nil
 }
 
-func extractTarEntry(tr io.Reader, dstBin string) error {
+func extractTarEntry(ctx context.Context, tr io.Reader, dstBin string) error {
 	dstDir := filepath.Dir(dstBin)
 	if err := os.MkdirAll(dstDir, 0755); err != nil {
 		return err
@@ -322,10 +322,10 @@ func extractTarEntry(tr io.Reader, dstBin string) error {
 	defer func() {
 		if !success {
 			if closeErr := tmpFile.Close(); closeErr != nil {
-				klog.V(2).Infof("failed to close temporary file: %v", closeErr)
+				scoped.Log(ctx).Fine("failed to close temporary file", "error", closeErr)
 			}
 			if rmErr := os.Remove(tmpName); rmErr != nil && !os.IsNotExist(rmErr) {
-				klog.V(2).Infof("failed to remove temporary file %s: %v", tmpName, rmErr)
+				scoped.Log(ctx).Fine("failed to remove temporary file", "path", tmpName, "error", rmErr)
 			}
 		}
 	}()
@@ -346,14 +346,14 @@ func extractTarEntry(tr io.Reader, dstBin string) error {
 	return nil
 }
 
-func extractDockerTgz(tgzPath, dstBin, targetName string) error {
+func extractDockerTgz(ctx context.Context, tgzPath, dstBin, targetName string) error {
 	f, err := os.Open(tgzPath)
 	if err != nil {
 		return err
 	}
 	defer func() {
 		if closeErr := f.Close(); closeErr != nil {
-			klog.V(2).Infof("failed to close %s: %v", tgzPath, closeErr)
+			scoped.Log(ctx).Fine("failed to close archive", "path", tgzPath, "error", closeErr)
 		}
 	}()
 
@@ -363,7 +363,7 @@ func extractDockerTgz(tgzPath, dstBin, targetName string) error {
 	}
 	defer func() {
 		if closeErr := gzr.Close(); closeErr != nil {
-			klog.V(2).Infof("failed to close gzip reader: %v", closeErr)
+			scoped.Log(ctx).Fine("failed to close gzip reader", "error", closeErr)
 		}
 	}()
 
@@ -378,13 +378,13 @@ func extractDockerTgz(tgzPath, dstBin, targetName string) error {
 		}
 		cleanName := filepath.Clean(hdr.Name)
 		if hdr.Typeflag == tar.TypeReg && (cleanName == targetName || cleanName == filepath.Join("docker", targetName) || strings.HasSuffix(cleanName, targetName)) {
-			return extractTarEntry(tr, dstBin)
+			return extractTarEntry(ctx, tr, dstBin)
 		}
 	}
 	return fmt.Errorf("target binary %q not found in archive %s", targetName, tgzPath)
 }
 
-func extractZipEntry(file *zip.File, dstBin string) error {
+func extractZipEntry(ctx context.Context, file *zip.File, dstBin string) error {
 	dstDir := filepath.Dir(dstBin)
 	if err := os.MkdirAll(dstDir, 0755); err != nil {
 		return err
@@ -395,7 +395,7 @@ func extractZipEntry(file *zip.File, dstBin string) error {
 	}
 	defer func() {
 		if closeErr := rc.Close(); closeErr != nil {
-			klog.V(2).Infof("failed to close zip entry: %v", closeErr)
+			scoped.Log(ctx).Fine("failed to close zip entry", "error", closeErr)
 		}
 	}()
 
@@ -408,10 +408,10 @@ func extractZipEntry(file *zip.File, dstBin string) error {
 	defer func() {
 		if !success {
 			if closeErr := tmpFile.Close(); closeErr != nil {
-				klog.V(2).Infof("failed to close temporary file: %v", closeErr)
+				scoped.Log(ctx).Fine("failed to close temporary file", "error", closeErr)
 			}
 			if rmErr := os.Remove(tmpName); rmErr != nil && !os.IsNotExist(rmErr) {
-				klog.V(2).Infof("failed to remove temporary file %s: %v", tmpName, rmErr)
+				scoped.Log(ctx).Fine("failed to remove temporary file", "path", tmpName, "error", rmErr)
 			}
 		}
 	}()
@@ -432,21 +432,21 @@ func extractZipEntry(file *zip.File, dstBin string) error {
 	return nil
 }
 
-func extractDockerZip(zipPath, dstBin, targetName string) error {
+func extractDockerZip(ctx context.Context, zipPath, dstBin, targetName string) error {
 	zr, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return err
 	}
 	defer func() {
 		if closeErr := zr.Close(); closeErr != nil {
-			klog.V(2).Infof("failed to close %s: %v", zipPath, closeErr)
+			scoped.Log(ctx).Fine("failed to close zip", "path", zipPath, "error", closeErr)
 		}
 	}()
 
 	for _, file := range zr.File {
 		cleanName := filepath.Clean(file.Name)
 		if !file.FileInfo().IsDir() && (cleanName == targetName || cleanName == filepath.Join("docker", targetName) || strings.HasSuffix(cleanName, targetName)) {
-			return extractZipEntry(file, dstBin)
+			return extractZipEntry(ctx, file, dstBin)
 		}
 	}
 	return fmt.Errorf("target binary %q not found in zip %s", targetName, zipPath)
