@@ -488,6 +488,9 @@ func TestDockerBuildTask_Platforms(t *testing.T) {
 		if !strings.Contains(argsStr, "--push") {
 			t.Errorf("expected '--push' in args, got: %s", argsStr)
 		}
+		if strings.Contains(argsStr, "--builder") {
+			t.Errorf("expected no '--builder' flag when default driver supports multi-platform, got: %s", argsStr)
+		}
 	}
 
 	// 4. Test case B: Push is false, no images.yaml configured -> should use docker buildx build --load, no platform (since there are multiple)
@@ -601,15 +604,27 @@ platforms:
 	}
 
 	foundBuildxBuild := false
+	foundCreateBuilder := false
 	for _, call := range calls {
 		argsStr := strings.Join(call.args, " ")
-		if len(call.args) > 0 && call.args[0] == "build" && strings.Contains(argsStr, "--platform linux/amd64,linux/arm64") && strings.Contains(argsStr, "--push") {
+		if len(call.args) > 0 && call.args[0] == "use" {
+			t.Errorf("unexpected buildx use command: %s", argsStr)
+		}
+		if strings.Contains(argsStr, "--use") {
+			t.Errorf("unexpected --use flag in command: %s", argsStr)
+		}
+		if len(call.args) > 0 && call.args[0] == "create" && strings.Contains(argsStr, "--name ap-builder") && strings.Contains(argsStr, "--driver docker-container") {
+			foundCreateBuilder = true
+		}
+		if len(call.args) > 0 && call.args[0] == "build" && strings.Contains(argsStr, "--platform linux/amd64,linux/arm64") && strings.Contains(argsStr, "--push") && strings.Contains(argsStr, "--builder ap-builder") {
 			foundBuildxBuild = true
-			break
 		}
 	}
+	if !foundCreateBuilder {
+		t.Errorf("expected create command for ap-builder, calls: %v", calls)
+	}
 	if !foundBuildxBuild {
-		t.Errorf("expected build call with multi-platform and --push after builder creation, calls: %v", calls)
+		t.Errorf("expected build call with multi-platform, --push, and --builder ap-builder after builder creation, calls: %v", calls)
 	}
 
 	// 9. Test case G: Multi-platform NOT supported and creating ap-builder fails -> should return wrapped error

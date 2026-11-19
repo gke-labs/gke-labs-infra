@@ -139,16 +139,18 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.TaskContext) err
 	// If it still cannot support multi-platform builds, we treat this as an error and provide hints.
 	// If we are building locally without pushing, we fall back to the host's native platform
 	// so local developer builds don't fail due to repository-wide multi-platform settings.
+	var builder string
 	if t.Push && len(platforms) > 1 {
-		if !t.supportsMultiPlatform(ctx, buildxBin) {
+		if !t.supportsMultiPlatform(ctx, buildxBin, "") {
 			if err := t.ensureMultiPlatformBuilder(ctx, buildxBin); err != nil {
 				return fmt.Errorf("failed to ensure multi-platform builder: %w", err)
 			}
+			builder = apBuilderName
 		}
-		if !t.supportsMultiPlatform(ctx, buildxBin) {
+		if !t.supportsMultiPlatform(ctx, buildxBin, builder) {
 			return fmt.Errorf("multi-platform build (platforms: %v) is not supported for the default docker driver. "+
 				"To build for multiple platforms, please switch to a different driver (e.g., docker-container, kubernetes) "+
-				"by running 'docker buildx create --use', or configure a single platform in '.ap/images.yaml'", platforms)
+				"or configure a single platform in '.ap/images.yaml'", platforms)
 		}
 	} else if !t.Push && len(platforms) > 1 {
 		if !t.Quiet {
@@ -157,21 +159,14 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.TaskContext) err
 		platforms = nil
 	}
 
-	return t.runDocker(ctx, scope, buildxBin, dockerBin, t.Root, fullImageName, actualImagePrefix, t.Dockerfile, naming, platforms)
+	return t.runDocker(ctx, scope, buildxBin, dockerBin, t.Root, fullImageName, actualImagePrefix, t.Dockerfile, naming, platforms, builder)
 }
 
 func (t *DockerBuildTask) ensureMultiPlatformBuilder(ctx context.Context, buildxBin string) error {
-	if t.supportsMultiPlatform(ctx, buildxBin) {
+	if t.supportsMultiPlatform(ctx, buildxBin, apBuilderName) {
 		return nil
 	}
-	// Try to use existing ap-builder
-	useCmd := execCommandContext(ctx, buildxBin, "use", "ap-builder")
-	useCmd.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(buildxBin))
-	if err := useCmd.Run(); err == nil && t.supportsMultiPlatform(ctx, buildxBin) {
-		return nil
-	}
-	// Create new ap-builder with docker-container driver and host networking
-	createCmd := execCommandContext(ctx, buildxBin, "create", "--name", "ap-builder", "--driver", "docker-container", "--driver-opt", "network=host", "--use")
+	createCmd := execCommandContext(ctx, buildxBin, "create", "--name", apBuilderName, "--driver", "docker-container", "--driver-opt", "network=host")
 	createCmd.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(buildxBin))
 	if err := createCmd.Run(); err != nil {
 		return fmt.Errorf("failed to create multi-platform builder: %w", err)
@@ -293,8 +288,12 @@ func pruneOCIDirectory(ctx context.Context, directory string) error {
 	return nil
 }
 
-func (t *DockerBuildTask) supportsMultiPlatform(ctx context.Context, buildxBin string) bool {
-	cmd := execCommandContext(ctx, buildxBin, "inspect")
+func (t *DockerBuildTask) supportsMultiPlatform(ctx context.Context, buildxBin, builder string) bool {
+	args := []string{"inspect"}
+	if builder != "" {
+		args = append(args, "--builder", builder)
+	}
+	cmd := execCommandContext(ctx, buildxBin, args...)
 	cmd.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(buildxBin))
 	out, err := cmd.Output()
 	if err != nil {
@@ -467,7 +466,7 @@ func (t *DockerBuildTask) runRemoteBuildctl(ctx context.Context, scope *tasks.Ta
 	return nil
 }
 
-func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContext, buildxBin, dockerBin, root, fullImageName, actualImagePrefix, relDockerfilePath string, naming ImageNaming, platforms []string) error {
+func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContext, buildxBin, dockerBin, root, fullImageName, actualImagePrefix, relDockerfilePath string, naming ImageNaming, platforms []string, builder string) error {
 	start := time.Now()
 
 	metaFile := filepath.Join(os.TempDir(), fmt.Sprintf("buildx-meta-%d.json", time.Now().UnixNano()))
@@ -484,6 +483,10 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContex
 		"--build-arg", "IMAGE_PREFIX=" + naming.Prefix,
 		"--build-arg", "IMAGE_TAG=" + naming.Tag,
 		"--metadata-file", metaFile,
+	}
+
+	if builder != "" {
+		args = append(args, "--builder", builder)
 	}
 
 	if t.Push {
