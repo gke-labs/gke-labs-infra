@@ -137,13 +137,12 @@ func TestRegistryPush(t *testing.T) {
 	}
 
 	cluster := k8s.CurrentCluster()
-	forwarder, err := k8s.NewPodPortForwarder(t.Context(), cluster, registrypush.DefaultNamespace, registrypush.DefaultService, registrypush.DefaultPort)
+	transport, err := registrypush.NewTransport(cluster, registrypush.DefaultNamespace, registrypush.DefaultService, registrypush.DefaultPort)
 	if err != nil {
-		t.Fatalf("NewPodPortForwarder failed: %v", err)
+		t.Fatalf("NewTransport failed: %v", err)
 	}
-	defer forwarder.Close()
 
-	if err := registrypush.Push(t.Context(), forwarder.Transport(), directory, "registrypush-e2e", "v1"); err != nil {
+	if err := registrypush.Push(t.Context(), transport, directory, "registrypush-e2e", "v1"); err != nil {
 		t.Fatalf("Push failed: %v", err)
 	}
 
@@ -151,7 +150,7 @@ func TestRegistryPush(t *testing.T) {
 	if err != nil {
 		t.Fatalf("name.NewTag failed: %v", err)
 	}
-	pulledImage, err := remote.Image(imageTag, remote.WithTransport(forwarder.Transport()), remote.WithContext(t.Context()))
+	pulledImage, err := remote.Image(imageTag, remote.WithTransport(transport), remote.WithContext(t.Context()))
 	if err != nil {
 		t.Fatalf("remote.Image failed: %v", err)
 	}
