@@ -51,7 +51,7 @@ func (t *FuncTask) GetChildren() []Task {
 // PrintTree prints the task tree to the specified writer.
 func PrintTree(w io.Writer, t Task, indent int) {
 	if _, err := fmt.Fprintf(w, "%s%s\n", strings.Repeat("  ", indent), t.GetName()); err != nil {
-		scoped.Log(context.Background()).Debug("failed to write task tree", "error", err)
+		scoped.Log(context.Background()).Fine("failed to write task tree", "error", err)
 	}
 	for _, child := range t.GetChildren() {
 		PrintTree(w, child, indent+1)

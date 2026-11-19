@@ -132,13 +132,13 @@ func resolveBash(ctx context.Context) (*bashTool, error) {
 	cmd := exec.CommandContext(ctx, binary, "--version")
 	out, err := cmd.Output()
 	if err != nil {
-		log.Debug("failed to run bash --version", "binary", binary, "error", err)
+		log.Fine("failed to run bash --version", "binary", binary, "error", err)
 		return bt, nil
 	}
 
 	ver, major, err := parseBashVersion(string(out))
 	if err != nil {
-		log.Debug("failed to parse bash version", "binary", binary, "error", err)
+		log.Fine("failed to parse bash version", "binary", binary, "error", err)
 		return bt, nil
 	}
 

@@ -33,12 +33,12 @@ type PRLintTask struct {
 func (t *PRLintTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
 	baseBranch, err := detectBaseBranch(ctx, t.RepoRoot)
 	if err != nil {
-		scoped.Log(ctx).Debug("could not detect base branch", "error", err)
+		scoped.Log(ctx).Fine("could not detect base branch", "error", err)
 		return nil
 	}
 
 	if baseBranch == "" {
-		scoped.Log(ctx).Debug("no base branch detected, skipping PR lint")
+		scoped.Log(ctx).Fine("no base branch detected, skipping PR lint")
 		return nil
 	}
 

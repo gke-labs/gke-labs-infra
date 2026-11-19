@@ -19,7 +19,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -43,7 +42,7 @@ import (
 // BuildkitForwarder forwards connections from a private unix domain socket to
 // port 2375 of an in-cluster BuildKit pod via the Kubernetes port-forward API.
 type BuildkitForwarder struct {
-	logger           *slog.Logger
+	logger           scoped.Logger
 	socketDirectory  string
 	socketPath       string
 	remotePort       int
@@ -143,7 +142,7 @@ func findReadyPod(ctx context.Context, client rest.Interface, namespace, service
 	return nil, fmt.Errorf("no ready pod found for service %s/%s", namespace, service)
 }
 
-func newBuildkitForwarderWithDialer(logger *slog.Logger, dialer httpstream.Dialer, remotePort int) (*BuildkitForwarder, error) {
+func newBuildkitForwarderWithDialer(logger scoped.Logger, dialer httpstream.Dialer, remotePort int) (*BuildkitForwarder, error) {
 	streamConnection, protocol, err := dialer.Dial(portforward.PortForwardProtocolV1Name)
 	if err != nil {
 		return nil, fmt.Errorf("dialing port-forward stream: %w", err)
@@ -224,7 +223,7 @@ func (f *BuildkitForwarder) acceptLoop() {
 func (f *BuildkitForwarder) handleConnection(connection net.Conn) {
 	defer func() {
 		if closeErr := connection.Close(); closeErr != nil {
-			f.logger.Debug("closing port-forward connection", "error", closeErr)
+			f.logger.Finest("closing port-forward connection", "error", closeErr)
 		}
 	}()
 
@@ -241,7 +240,7 @@ func (f *BuildkitForwarder) handleConnection(connection net.Conn) {
 		return
 	}
 	if closeErr := errorStream.Close(); closeErr != nil {
-		f.logger.Debug("closing error stream for port-forward", "error", closeErr)
+		f.logger.Finest("closing error stream for port-forward", "error", closeErr)
 		return
 	}
 	defer f.streamConnection.RemoveStreams(errorStream)
@@ -273,14 +272,14 @@ func (f *BuildkitForwarder) handleConnection(connection net.Conn) {
 	go func() {
 		defer close(remoteDone)
 		if _, copyErr := io.Copy(connection, dataStream); copyErr != nil {
-			f.logger.Debug("copying from remote data stream to unix connection", "error", copyErr)
+			f.logger.Finest("copying from remote data stream to unix connection", "error", copyErr)
 		}
 	}()
 
 	go func() {
 		defer func() {
 			if closeErr := dataStream.Close(); closeErr != nil {
-				f.logger.Debug("closing data stream", "error", closeErr)
+				f.logger.Finest("closing data stream", "error", closeErr)
 			}
 		}()
 		if _, copyErr := io.Copy(dataStream, connection); copyErr != nil {
@@ -295,7 +294,7 @@ func (f *BuildkitForwarder) handleConnection(connection net.Conn) {
 	}
 
 	if resetErr := dataStream.Reset(); resetErr != nil {
-		f.logger.Debug("resetting data stream", "error", resetErr)
+		f.logger.Finest("resetting data stream", "error", resetErr)
 	}
 	<-errorChannel
 }

@@ -29,11 +29,11 @@ import (
 
 func TestCommandLogging(t *testing.T) {
 	var buf bytes.Buffer
-	testLogger := tasks.NewLogger(&buf)
+	testLogger := slog.New(tasks.NewHandler(&buf))
 	slog.SetDefault(testLogger)
 	klog.SetSlogLogger(testLogger)
 	defer func() {
-		defaultLogger := tasks.NewLogger(os.Stderr)
+		defaultLogger := slog.New(tasks.NewHandler(os.Stderr))
 		slog.SetDefault(defaultLogger)
 		klog.SetSlogLogger(defaultLogger)
 	}()
@@ -47,7 +47,7 @@ func TestCommandLogging(t *testing.T) {
 
 	logger := scoped.Log(cmd.Context())
 	logger.Info("command started", "component", "root", "target", "local")
-	logger.Debug("verbose debug message", "should", "hide")
+	logger.Fine("verbose debug message", "should", "hide")
 
 	got := strings.TrimSpace(buf.String())
 	want := "command started component=root target=local"

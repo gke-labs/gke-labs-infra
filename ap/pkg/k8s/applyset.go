@@ -398,7 +398,7 @@ func ResolveParentRef(ctx context.Context, parent *applyset.ParentRef, deployNam
 	if kubectlBin != "" {
 		r, err := GetDiscoveryScopeResolver(cluster, kubectlBin)
 		if err != nil {
-			scoped.Log(ctx).Debug("could not get discovery scope resolver", "error", err)
+			scoped.Log(ctx).Fine("could not get discovery scope resolver", "error", err)
 		} else {
 			resolver = r
 		}
@@ -425,7 +425,7 @@ func ResolveParentRef(ctx context.Context, parent *applyset.ParentRef, deployNam
 		gvk := GroupVersionKind{Group: parent.Group, Kind: parent.Kind}
 		ns, err := resolver.IsNamespaced(gvk)
 		if err != nil {
-			scoped.Log(ctx).Debug("could not determine scope", "gvk", gvk.String(), "error", err)
+			scoped.Log(ctx).Fine("could not determine scope", "gvk", gvk.String(), "error", err)
 		} else if !ns {
 			isNamespaced = false
 		}

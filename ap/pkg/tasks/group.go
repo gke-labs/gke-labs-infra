@@ -52,7 +52,7 @@ func (b *syncBuffer) String() string {
 
 func writef(w io.Writer, format string, args ...any) {
 	if _, err := fmt.Fprintf(w, format, args...); err != nil {
-		scoped.Log(context.Background()).Debug("failed to write output", "error", err)
+		scoped.Log(context.Background()).Fine("failed to write output", "error", err)
 	}
 }
 
@@ -245,7 +245,7 @@ func Run(ctx context.Context, scope *TaskContext, ts []Task, opts RunOptions) er
 	defer func() {
 		if scope != nil && scope.SourceTree() != nil {
 			if saveErr := scope.SourceTree().Save(); saveErr != nil {
-				scoped.Log(ctx).Debug("failed to save sourcetree hash cache", "error", saveErr)
+				scoped.Log(ctx).Fine("failed to save sourcetree hash cache", "error", saveErr)
 			}
 		}
 	}()

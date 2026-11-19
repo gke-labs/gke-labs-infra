@@ -302,11 +302,11 @@ func TestDiscoverScopes_ScriptAndGoE2e(t *testing.T) {
 	}
 
 	var logBuf bytes.Buffer
-	testLogger := tasks.NewLogger(&logBuf)
+	testLogger := slog.New(tasks.NewHandler(&logBuf))
 	slog.SetDefault(testLogger)
 	klog.SetSlogLogger(testLogger)
 	defer func() {
-		defaultLogger := tasks.NewLogger(os.Stderr)
+		defaultLogger := slog.New(tasks.NewHandler(os.Stderr))
 		slog.SetDefault(defaultLogger)
 		klog.SetSlogLogger(defaultLogger)
 	}()

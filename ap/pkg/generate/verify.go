@@ -257,7 +257,7 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext
 	// Capture initial git status
 	initialGitStatus, gitErr := getGitStatus(ctx, repoRoot)
 	if gitErr != nil {
-		log.Debug("failed to get initial git status", "error", gitErr)
+		log.Fine("failed to get initial git status", "error", gitErr)
 	}
 
 	// Generate nonce for this run
@@ -341,7 +341,7 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext
 				}
 			}
 			if err := os.Chtimes(pf.path, pf.modTime, pf.modTime); err != nil {
-				log.Debug("failed to restore mtime", "path", pf.path, "error", err)
+				log.Fine("failed to restore mtime", "path", pf.path, "error", err)
 			}
 		}
 	}
@@ -379,7 +379,7 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext
 			if currentHash == pf.hash {
 				// File is byte-identical! Restore mtime.
 				if err := os.Chtimes(pf.path, pf.modTime, pf.modTime); err != nil {
-					log.Debug("failed to restore mtime", "path", pf.path, "error", err)
+					log.Fine("failed to restore mtime", "path", pf.path, "error", err)
 				}
 			} else {
 				currentContent, readErr := os.ReadFile(pf.path)

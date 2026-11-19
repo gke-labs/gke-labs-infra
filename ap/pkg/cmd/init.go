@@ -234,7 +234,7 @@ func detectGitUserName(ctx context.Context, dir string) string {
 	cmd.Env = env
 	out, err := cmd.Output()
 	if err != nil {
-		scoped.Log(ctx).Debug("detectGitUserName failed", "dir", dir, "error", err)
+		scoped.Log(ctx).Fine("detectGitUserName failed", "dir", dir, "error", err)
 		return ""
 	}
 	return strings.TrimSpace(string(out))

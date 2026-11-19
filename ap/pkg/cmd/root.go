@@ -117,7 +117,7 @@ func (opt *RootOptions) Resolve(args []string) error {
 }
 
 func init() {
-	defaultLogger := tasks.NewLogger(os.Stderr)
+	defaultLogger := slog.New(tasks.NewHandler(os.Stderr))
 	slog.SetDefault(defaultLogger)
 	klog.SetSlogLogger(defaultLogger)
 }

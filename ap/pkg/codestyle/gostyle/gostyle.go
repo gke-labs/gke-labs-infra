@@ -53,7 +53,7 @@ func Run(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files [
 	// Initialize cache
 	cm, err := cache.NewManager(ctx)
 	if err != nil {
-		log.Debug("failed to initialize cache", "error", err)
+		log.Fine("failed to initialize cache", "error", err)
 	} else {
 		defer func() {
 			if err := cm.Save(); err != nil {
@@ -236,7 +236,7 @@ func runGoModTidy(ctx context.Context, r *sourcetree.SourceTree, repoRoot string
 		}
 
 		if cm != nil && cm.IsDone(cache.StepTidy, key) {
-			log.Debug("Module is tidy (cached)", "module", relMod)
+			log.Fine("Module is tidy (cached)", "module", relMod)
 			continue
 		}
 

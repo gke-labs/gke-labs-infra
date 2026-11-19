@@ -96,7 +96,7 @@ func DialStdioConn(ctx context.Context, connection net.Conn) (api.PluginServiceC
 	)
 	if err != nil {
 		if closeError := connection.Close(); closeError != nil {
-			scoped.Log(ctx).Debug("failed to close connection on dial error", "error", closeError)
+			scoped.Log(ctx).Fine("failed to close connection on dial error", "error", closeError)
 		}
 		return nil, nil, fmt.Errorf("connecting to plugin stdio: %w", err)
 	}
@@ -188,7 +188,7 @@ func DescribeContainer(ctx context.Context, scope *tasks.TaskContext, cacheDirec
 	}
 	defer func() {
 		if closeError := closer.Close(); closeError != nil {
-			scoped.Log(ctx).Debug("failed to close plugin client during describe", "error", closeError)
+			scoped.Log(ctx).Fine("failed to close plugin client during describe", "error", closeError)
 		}
 	}()
 
@@ -446,7 +446,7 @@ func (task *ContainerTask) run(ctx context.Context, scope *tasks.TaskContext) er
 	}
 	defer func() {
 		if closeError := closer.Close(); closeError != nil {
-			scoped.Log(ctx).Debug("failed to close plugin client", "error", closeError)
+			scoped.Log(ctx).Fine("failed to close plugin client", "error", closeError)
 		}
 	}()
 
@@ -464,7 +464,7 @@ func (task *ContainerTask) run(ctx context.Context, scope *tasks.TaskContext) er
 	}
 	defer func() {
 		if removeErr := os.RemoveAll(stagingDirectory); removeErr != nil && !os.IsNotExist(removeErr) {
-			scoped.Log(ctx).Debug("failed to remove staging directory", "dir", stagingDirectory, "error", removeErr)
+			scoped.Log(ctx).Fine("failed to remove staging directory", "dir", stagingDirectory, "error", removeErr)
 		}
 	}()
 
@@ -474,7 +474,7 @@ func (task *ContainerTask) run(ctx context.Context, scope *tasks.TaskContext) er
 	}
 	defer func() {
 		if closeError := stagingRoot.Close(); closeError != nil {
-			scoped.Log(ctx).Debug("failed to close staging root", "error", closeError)
+			scoped.Log(ctx).Fine("failed to close staging root", "error", closeError)
 		}
 	}()
 
@@ -520,7 +520,7 @@ func (task *ContainerTask) sendInputs(ctx context.Context, stream api.PluginServ
 	}
 	defer func() {
 		if closeError := repositoryRoot.Close(); closeError != nil {
-			scoped.Log(ctx).Debug("failed to close repository root", "error", closeError)
+			scoped.Log(ctx).Fine("failed to close repository root", "error", closeError)
 		}
 	}()
 
@@ -565,7 +565,7 @@ func (task *ContainerTask) sendInputs(ctx context.Context, stream api.PluginServ
 
 		fileContent, fileMode, err := readFileContentAndMode(openedFile, relativeFilePath)
 		if closeError := openedFile.Close(); closeError != nil {
-			scoped.Log(ctx).Debug("failed to close file", "path", relativeFilePath, "error", closeError)
+			scoped.Log(ctx).Fine("failed to close file", "path", relativeFilePath, "error", closeError)
 		}
 		if err != nil {
 			return err
@@ -777,7 +777,7 @@ func verifyStagedOutputs(ctx context.Context, targetDirectory, stagingDirectory 
 			diffOutput, hasDiff, err := gitDiff(ctx, checkoutPath, stagedPath)
 			if cleanupDirectory != "" {
 				if removeErr := os.RemoveAll(cleanupDirectory); removeErr != nil && !os.IsNotExist(removeErr) {
-					scoped.Log(ctx).Debug("failed to remove temporary directory", "dir", cleanupDirectory, "error", removeErr)
+					scoped.Log(ctx).Fine("failed to remove temporary directory", "dir", cleanupDirectory, "error", removeErr)
 				}
 			}
 			if err != nil {

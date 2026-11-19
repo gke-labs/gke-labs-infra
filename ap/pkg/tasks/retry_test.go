@@ -19,10 +19,13 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"k8s.io/klog/v2"
 )
@@ -324,5 +327,79 @@ func TestRetry_PassingTaskShowsRetryWarning(t *testing.T) {
 	}
 	if !strings.Contains(out, "task failed, retrying level=warning task=task-retry-pass attempt=1") {
 		t.Errorf("expected retry warning line in output:\n%s", out)
+	}
+}
+
+func TestBufferHandler_VerbosityLevels(t *testing.T) {
+	tests := []struct {
+		vLevel int
+		want   []string
+		omit   []string
+	}{
+		{
+			vLevel: 0,
+			want:   []string{"error line", "warn line", "info line"},
+			omit:   []string{"debug line", "fine line", "finer line", "finest line", "klog v1", "klog v2", "klog v3", "klog v4"},
+		},
+		{
+			vLevel: 1,
+			want:   []string{"error line", "warn line", "info line", "debug line", "klog v1"},
+			omit:   []string{"fine line", "finer line", "finest line", "klog v2", "klog v3", "klog v4"},
+		},
+		{
+			vLevel: 2,
+			want:   []string{"error line", "warn line", "info line", "debug line", "fine line", "klog v1", "klog v2"},
+			omit:   []string{"finer line", "finest line", "klog v3", "klog v4"},
+		},
+		{
+			vLevel: 3,
+			want:   []string{"error line", "warn line", "info line", "debug line", "fine line", "finer line", "klog v1", "klog v2", "klog v3"},
+			omit:   []string{"finest line", "klog v4"},
+		},
+		{
+			vLevel: 4,
+			want:   []string{"error line", "warn line", "info line", "debug line", "fine line", "finer line", "finest line", "klog v1", "klog v2", "klog v3", "klog v4"},
+			omit:   nil,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(fmt.Sprintf("v=%d", tc.vLevel), func(t *testing.T) {
+			fs := flag.NewFlagSet("klog", flag.ContinueOnError)
+			klog.InitFlags(fs)
+			if err := fs.Set("v", strconv.Itoa(tc.vLevel)); err != nil {
+				t.Fatalf("setting -v: %v", err)
+			}
+			defer fs.Set("v", "0")
+
+			var buf bytes.Buffer
+			logger := NewLogger(&buf)
+			ctx := scoped.WithLog(t.Context(), logger)
+
+			logger.Error("error line")
+			logger.Warn("warn line")
+			logger.Info("info line")
+			logger.Debug("debug line")
+			logger.Fine("fine line")
+			logger.Finer("finer line")
+			logger.Finest("finest line")
+
+			klog.FromContext(ctx).V(1).Info("klog v1")
+			klog.FromContext(ctx).V(2).Info("klog v2")
+			klog.FromContext(ctx).V(3).Info("klog v3")
+			klog.FromContext(ctx).V(4).Info("klog v4")
+
+			out := buf.String()
+			for _, w := range tc.want {
+				if !strings.Contains(out, w) {
+					t.Errorf("at -v=%d, expected %q in output:\n%s", tc.vLevel, w, out)
+				}
+			}
+			for _, o := range tc.omit {
+				if strings.Contains(out, o) {
+					t.Errorf("at -v=%d, expected %q NOT in output:\n%s", tc.vLevel, o, out)
+				}
+			}
+		})
 	}
 }

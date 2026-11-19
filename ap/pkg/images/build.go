@@ -228,7 +228,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 	metaFile := filepath.Join(os.TempDir(), fmt.Sprintf("buildctl-meta-%d.json", time.Now().UnixNano()))
 	defer func() {
 		if err := os.Remove(metaFile); err != nil && !os.IsNotExist(err) {
-			scoped.Log(ctx).Debug("failed to remove metadata file", "path", metaFile, "error", err)
+			scoped.Log(ctx).Finest("failed to remove metadata file", "path", metaFile, "error", err)
 		}
 	}()
 
@@ -319,7 +319,7 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContex
 	metaFile := filepath.Join(os.TempDir(), fmt.Sprintf("buildx-meta-%d.json", time.Now().UnixNano()))
 	defer func() {
 		if err := os.Remove(metaFile); err != nil && !os.IsNotExist(err) {
-			scoped.Log(ctx).Debug("failed to remove metadata file", "path", metaFile, "error", err)
+			scoped.Log(ctx).Finest("failed to remove metadata file", "path", metaFile, "error", err)
 		}
 	}()
 
