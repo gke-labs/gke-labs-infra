@@ -16,7 +16,6 @@ package baseline
 
 import (
 	"bytes"
-	"context"
 	"go/token"
 	"log/slog"
 	"os"
@@ -290,154 +289,55 @@ func TestResolveBaselinePath(t *testing.T) {
 	}
 }
 
-type captureHandler struct {
-	records []slog.Record
-}
+func TestApply_Reporting(t *testing.T) {
+	finding := Finding{
+		Pos:     token.Position{Filename: "pkg/foo/bar.go", Line: 10, Column: 5},
+		Message: "use t.Context() instead",
+		Related: []RelatedInfo{{Pos: token.Position{Filename: "pkg/foo/bar.go", Line: 5, Column: 2}, Message: "context created here"}},
+	}
 
-func (h *captureHandler) Enabled(context.Context, slog.Level) bool {
-	return true
-}
-
-func (h *captureHandler) Handle(_ context.Context, r slog.Record) error {
-	h.records = append(h.records, r.Clone())
-	return nil
-}
-
-func (h *captureHandler) WithAttrs(_ []slog.Attr) slog.Handler { return h }
-func (h *captureHandler) WithGroup(_ string) slog.Handler      { return h }
-
-func TestApply_WarnMode(t *testing.T) {
-	handler := &captureHandler{}
-	logger := slog.New(handler)
-	ctx := scoped.WithLog(t.Context(), logger)
-
-	var stderr bytes.Buffer
-	findings := []Finding{
+	tests := []struct {
+		mode       string
+		wantErr    bool
+		wantLog    []string
+		wantStderr string
+	}{
 		{
-			Pos: token.Position{
-				Filename: "pkg/foo/bar.go",
-				Line:     10,
-				Column:   5,
+			mode:    "warn",
+			wantErr: false,
+			wantLog: []string{
+				"level=WARN msg=\"pkg/foo/bar.go:10:5: use t.Context() instead\"",
+				"level=WARN msg=\"pkg/foo/bar.go:5:2:\\tcontext created here\"",
+				"level=WARN msg=\"check failed\" name=testcontext dir=/repo diagnostics=1",
 			},
-			Message:       "use t.Context() instead",
-			RelFile:       "pkg/foo/bar.go",
-			EnclosingFunc: "TestFoo",
-			Related: []RelatedInfo{
-				{
-					Pos:     token.Position{Filename: "pkg/foo/bar.go", Line: 5, Column: 2},
-					Message: "context created here",
-				},
-			},
+		},
+		{
+			mode:       "error",
+			wantErr:    true,
+			wantStderr: "pkg/foo/bar.go:10:5: use t.Context() instead\npkg/foo/bar.go:5:2:\tcontext created here\n",
 		},
 	}
 
-	opts := ApplyOptions{
-		Name:            "testcontext",
-		RepoRoot:        "/repo",
-		Dir:             "/repo",
-		AllCheckedFiles: map[string]bool{"pkg/foo/bar.go": true},
-		Mode:            "warn",
-		Stderr:          &stderr,
-	}
-
-	reported, err := Apply(ctx, findings, opts)
-	if err != nil {
-		t.Fatalf("unexpected error in warn mode: %v", err)
-	}
-	if len(reported) != 1 {
-		t.Fatalf("expected 1 reported finding, got %d", len(reported))
-	}
-
-	// In warn mode, findings must not be written to Stderr (avoiding duplicates)
-	if stderr.Len() != 0 {
-		t.Errorf("expected empty stderr in warn mode, got:\n%s", stderr.String())
-	}
-
-	// Must log each finding, related info, and summary at warning level
-	if len(handler.records) != 3 {
-		t.Fatalf("expected 3 log records, got %d", len(handler.records))
-	}
-
-	// 1. Finding logged at warning level in file:line: message form
-	if handler.records[0].Level != slog.LevelWarn {
-		t.Errorf("record 0: expected LevelWarn, got %v", handler.records[0].Level)
-	}
-	if want := "pkg/foo/bar.go:10:5: use t.Context() instead"; handler.records[0].Message != want {
-		t.Errorf("record 0: message = %q, want %q", handler.records[0].Message, want)
-	}
-
-	// 2. Related info line logged at warning level
-	if handler.records[1].Level != slog.LevelWarn {
-		t.Errorf("record 1: expected LevelWarn, got %v", handler.records[1].Level)
-	}
-	if want := "pkg/foo/bar.go:5:2:\tcontext created here"; handler.records[1].Message != want {
-		t.Errorf("record 1: message = %q, want %q", handler.records[1].Message, want)
-	}
-
-	// 3. Summary line logged at warning level
-	if handler.records[2].Level != slog.LevelWarn {
-		t.Errorf("record 2: expected LevelWarn, got %v", handler.records[2].Level)
-	}
-	if want := "check failed"; handler.records[2].Message != want {
-		t.Errorf("record 2: message = %q, want %q", handler.records[2].Message, want)
-	}
-
-	var hasName, hasDiagnostics bool
-	handler.records[2].Attrs(func(a slog.Attr) bool {
-		if a.Key == "name" && a.Value.String() == "testcontext" {
-			hasName = true
-		}
-		if a.Key == "diagnostics" && a.Value.Int64() == 1 {
-			hasDiagnostics = true
-		}
-		return true
-	})
-	if !hasName {
-		t.Errorf("record 2: missing name=testcontext attribute")
-	}
-	if !hasDiagnostics {
-		t.Errorf("record 2: missing diagnostics=1 attribute")
-	}
-}
-
-func TestApply_ErrorMode(t *testing.T) {
-	handler := &captureHandler{}
-	logger := slog.New(handler)
-	ctx := scoped.WithLog(t.Context(), logger)
-
-	var stderr bytes.Buffer
-	findings := []Finding{
-		{
-			Pos: token.Position{
-				Filename: "pkg/foo/bar.go",
-				Line:     10,
-				Column:   5,
-			},
-			Message:       "unused variable",
-			RelFile:       "pkg/foo/bar.go",
-			EnclosingFunc: "TestFoo",
-		},
-	}
-
-	opts := ApplyOptions{
-		Name:            "unused",
-		RepoRoot:        "/repo",
-		Dir:             "/repo",
-		AllCheckedFiles: map[string]bool{"pkg/foo/bar.go": true},
-		Mode:            "error",
-		Stderr:          &stderr,
-	}
-
-	_, err := Apply(ctx, findings, opts)
-	if err == nil {
-		t.Fatal("expected error in error mode, got nil")
-	}
-
-	// In error mode, findings must be written to Stderr and NOT logged at warning level
-	if !strings.Contains(stderr.String(), "pkg/foo/bar.go:10:5: unused variable") {
-		t.Errorf("expected finding in stderr, got:\n%s", stderr.String())
-	}
-	if len(handler.records) != 0 {
-		t.Errorf("expected no warning log records in error mode, got %d", len(handler.records))
+	for _, tc := range tests {
+		t.Run(tc.mode, func(t *testing.T) {
+			var logBuf, errBuf bytes.Buffer
+			ctx := scoped.WithLog(t.Context(), slog.New(slog.NewTextHandler(&logBuf, nil)))
+			opts := ApplyOptions{Name: "testcontext", RepoRoot: "/repo", Dir: "/repo", Mode: tc.mode, Stderr: &errBuf}
+			_, err := Apply(ctx, []Finding{finding}, opts)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("Apply() error = %v, wantErr %v", err, tc.wantErr)
+			}
+			for _, w := range tc.wantLog {
+				if !strings.Contains(logBuf.String(), w) {
+					t.Errorf("log output missing %q, got:\n%s", w, logBuf.String())
+				}
+			}
+			if len(tc.wantLog) == 0 && logBuf.Len() != 0 {
+				t.Errorf("expected no log output, got:\n%s", logBuf.String())
+			}
+			if errBuf.String() != tc.wantStderr {
+				t.Errorf("stderr = %q, want %q", errBuf.String(), tc.wantStderr)
+			}
+		})
 	}
 }
