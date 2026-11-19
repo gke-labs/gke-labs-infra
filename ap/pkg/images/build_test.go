@@ -29,6 +29,9 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
+	"github.com/google/go-containerregistry/pkg/v1/empty"
+	"github.com/google/go-containerregistry/pkg/v1/layout"
+	"github.com/google/go-containerregistry/pkg/v1/random"
 )
 
 func TestHasImages(t *testing.T) {
@@ -303,7 +306,85 @@ func TestBuildTasksForImages(t *testing.T) {
 	}
 }
 
-func TestBuildTasks_PortForward(t *testing.T) {
+func TestPruneOCIDirectory(t *testing.T) {
+	layoutDirectory := t.TempDir()
+	image, err := random.Image(1024, 1)
+	if err != nil {
+		t.Fatalf("random.Image: %v", err)
+	}
+
+	layoutPath, err := layout.Write(layoutDirectory, empty.Index)
+	if err != nil {
+		t.Fatalf("layout.Write: %v", err)
+	}
+	if err := layoutPath.AppendImage(image); err != nil {
+		t.Fatalf("AppendImage: %v", err)
+	}
+
+	// Add an unreferenced stale blob
+	staleBlobPath := filepath.Join(layoutDirectory, "blobs", "sha256", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	if err := os.WriteFile(staleBlobPath, []byte("stale blob content"), 0644); err != nil {
+		t.Fatalf("WriteFile stale blob: %v", err)
+	}
+
+	if err := pruneOCIDirectory(t.Context(), layoutDirectory); err != nil {
+		t.Fatalf("pruneOCIDirectory: %v", err)
+	}
+
+	// Stale blob should be deleted
+	if _, err := os.Stat(staleBlobPath); !os.IsNotExist(err) {
+		t.Errorf("expected stale blob %s to be deleted, stat error = %v", staleBlobPath, err)
+	}
+
+	// Valid image should still be readable
+	readLayoutPath, err := layout.FromPath(layoutDirectory)
+	if err != nil {
+		t.Fatalf("layout.FromPath: %v", err)
+	}
+	index, err := readLayoutPath.ImageIndex()
+	if err != nil {
+		t.Fatalf("readLayoutPath.ImageIndex: %v", err)
+	}
+	indexManifest, err := index.IndexManifest()
+	if err != nil {
+		t.Fatalf("index.IndexManifest: %v", err)
+	}
+	if len(indexManifest.Manifests) != 1 {
+		t.Errorf("expected 1 manifest, got %d", len(indexManifest.Manifests))
+	}
+}
+
+func TestEnsureBuildkitContainer_Errors(t *testing.T) {
+	originalExec := execCommandContext
+	defer func() { execCommandContext = originalExec }()
+
+	// Mock execCommandContext to fail
+	execCommandContext = func(ctx context.Context, command string, args ...string) *exec.Cmd {
+		return exec.Command("false")
+	}
+
+	task := &DockerBuildTask{
+		ImageName: "test-img",
+	}
+
+	err := task.ensureBuildkitContainer(t.Context(), "docker-buildx")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	errorMessage := err.Error()
+	if !strings.Contains(errorMessage, "a BuildKit container is required") {
+		t.Errorf("expected error to contain 'a BuildKit container is required', got: %s", errorMessage)
+	}
+	if !strings.Contains(errorMessage, "privileged containers must be allowed") {
+		t.Errorf("expected error to contain 'privileged containers must be allowed', got: %s", errorMessage)
+	}
+	if !strings.Contains(errorMessage, "ran:") {
+		t.Errorf("expected error to contain 'ran:', got: %s", errorMessage)
+	}
+}
+
+func TestBuildTasks_NoPortForward(t *testing.T) {
 	tmpDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(tmpDir, "images", "foo"), 0755); err != nil {
 		t.Fatal(err)
@@ -317,110 +398,26 @@ func TestBuildTasks_PortForward(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	emptyDir := t.TempDir()
-	emptyRepo, err := sourcetree.Open(emptyDir)
+	cfg, _ := config.Load(tmpDir)
+	naming := ResolveImageNaming(cfg)
+	task, err := BuildTasks(r, tmpDir, true, "", naming)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("BuildTasks() error = %v", err)
 	}
 
-	tests := []struct {
-		name              string
-		push              bool
-		buildkitHost      string
-		envBuildkitHost   string
-		imagePrefix       string
-		noDockerfiles     bool
-		expectPortForward bool
-	}{
-		{
-			name:              "no push",
-			push:              false,
-			buildkitHost:      "",
-			expectPortForward: false,
-		},
-		{
-			name:              "no dockerfiles",
-			push:              true,
-			buildkitHost:      "",
-			noDockerfiles:     true,
-			expectPortForward: false,
-		},
-		{
-			name:              "push to images.local without buildkit host",
-			push:              true,
-			buildkitHost:      "",
-			expectPortForward: true,
-		},
-		{
-			name:              "push to images.local with remote tcp buildkit host",
-			push:              true,
-			buildkitHost:      "tcp://localhost:2375",
-			expectPortForward: true,
-		},
-		{
-			name:              "push to images.local with in-cluster k8s:// buildkit host",
-			push:              true,
-			buildkitHost:      "k8s://autodeploy-system/buildkit",
-			expectPortForward: false,
-		},
-		{
-			name:              "push to images.local with shorthand k8s buildkit host",
-			push:              true,
-			buildkitHost:      "k8s",
-			expectPortForward: false,
-		},
-		{
-			name:              "push to images.local with BUILDKIT_HOST env var set to k8s://",
-			push:              true,
-			buildkitHost:      "",
-			envBuildkitHost:   "k8s://autodeploy-system/buildkit",
-			expectPortForward: false,
-		},
-		{
-			name:              "push to images.local with BUILDKIT_HOST env var set to k8s",
-			push:              true,
-			buildkitHost:      "",
-			envBuildkitHost:   "k8s",
-			expectPortForward: false,
-		},
-		{
-			name:              "push to external registry with no buildkit host",
-			push:              true,
-			buildkitHost:      "",
-			imagePrefix:       "gcr.io/my-project",
-			expectPortForward: false,
-		},
+	group, ok := task.(*tasks.Group)
+	if !ok {
+		t.Fatalf("expected *tasks.Group, got %T", task)
 	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("BUILDKIT_HOST", tc.envBuildkitHost)
-			t.Setenv("IMAGE_PREFIX", tc.imagePrefix)
-
-			resolvedHost, err := ResolveBuildkitHost(tc.buildkitHost)
-			if err != nil {
-				t.Fatalf("ResolveBuildkitHost() error = %v", err)
-			}
-
-			testDir := tmpDir
-			testRepo := r
-			if tc.noDockerfiles {
-				testDir = emptyDir
-				testRepo = emptyRepo
-			}
-
-			cfg, _ := config.Load(testDir)
-			naming := ResolveImageNaming(cfg)
-			task, err := BuildTasks(testRepo, testDir, tc.push, resolvedHost, naming)
-			if err != nil {
-				t.Fatalf("BuildTasks() error = %v", err)
-			}
-
-			_, isPortForward := task.(*k8s.PortForwardTask)
-			if isPortForward != tc.expectPortForward {
-				t.Errorf("expected isPortForward=%v, got %v (%T)", tc.expectPortForward, isPortForward, task)
-			}
-		})
+	if len(group.Tasks) != 1 {
+		t.Fatalf("expected 1 task in group, got %d", len(group.Tasks))
+	}
+	buildTask, ok := group.Tasks[0].(*DockerBuildTask)
+	if !ok {
+		t.Fatalf("expected *DockerBuildTask, got %T", group.Tasks[0])
+	}
+	if !buildTask.Push {
+		t.Errorf("expected buildTask.Push = true")
 	}
 }
 
@@ -458,12 +455,13 @@ func TestDockerBuildTask_Platforms(t *testing.T) {
 		return exec.CommandContext(ctx, "echo", "mocked")
 	}
 
-	// 3. Test case A: Push is true, no images.yaml configured -> should buildx multi-platform
+	// 3. Test case A: Push is true, external registry -> should buildx multi-platform with --push
 	task := &DockerBuildTask{
 		ImageName:  "test-img",
 		Dockerfile: "images/test-img/Dockerfile",
 		Root:       tmpDir,
 		Push:       true,
+		Naming:     ImageNaming{Prefix: "gcr.io/my-org"},
 	}
 
 	r, err := sourcetree.Open(tmpDir)

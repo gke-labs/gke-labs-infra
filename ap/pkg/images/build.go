@@ -18,6 +18,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,12 +34,19 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/registrypush"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
+	"github.com/google/go-containerregistry/pkg/v1/layout"
 )
 
 var execCommandContext = exec.CommandContext
+
+const (
+	apBuilderName      = "ap-builder"
+	apBuilderContainer = "buildx_buildkit_ap-builder0"
+)
 
 // DefaultK8sBuildkitHost is the default buildkit host used for the k8s shorthand.
 const DefaultK8sBuildkitHost = "k8s://autodeploy-system/buildkit"
@@ -103,7 +112,11 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.TaskContext) err
 	fullImageName := ImageRef{Prefix: actualImagePrefix, Name: t.ImageName, Tag: naming.Tag}.String()
 
 	if t.BuildkitHost != "" {
-		return t.runBuildctl(ctx, scope, t.Root, fullImageName, t.Dockerfile, naming, platforms)
+		return t.runRemoteBuildctl(ctx, scope, t.Root, fullImageName, t.Dockerfile, naming, platforms)
+	}
+
+	if t.Push && naming.Prefix == "images.local" && !naming.KindMode && !naming.InCluster {
+		return t.runLocalBuildkitPush(ctx, scope, t.Root, t.Dockerfile, naming, platforms)
 	}
 
 	buildxBin := t.BuildxBin
@@ -166,6 +179,120 @@ func (t *DockerBuildTask) ensureMultiPlatformBuilder(ctx context.Context, buildx
 	return nil
 }
 
+func shortHash(input string) string {
+	hash := sha256.Sum256([]byte(input))
+	return hex.EncodeToString(hash[:])[:12]
+}
+
+func (t *DockerBuildTask) ensureBuildkitContainer(ctx context.Context, buildxBinary string) error {
+	bootstrapCommand := execCommandContext(ctx, buildxBinary, "inspect", "--bootstrap", apBuilderName)
+	bootstrapCommand.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(buildxBinary))
+	if err := bootstrapCommand.Run(); err != nil {
+		scoped.Log(ctx).Debug("bootstrap failed, attempting to create builder", "builder", apBuilderName, "error", err)
+	} else {
+		return nil
+	}
+
+	createCommand := execCommandContext(ctx, buildxBinary, "create", "--name", apBuilderName, "--driver", "docker-container", "--driver-opt", "network=host")
+	createCommand.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(buildxBinary))
+	createError := createCommand.Run()
+
+	secondBootstrapCommand := execCommandContext(ctx, buildxBinary, "inspect", "--bootstrap", apBuilderName)
+	secondBootstrapCommand.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(buildxBinary))
+	secondBootstrapError := secondBootstrapCommand.Run()
+	if secondBootstrapError == nil {
+		return nil
+	}
+
+	commandsRun := fmt.Sprintf("'%s inspect --bootstrap %s', '%s create --name %s --driver docker-container --driver-opt network=host', '%s inspect --bootstrap %s'",
+		filepath.Base(buildxBinary), apBuilderName,
+		filepath.Base(buildxBinary), apBuilderName,
+		filepath.Base(buildxBinary), apBuilderName)
+
+	return fmt.Errorf("a BuildKit container is required: failed to start builder %s (ran: %s; create error: %v, bootstrap error: %w). Please ensure Docker is running and allows running BuildKit containers (for example, privileged containers must be allowed)",
+		apBuilderName, commandsRun, createError, secondBootstrapError)
+}
+
+func (t *DockerBuildTask) runLocalBuildkitPush(ctx context.Context, scope *tasks.TaskContext, root, relDockerfilePath string, naming ImageNaming, platforms []string) error {
+	buildxBinary := t.BuildxBin
+	if buildxBinary == "" && t.DockerBin != "" {
+		buildxBinary = t.DockerBin
+	}
+	if buildxBinary == "" {
+		var err error
+		buildxBinary, err = scope.Tool(ctx, "docker-buildx")
+		if err != nil {
+			return fmt.Errorf("failed to ensure docker-buildx: %w", err)
+		}
+	}
+
+	if err := t.ensureBuildkitContainer(ctx, buildxBinary); err != nil {
+		return err
+	}
+
+	cacheRoot, err := fileutils.CacheDir()
+	if err != nil {
+		return fmt.Errorf("determining cache dir: %w", err)
+	}
+	ociDirectory := filepath.Join(cacheRoot, "images", shortHash(root), t.ImageName)
+	if err := os.MkdirAll(ociDirectory, 0755); err != nil {
+		return fmt.Errorf("creating OCI cache directory %s: %w", ociDirectory, err)
+	}
+
+	dockerBinary := t.dockerBinary(ctx, scope)
+
+	invocation := buildctlInvocation{
+		address:            "docker-container://" + apBuilderContainer,
+		output:             "type=oci,tar=false,dest=" + ociDirectory,
+		description:        apBuilderName,
+		extraPathDirectory: filepath.Dir(dockerBinary),
+	}
+
+	if err := t.runBuildctl(ctx, scope, root, relDockerfilePath, invocation, naming, platforms); err != nil {
+		return err
+	}
+
+	if err := pruneOCIDirectory(ctx, ociDirectory); err != nil {
+		scoped.Log(ctx).Warn("failed to prune OCI cache directory", "directory", ociDirectory, "error", err)
+	}
+
+	transport, err := registrypush.NewTransport(t.Cluster, registrypush.DefaultNamespace, registrypush.DefaultService, registrypush.DefaultPort)
+	if err != nil {
+		return fmt.Errorf("creating registry transport for %s: %w", t.ImageName, err)
+	}
+
+	if err := registrypush.Push(ctx, transport, ociDirectory, t.ImageName, naming.Tag); err != nil {
+		return fmt.Errorf("pushing %s to in-cluster registry: %w", t.ImageName, err)
+	}
+
+	return nil
+}
+
+// pruneOCIDirectory removes unreferenced blobs from an OCI layout directory
+// so blobs from old builds do not accumulate without bound.
+func pruneOCIDirectory(ctx context.Context, directory string) error {
+	layoutPath, err := layout.FromPath(directory)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("opening OCI layout directory %s: %w", directory, err)
+	}
+
+	unreferencedBlobs, err := layoutPath.GarbageCollect()
+	if err != nil {
+		return fmt.Errorf("garbage collecting OCI layout directory %s: %w", directory, err)
+	}
+
+	for _, blobHash := range unreferencedBlobs {
+		if err := layoutPath.RemoveBlob(blobHash); err != nil && !errors.Is(err, os.ErrNotExist) {
+			scoped.Log(ctx).Warn("failed to remove unreferenced blob", "directory", directory, "blob", blobHash.String(), "error", err)
+		}
+	}
+
+	return nil
+}
+
 func (t *DockerBuildTask) supportsMultiPlatform(ctx context.Context, buildxBin string) bool {
 	cmd := execCommandContext(ctx, buildxBin, "inspect")
 	cmd.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(buildxBin))
@@ -197,14 +324,82 @@ func (t *DockerBuildTask) dockerBinary(ctx context.Context, scope *tasks.TaskCon
 	return "docker"
 }
 
-func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskContext, root, fullImageName, relDockerfilePath string, naming ImageNaming, platforms []string) (retErr error) {
-	buildctlBin, err := scope.Tool(ctx, "buildctl")
+type buildctlInvocation struct {
+	address            string
+	output             string
+	description        string
+	extraPathDirectory string
+}
+
+func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskContext, root, relDockerfilePath string, invocation buildctlInvocation, naming ImageNaming, platforms []string) error {
+	buildctlBinary, err := scope.Tool(ctx, "buildctl")
 	if err != nil {
 		return fmt.Errorf("failed to ensure buildctl: %w", err)
 	}
 
 	start := time.Now()
 
+	metadataFile := filepath.Join(os.TempDir(), fmt.Sprintf("buildctl-meta-%d.json", time.Now().UnixNano()))
+	defer func() {
+		if err := os.Remove(metadataFile); err != nil && !os.IsNotExist(err) {
+			scoped.Log(ctx).Finest("failed to remove metadata file", "path", metadataFile, "error", err)
+		}
+	}()
+
+	buildctlArgs := []string{
+		"build",
+		"--frontend", "dockerfile.v0",
+		"--local", "context=.",
+		"--local", "dockerfile=.",
+		"--opt", "filename=" + relDockerfilePath,
+		"--opt", "build-arg:IMAGE_PREFIX=" + naming.Prefix,
+		"--opt", "build-arg:IMAGE_TAG=" + naming.Tag,
+		"--metadata-file", metadataFile,
+		"--progress=plain",
+		"--output", invocation.output,
+	}
+
+	if len(platforms) > 0 {
+		buildctlArgs = append(buildctlArgs, "--opt", "platform="+strings.Join(platforms, ","))
+	}
+
+	var progressBuffer bytes.Buffer
+
+	command := execCommandContext(ctx, buildctlBinary, buildctlArgs...)
+	command.Dir = root
+	command.Stdout = scope.Stdout()
+	command.Stderr = io.MultiWriter(scope.Stderr(), &progressBuffer)
+
+	environment := fileutils.PrependPath(os.Environ(), filepath.Dir(buildctlBinary))
+	if invocation.extraPathDirectory != "" {
+		environment = fileutils.PrependPath(environment, invocation.extraPathDirectory)
+	}
+	command.Env = append(environment, "BUILDKIT_HOST="+invocation.address)
+
+	if err := command.Run(); err != nil {
+		return fmt.Errorf("buildctl build failed for %s: %w", t.ImageName, err)
+	}
+
+	digest := extractDigestFromMetadataFile(metadataFile)
+	if naming.Tag == "latest" && digest != "" {
+		ref := naming.Ref(t.ImageName)
+		ref.Digest = digest
+	}
+
+	if !t.Quiet {
+		contextSize := parseContextSizeFromPlain(&progressBuffer)
+		duration := time.Since(start)
+		if contextSize != "" {
+			scoped.Log(ctx).Info(fmt.Sprintf("built %s with %s in %s; sent %s", t.ImageName, invocation.description, formatDuration(duration), contextSize))
+		} else {
+			scoped.Log(ctx).Info(fmt.Sprintf("built %s with %s in %s", t.ImageName, invocation.description, formatDuration(duration)))
+		}
+	}
+
+	return nil
+}
+
+func (t *DockerBuildTask) runRemoteBuildctl(ctx context.Context, scope *tasks.TaskContext, root, fullImageName, relDockerfilePath string, naming ImageNaming, platforms []string) (retErr error) {
 	var output string
 	var archivePath string
 	if t.Load {
@@ -224,32 +419,6 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 			output += ",registry.insecure=true"
 		}
 	}
-
-	metaFile := filepath.Join(os.TempDir(), fmt.Sprintf("buildctl-meta-%d.json", time.Now().UnixNano()))
-	defer func() {
-		if err := os.Remove(metaFile); err != nil && !os.IsNotExist(err) {
-			scoped.Log(ctx).Finest("failed to remove metadata file", "path", metaFile, "error", err)
-		}
-	}()
-
-	buildctlArgs := []string{
-		"build",
-		"--frontend", "dockerfile.v0",
-		"--local", "context=.",
-		"--local", "dockerfile=.",
-		"--opt", "filename=" + relDockerfilePath,
-		"--opt", "build-arg:IMAGE_PREFIX=" + naming.Prefix,
-		"--opt", "build-arg:IMAGE_TAG=" + naming.Tag,
-		"--metadata-file", metaFile,
-		"--progress=plain",
-		"--output", output,
-	}
-
-	if len(platforms) > 0 {
-		buildctlArgs = append(buildctlArgs, "--opt", "platform="+strings.Join(platforms, ","))
-	}
-
-	var progressBuf bytes.Buffer
 
 	buildkitHost := t.BuildkitHost
 	if host, ok := strings.CutPrefix(t.BuildkitHost, "k8s://"); ok {
@@ -275,38 +444,23 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 		}
 	}
 
-	cmd := execCommandContext(ctx, buildctlBin, buildctlArgs...)
-	cmd.Dir = root
-	cmd.Stdout = scope.Stdout()
-	cmd.Stderr = io.MultiWriter(scope.Stderr(), &progressBuf)
-	cmd.Env = append(fileutils.PrependPath(os.Environ(), filepath.Dir(buildctlBin)), "BUILDKIT_HOST="+buildkitHost)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("buildctl build failed for %s: %w", t.ImageName, err)
+	invocation := buildctlInvocation{
+		address:     buildkitHost,
+		output:      output,
+		description: t.BuildkitHost,
+	}
+
+	if err := t.runBuildctl(ctx, scope, root, relDockerfilePath, invocation, naming, platforms); err != nil {
+		return err
 	}
 
 	if t.Load {
-		dockerBin := t.dockerBinary(ctx, scope)
-		loadCommand := execCommandContext(ctx, dockerBin, "load", "-i", archivePath)
-		loadCommand.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(dockerBin))
+		dockerBinary := t.dockerBinary(ctx, scope)
+		loadCommand := execCommandContext(ctx, dockerBinary, "load", "-i", archivePath)
+		loadCommand.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(dockerBinary))
 		loadOutput, err := loadCommand.CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("loading built image %s: %w (%s)", fullImageName, err, strings.TrimSpace(string(loadOutput)))
-		}
-	}
-
-	digest := extractDigestFromMetadataFile(metaFile)
-	if naming.Tag == "latest" && digest != "" {
-		ref := naming.Ref(t.ImageName)
-		ref.Digest = digest
-	}
-
-	if !t.Quiet {
-		contextSize := parseContextSizeFromPlain(&progressBuf)
-		duration := time.Since(start)
-		if contextSize != "" {
-			scoped.Log(ctx).Info(fmt.Sprintf("built %s with %s in %s; sent %s", t.ImageName, t.BuildkitHost, formatDuration(duration), contextSize))
-		} else {
-			scoped.Log(ctx).Info(fmt.Sprintf("built %s with %s in %s", t.ImageName, t.BuildkitHost, formatDuration(duration)))
 		}
 	}
 
@@ -595,17 +749,6 @@ func BuildTasksForImages(r *sourcetree.SourceTree, root string, push bool, build
 
 	if len(buildTasks) == 0 {
 		return rootTask, nil
-	}
-
-	if push && naming.Prefix == "images.local" && !strings.HasPrefix(buildkitHost, "k8s://") {
-		rootTask = &k8s.PortForwardTask{
-			Child:      rootTask,
-			Service:    "in-cluster-image-registry",
-			Namespace:  "in-cluster-image-registry-system",
-			LocalPort:  5000,
-			RemotePort: 80,
-			Cluster:    cluster,
-		}
 	}
 
 	return rootTask, nil

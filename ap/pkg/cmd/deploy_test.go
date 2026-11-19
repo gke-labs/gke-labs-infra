@@ -229,9 +229,6 @@ func extractDeployTasks(planTasks []tasks.Task) (builtImages []string, appliedMa
 			continue
 		}
 		for _, child := range group.Tasks {
-			if pf, ok := child.(*k8s.PortForwardTask); ok {
-				child = pf.Child
-			}
 			if bg, ok := child.(*tasks.Group); ok && bg.Name == "build-images" {
 				for _, bt := range bg.Tasks {
 					if dbt, ok := bt.(*images.DockerBuildTask); ok {
@@ -557,9 +554,6 @@ func TestBuildDeployPlan_DryRunClusterKind(t *testing.T) {
 	for _, task := range allTasks {
 		if group, ok := task.(*tasks.Group); ok {
 			for _, child := range group.Tasks {
-				if pf, ok := child.(*k8s.PortForwardTask); ok {
-					child = pf.Child
-				}
 				if kt, ok := child.(*KindLoadTask); ok {
 					kindLoads = append(kindLoads, kt)
 				}
@@ -650,9 +644,6 @@ func TestBuildDeployPlan_DryRunClusterNonKind(t *testing.T) {
 	for _, task := range allTasks {
 		if group, ok := task.(*tasks.Group); ok {
 			for _, child := range group.Tasks {
-				if pf, ok := child.(*k8s.PortForwardTask); ok {
-					child = pf.Child
-				}
 				if kt, ok := child.(*KindLoadTask); ok {
 					kindLoads = append(kindLoads, kt)
 				}
@@ -700,16 +691,11 @@ func TestBuildDeployPlan_DryRunClusterNonKind(t *testing.T) {
 	}
 }
 
-func collectBuildTasks(plan []tasks.Task) (*k8s.PortForwardTask, []*images.DockerBuildTask) {
-	var portForward *k8s.PortForwardTask
+func collectBuildTasks(plan []tasks.Task) []*images.DockerBuildTask {
 	var buildTasks []*images.DockerBuildTask
 	for _, task := range plan {
 		if group, ok := task.(*tasks.Group); ok {
 			for _, child := range group.Tasks {
-				if pf, ok := child.(*k8s.PortForwardTask); ok {
-					portForward = pf
-					child = pf.Child
-				}
 				if bg, ok := child.(*tasks.Group); ok && bg.Name == "build-images" {
 					for _, bt := range bg.Tasks {
 						if dbt, ok := bt.(*images.DockerBuildTask); ok {
@@ -720,7 +706,7 @@ func collectBuildTasks(plan []tasks.Task) (*k8s.PortForwardTask, []*images.Docke
 			}
 		}
 	}
-	return portForward, buildTasks
+	return buildTasks
 }
 
 func TestBuildDeployPlan_PassesContextToBuildTasks(t *testing.T) {
@@ -746,20 +732,16 @@ func TestBuildDeployPlan_PassesContextToBuildTasks(t *testing.T) {
 
 	tests := []struct {
 		buildkitHost string
-		wantPF       bool
 	}{
-		{buildkitHost: "", wantPF: true},
-		{buildkitHost: "k8s://autodeploy-system/buildkit", wantPF: false},
+		{buildkitHost: ""},
+		{buildkitHost: "k8s://autodeploy-system/buildkit"},
 	}
 	for _, tt := range tests {
 		plan, err := BuildDeployPlan(opt, r, tt.buildkitHost, naming)
 		if err != nil {
 			t.Fatalf("BuildDeployPlan(%q) failed: %v", tt.buildkitHost, err)
 		}
-		portForward, buildTasks := collectBuildTasks(plan)
-		if tt.wantPF && (portForward == nil || portForward.Cluster != k8s.ClusterFromContext("my-custom-context")) {
-			t.Errorf("host %q: want registry PortForwardTask with cluster 'my-custom-context', got %v", tt.buildkitHost, portForward)
-		}
+		buildTasks := collectBuildTasks(plan)
 		if len(buildTasks) == 0 {
 			t.Fatalf("host %q: expected DockerBuildTasks, got none", tt.buildkitHost)
 		}
@@ -1138,9 +1120,6 @@ func TestDeploy_BuildkitAndBuildx(t *testing.T) {
 	for _, tsk := range tasksBuildx {
 		group := tsk.(*tasks.Group)
 		for _, c := range group.Tasks {
-			if pf, ok := c.(*k8s.PortForwardTask); ok {
-				c = pf.Child
-			}
 			if bg, ok := c.(*tasks.Group); ok && bg.Name == "build-images" {
 				for _, bt := range bg.Tasks {
 					dbt := bt.(*images.DockerBuildTask)
@@ -1172,9 +1151,6 @@ func TestDeploy_BuildkitAndBuildx(t *testing.T) {
 	for _, tsk := range tasksBuildctl {
 		group := tsk.(*tasks.Group)
 		for _, c := range group.Tasks {
-			if pf, ok := c.(*k8s.PortForwardTask); ok {
-				c = pf.Child
-			}
 			if bg, ok := c.(*tasks.Group); ok && bg.Name == "build-images" {
 				for _, bt := range bg.Tasks {
 					dbt := bt.(*images.DockerBuildTask)

@@ -132,14 +132,13 @@ func (n ImageNaming) Ref(name string) *ImageRef {
 
 // PushPrefix returns the registry prefix to use when pushing images.
 // For the default "images.local" prefix, it rewrites to the in-cluster registry
-// (if running in-cluster or using a k8s buildkit host) or localhost:5000.
+// when running in-cluster or using a k8s buildkit host.
 // For any other prefix, it returns Prefix unchanged.
 func (n ImageNaming) PushPrefix(buildkitHost string) string {
 	if n.Prefix == "images.local" {
 		if n.InCluster || strings.HasPrefix(buildkitHost, "k8s://") {
 			return "in-cluster-image-registry.in-cluster-image-registry-system.svc.cluster.local:80"
 		}
-		return "localhost:5000"
 	}
 	return n.Prefix
 }

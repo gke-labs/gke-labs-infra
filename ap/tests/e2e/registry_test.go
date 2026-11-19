@@ -17,6 +17,7 @@ package e2e
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/e2e"
@@ -97,6 +98,20 @@ spec:
 	defer os.Chdir(origWd)
 	if err := os.Chdir(tmpDir); err != nil {
 		t.Fatal(err)
+	}
+
+	// If running inside a container with a Kubernetes service account, clear
+	// KUBERNETES_SERVICE_HOST so ap uses the cluster kubeconfig rather than
+	// assuming it is inside the target cluster.
+	t.Setenv("KUBERNETES_SERVICE_HOST", "")
+
+	// Build and push image to in-cluster registry through the new local push path
+	h.RunCmd(apBin, "build", "autodeploy/examples/helloworld", "--push")
+
+	// Verify image was pushed to the in-cluster registry
+	tagsOutput := h.RunCmd(h.KubectlCommand(), "exec", "-n", "in-cluster-image-registry-system", "in-cluster-image-registry-0", "--", "wget", "-qO-", "http://localhost:5000/v2/examples-helloworld/tags/list")
+	if !strings.Contains(tagsOutput, "e2e") {
+		t.Errorf("expected tags list to contain 'e2e', got %q", tagsOutput)
 	}
 
 	// Run ap deploy (which builds, pushes, and applies in one root)

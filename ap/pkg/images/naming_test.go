@@ -42,8 +42,8 @@ func TestResolveImageNaming(t *testing.T) {
 			wantPrefix:     "images.local",
 			wantTag:        "latest",
 			wantRef:        "images.local/test-app:latest",
-			wantPushPrefix: "localhost:5000",
-			wantPushRef:    "localhost:5000/test-app:latest",
+			wantPushPrefix: "images.local",
+			wantPushRef:    "images.local/test-app:latest",
 		},
 		{
 			name:           "set env vars uses specified prefix and tag",
