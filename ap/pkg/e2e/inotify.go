@@ -15,12 +15,13 @@
 package e2e
 
 import (
+	"context"
 	"os"
 	"runtime"
 	"strconv"
 	"strings"
 
-	"k8s.io/klog/v2"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 )
 
 const (
@@ -30,22 +31,22 @@ const (
 
 // warnInotifyLimits reads inotify limits directly from /proc on Linux and warns
 // if they are below kind's recommended thresholds.
-func warnInotifyLimits() {
+func warnInotifyLimits(ctx context.Context) {
 	if runtime.GOOS != "linux" {
 		return
 	}
 
 	instances, err := readProcInt("/proc/sys/fs/inotify/max_user_instances")
 	if err != nil {
-		klog.V(2).Infof("failed to read /proc/sys/fs/inotify/max_user_instances: %v", err)
+		scoped.Log(ctx).Fine("failed to read /proc/sys/fs/inotify/max_user_instances", "error", err)
 	}
 
 	watches, err := readProcInt("/proc/sys/fs/inotify/max_user_watches")
 	if err != nil {
-		klog.V(2).Infof("failed to read /proc/sys/fs/inotify/max_user_watches: %v", err)
+		scoped.Log(ctx).Fine("failed to read /proc/sys/fs/inotify/max_user_watches", "error", err)
 	}
 
-	checkInotifyLimits(instances, watches)
+	checkInotifyLimits(ctx, instances, watches)
 }
 
 func readProcInt(path string) (int, error) {
@@ -62,13 +63,13 @@ func readProcInt(path string) (int, error) {
 
 // checkInotifyLimits checks if the given inotify instances and watches limits
 // meet kind's recommended thresholds and logs warnings if they do not.
-func checkInotifyLimits(instances, watches int) {
+func checkInotifyLimits(ctx context.Context, instances, watches int) {
 	if instances >= 0 && instances < recommendedMaxUserInstances {
-		klog.Warningf("inotify limit fs.inotify.max_user_instances is %d, below kind's recommended value of %d; a kind node's kubelet may restart in a loop while other nodes are Ready; raise it with: sudo sysctl -w fs.inotify.max_user_instances=%d",
-			instances, recommendedMaxUserInstances, recommendedMaxUserInstances)
+		scoped.Log(ctx).Warn("inotify limit fs.inotify.max_user_instances is below kind's recommended value; a kind node's kubelet may restart in a loop while other nodes are Ready; raise it with: sudo sysctl -w fs.inotify.max_user_instances=512",
+			"instances", instances, "recommended", recommendedMaxUserInstances)
 	}
 	if watches >= 0 && watches < recommendedMaxUserWatches {
-		klog.Warningf("inotify limit fs.inotify.max_user_watches is %d, below kind's recommended value of %d; a kind node's kubelet may restart in a loop while other nodes are Ready; raise it with: sudo sysctl -w fs.inotify.max_user_watches=%d",
-			watches, recommendedMaxUserWatches, recommendedMaxUserWatches)
+		scoped.Log(ctx).Warn("inotify limit fs.inotify.max_user_watches is below kind's recommended value; a kind node's kubelet may restart in a loop while other nodes are Ready; raise it with: sudo sysctl -w fs.inotify.max_user_watches=524288",
+			"watches", watches, "recommended", recommendedMaxUserWatches)
 	}
 }

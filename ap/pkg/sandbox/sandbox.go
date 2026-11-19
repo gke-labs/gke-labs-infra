@@ -26,10 +26,10 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sandbox/api"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kubectl"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"k8s.io/klog/v2"
 )
 
 // Run runs the ap command in a sandbox pod.
@@ -42,13 +42,13 @@ func Run(ctx context.Context, root string, args []string) (retErr error) {
 		return fmt.Errorf("failed to ensure kubectl: %w", err)
 	}
 
-	klog.Infof("Ensuring sandbox pod %s is running...", podName)
+	scoped.Log(ctx).Info("ensuring sandbox pod is running", "pod", podName)
 
 	// Check if pod exists
 	checkCmd := exec.CommandContext(ctx, kubectlBin, "get", "pod", podName, "--no-headers")
 	if err := checkCmd.Run(); err != nil {
 		// Pod doesn't exist, create it
-		klog.Infof("Creating pod %s...", podName)
+		scoped.Log(ctx).Info("creating pod", "pod", podName)
 		runCmd := exec.CommandContext(ctx, kubectlBin, "run", podName,
 			"--image="+image,
 			"--restart=Never",
@@ -58,7 +58,7 @@ func Run(ctx context.Context, root string, args []string) (retErr error) {
 		}
 
 		// Wait for pod to be ready
-		klog.Infof("Waiting for pod %s to be ready...", podName)
+		scoped.Log(ctx).Info("waiting for pod to be ready", "pod", podName)
 		waitCmd := exec.CommandContext(ctx, kubectlBin, "wait", "--for=condition=Ready", "pod/"+podName, "--timeout=60s")
 		if err := waitCmd.Run(); err != nil {
 			return fmt.Errorf("pod did not become ready: %w", err)
@@ -66,7 +66,7 @@ func Run(ctx context.Context, root string, args []string) (retErr error) {
 	}
 
 	// Port forward
-	klog.Infof("Setting up port-forward...")
+	scoped.Log(ctx).Info("setting up port-forward")
 	localPort := 50051
 	pfCmd := exec.CommandContext(ctx, kubectlBin, "port-forward", "pod/"+podName, fmt.Sprintf("%d:%d", localPort, localPort))
 	// Redirect pf output to avoid noise
@@ -97,13 +97,13 @@ func Run(ctx context.Context, root string, args []string) (retErr error) {
 	}
 	defer func() {
 		if err := conn.Close(); err != nil {
-			klog.Warningf("failed to close grpc connection: %v", err)
+			scoped.Log(ctx).Warn("failed to close grpc connection", "error", err)
 		}
 	}()
 	client := api.NewSandboxServiceClient(conn)
 
 	// Copy code using gRPC
-	klog.Infof("Copying code to sandbox using gRPC...")
+	scoped.Log(ctx).Info("copying code to sandbox using gRPC")
 	err = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -136,7 +136,7 @@ func Run(ctx context.Context, root string, args []string) (retErr error) {
 	}
 
 	// Run the task
-	klog.Infof("Executing task: ap %s", strings.Join(args, " "))
+	scoped.Log(ctx).Info("executing task", "command", "ap "+strings.Join(args, " "))
 	resp, err := client.RunTask(ctx, &api.RunTaskRequest{
 		Args: args,
 	})
@@ -149,7 +149,7 @@ func Run(ctx context.Context, root string, args []string) (retErr error) {
 
 	// Copy back changed files/results
 	if len(resp.ChangedFiles) > 0 {
-		klog.Infof("Copying back %d changed files...", len(resp.ChangedFiles))
+		scoped.Log(ctx).Info("copying back changed files", "count", len(resp.ChangedFiles))
 		untrustedRoot, err := fileutils.OpenUntrustedRoot(root)
 		if err != nil {
 			return fmt.Errorf("failed to open root directory %s: %w", root, err)

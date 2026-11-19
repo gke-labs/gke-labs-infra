@@ -103,7 +103,7 @@ func TestBumpContent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, changed := bumpContent(tt.filename, []byte(tt.content), tt.version)
+			got, changed := bumpContent(t.Context(), tt.filename, []byte(tt.content), tt.version)
 			if string(got) != tt.want {
 				t.Errorf("bumpContent() got = %v, want %v", string(got), tt.want)
 			}
@@ -126,7 +126,7 @@ func TestGetGoDirectiveVersion(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			got := getGoDirectiveVersion(tt.input)
+			got := getGoDirectiveVersion(t.Context(), tt.input)
 			if got != tt.want {
 				t.Errorf("getGoDirectiveVersion(%q) = %q, want %q", tt.input, got, tt.want)
 			}
@@ -217,7 +217,7 @@ func TestBumpGoMod(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, changed := bumpGoMod(tt.content, tt.version)
+			got, changed := bumpGoMod(t.Context(), tt.content, tt.version)
 			if got != tt.wantContent {
 				t.Errorf("bumpGoMod() got = %q, want %q", got, tt.wantContent)
 			}
@@ -324,7 +324,7 @@ func TestBumpDockerfile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, changed := bumpDockerfile(tt.content, tt.version)
+			got, changed := bumpDockerfile(t.Context(), tt.content, tt.version)
 			if got != tt.wantContent {
 				t.Errorf("bumpDockerfile() got = %q, want %q", got, tt.wantContent)
 			}

@@ -29,8 +29,8 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/dockerfile"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/imageref"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
-	"k8s.io/klog/v2"
 )
 
 // GoVersion represents a Go version from the official downloads API.
@@ -51,7 +51,7 @@ func Run(ctx context.Context, r *sourcetree.SourceTree, root string, targetGoVer
 			return fmt.Errorf("failed to fetch latest go version: %w", err)
 		}
 	}
-	klog.Infof("Target Go version: %s", latestGo)
+	scoped.Log(ctx).Info("target Go version", "version", latestGo)
 
 	// Strip 'go' prefix from 'go1.26.1' -> '1.26.1'
 	version := strings.TrimPrefix(latestGo, "go")
@@ -68,7 +68,7 @@ func Run(ctx context.Context, r *sourcetree.SourceTree, root string, targetGoVer
 
 	var errs []error
 	for _, file := range files {
-		if err := bumpFile(file, version); err != nil {
+		if err := bumpFile(ctx, file, version); err != nil {
 			errs = append(errs, fmt.Errorf("failed to bump %s: %w", file, err))
 		}
 	}
@@ -89,7 +89,7 @@ func fetchLatestGoVersion(ctx context.Context) (string, error) {
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			klog.Warningf("failed to close response body: %v", err)
+			scoped.Log(ctx).Warn("failed to close response body", "error", err)
 		}
 	}()
 
@@ -136,7 +136,7 @@ func isValidVersion(s string) bool {
 	return true
 }
 
-func bumpGoMod(content string, version string) (string, bool) {
+func bumpGoMod(ctx context.Context, content string, version string) (string, bool) {
 	lines := strings.Split(content, "\n")
 	goLineIdx := -1
 	toolchainLineIdx := -1
@@ -160,7 +160,7 @@ func bumpGoMod(content string, version string) (string, bool) {
 		return content, false
 	}
 
-	goVersion := getGoDirectiveVersion(version)
+	goVersion := getGoDirectiveVersion(ctx, version)
 	isCRLF := strings.Contains(content, "\r\n")
 
 	lines[goLineIdx] = "go " + goVersion
@@ -193,7 +193,7 @@ func bumpGoMod(content string, version string) (string, bool) {
 	return newContent, newContent != content
 }
 
-func bumpDockerfile(content string, version string) (string, bool) {
+func bumpDockerfile(ctx context.Context, content string, version string) (string, bool) {
 	lines := strings.Split(content, "\n")
 	changed := false
 
@@ -213,7 +213,7 @@ func bumpDockerfile(content string, version string) (string, bool) {
 		}
 
 		if ref.Digest != "" {
-			klog.Warningf("skipping digest-pinned image on line %d: %s", from.Line, line)
+			scoped.Log(ctx).Warn("skipping digest-pinned image", "line", from.Line, "image", line)
 			continue
 		}
 
@@ -243,40 +243,40 @@ func bumpDockerfile(content string, version string) (string, bool) {
 	return newContent, changed
 }
 
-func bumpFile(path string, version string) error {
+func bumpFile(ctx context.Context, path string, version string) error {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
 
-	newContent, changed := bumpContent(filepath.Base(path), content, version)
+	newContent, changed := bumpContent(ctx, filepath.Base(path), content, version)
 
 	if changed {
-		klog.Infof("Updating %s", path)
+		scoped.Log(ctx).Info("updating file", "path", path)
 		return os.WriteFile(path, newContent, 0644)
 	}
 
 	return nil
 }
 
-func bumpContent(filename string, content []byte, version string) ([]byte, bool) {
+func bumpContent(ctx context.Context, filename string, content []byte, version string) ([]byte, bool) {
 	if filename == "go.mod" {
-		newContent, changed := bumpGoMod(string(content), version)
+		newContent, changed := bumpGoMod(ctx, string(content), version)
 		return []byte(newContent), changed
 	} else if strings.Contains(filename, "Dockerfile") {
-		newContent, changed := bumpDockerfile(string(content), version)
+		newContent, changed := bumpDockerfile(ctx, string(content), version)
 		return []byte(newContent), changed
 	}
 
 	return content, false
 }
 
-func getGoDirectiveVersion(version string) string {
+func getGoDirectiveVersion(ctx context.Context, version string) string {
 	parts := strings.Split(version, ".")
 	if len(parts) == 3 {
 		patch, err := strconv.Atoi(parts[2])
 		if err != nil {
-			klog.Warningf("failed to parse patch version %q in %q: %v", parts[2], version, err)
+			scoped.Log(ctx).Warn("failed to parse patch version", "patch", parts[2], "version", version, "error", err)
 			return fmt.Sprintf("%s.%s", parts[0], parts[1])
 		}
 		if patch > 0 {
