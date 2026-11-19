@@ -28,8 +28,8 @@ import (
 	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sandbox/api"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"google.golang.org/grpc"
-	"k8s.io/klog/v2"
 )
 
 type server struct {
@@ -58,7 +58,7 @@ func (s *server) ReadFile(_ context.Context, req *api.ReadFileRequest) (*api.Rea
 }
 
 func (s *server) RunTask(ctx context.Context, req *api.RunTaskRequest) (*api.RunTaskResponse, error) {
-	klog.Infof("Running task in sandbox: ap %s", strings.Join(req.Args, " "))
+	scoped.Log(ctx).Info("running task in sandbox", "command", "ap "+strings.Join(req.Args, " "))
 
 	startTime := time.Now()
 
@@ -161,7 +161,7 @@ func Serve(ctx context.Context, root string, port int) error {
 	s := grpc.NewServer()
 	api.RegisterSandboxServiceServer(s, &server{root: root})
 
-	klog.Infof("Sandbox server listening on %v", lis.Addr())
+	scoped.Log(ctx).Info("sandbox server listening", "address", lis.Addr().String())
 
 	go func() {
 		<-ctx.Done()

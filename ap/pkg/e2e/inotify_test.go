@@ -16,11 +16,11 @@ package e2e
 
 import (
 	"bytes"
-	"os"
+	"log/slog"
 	"strings"
 	"testing"
 
-	"k8s.io/klog/v2"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 )
 
 func TestCheckInotifyLimits(t *testing.T) {
@@ -85,14 +85,9 @@ func TestCheckInotifyLimits(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var logBuf bytes.Buffer
-			klog.SetOutput(&logBuf)
-			klog.LogToStderr(false)
-			defer func() {
-				klog.SetOutput(os.Stderr)
-				klog.LogToStderr(true)
-			}()
+			ctx := scoped.WithLog(t.Context(), scoped.NewLogger(slog.NewTextHandler(&logBuf, nil)))
 
-			checkInotifyLimits(tc.instances, tc.watches)
+			checkInotifyLimits(ctx, tc.instances, tc.watches)
 
 			out := logBuf.String()
 			hasInstancesWarn := strings.Contains(out, "max_user_instances")
