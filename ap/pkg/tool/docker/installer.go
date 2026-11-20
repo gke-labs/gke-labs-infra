@@ -212,7 +212,7 @@ func EnsureDocker(ctx context.Context, version string) (string, error) {
 		return "", fmt.Errorf("failed to chmod docker binary %s: %w", binPath, err)
 	}
 
-	scoped.Log(ctx).Info(fmt.Sprintf("Installed docker %s to %s", resolvedVer, binPath))
+	scoped.Log(ctx).Info("installed tool", "tool", "docker", "version", resolvedVer, "path", binPath)
 	return binPath, nil
 }
 
@@ -289,7 +289,7 @@ func EnsureDockerBuildx(ctx context.Context, version string) (string, error) {
 		return "", fmt.Errorf("failed to install buildx binary %s: %w", binPath, err)
 	}
 
-	scoped.Log(ctx).Info(fmt.Sprintf("Installed docker-buildx v%s to %s", normVer, binPath))
+	scoped.Log(ctx).Info("installed tool", "tool", "docker-buildx", "version", "v"+normVer, "path", binPath)
 	return binPath, nil
 }
 

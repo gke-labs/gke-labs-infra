@@ -165,7 +165,7 @@ func EnsureGo(ctx context.Context, version string) (string, error) {
 	}
 	success = true
 
-	scoped.Log(ctx).Info(fmt.Sprintf("Installed Go %s to %s", resolvedVer, binPath))
+	scoped.Log(ctx).Info("installed tool", "tool", "go", "version", resolvedVer, "path", binPath)
 	return binPath, nil
 }
 

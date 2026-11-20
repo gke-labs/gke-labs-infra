@@ -569,7 +569,7 @@ func Ensure(ctx context.Context, spec *Spec, version string) (string, error) {
 		return "", fmt.Errorf("failed to chmod %s binary %s: %w", spec.Name, binPath, err)
 	}
 
-	scoped.Log(ctx).Info(fmt.Sprintf("Installed %s %s to %s", spec.Name, tag, binPath))
+	scoped.Log(ctx).Info("installed tool", "tool", spec.Name, "version", tag, "path", binPath)
 	return binPath, nil
 }
 

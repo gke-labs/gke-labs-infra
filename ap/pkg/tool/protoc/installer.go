@@ -287,7 +287,7 @@ func installProtocZip(ctx context.Context, zipPath, installDir, binName, resolve
 		return "", "", fmt.Errorf("failed to chmod protoc binary %s: %w", protocBin, err)
 	}
 
-	scoped.Log(ctx).Info(fmt.Sprintf("Installed protoc %s to %s", resolvedVer, protocBin))
+	scoped.Log(ctx).Info("installed tool", "tool", "protoc", "version", resolvedVer, "path", protocBin)
 	return protocBin, filepath.Join(installDir, "include"), nil
 }
 
@@ -377,7 +377,7 @@ func EnsurePlugin(ctx context.Context, pluginName, requestedVer string, cfgPlugi
 			return "", fmt.Errorf("failed to chmod plugin binary %s: %w", targetBin, err)
 		}
 
-		scoped.Log(ctx).Info(fmt.Sprintf("Installed %s %s to %s", normalizedName, ver, targetBin))
+		scoped.Log(ctx).Info("installed tool", "tool", normalizedName, "version", ver, "path", targetBin)
 		return targetBinDir, nil
 	}
 
@@ -426,7 +426,7 @@ func EnsurePlugin(ctx context.Context, pluginName, requestedVer string, cfgPlugi
 		return "", fmt.Errorf("failed to chmod plugin binary %s: %w", targetBin, err)
 	}
 
-	scoped.Log(ctx).Info(fmt.Sprintf("Installed %s %s to %s", normalizedName, resolvedVer, targetBin))
+	scoped.Log(ctx).Info("installed tool", "tool", normalizedName, "version", resolvedVer, "path", targetBin)
 	return targetBinDir, nil
 }
 

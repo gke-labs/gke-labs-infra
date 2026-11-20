@@ -102,7 +102,7 @@ func (opt *DeployOptions) Resolve(ctx context.Context, args []string) error {
 		if len(shortCommit) > 7 {
 			shortCommit = shortCommit[:7]
 		}
-		scoped.Log(ctx).Info(fmt.Sprintf("deploying %s@%s path %s", target.RepoURL, shortCommit, target.Path))
+		scoped.Log(ctx).Info("deploying", "repository", target.RepoURL, "commit", shortCommit, "path", target.Path)
 		cacheRoot, err := fileutils.CacheDir()
 		if err != nil {
 			return fmt.Errorf("failed to determine cache dir: %w", err)
