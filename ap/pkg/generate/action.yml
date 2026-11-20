@@ -12,6 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# This file is never run as an action. It exists so that Dependabot's
+# `github-actions` updater, which only reads workflow files and `action.yml`,
+# can see and bump the action versions that `ap generate` writes into
+# generated workflows.
+#
+# `runs.using: composite` is only there because an `action.yml` must declare
+# how it runs, and a composite action is the form whose steps can contain
+# `uses:` lines; nothing invokes it.
+#
+# The `uses:` lines are the data: `ap` embeds this file and reads the pinned
+# references from it (`ap/pkg/generate/actions.go`); adding an action means
+# adding a line here and a field there.
+
 name: action-versions
 description: Pinned GitHub Actions versions for ap generate
 runs:
