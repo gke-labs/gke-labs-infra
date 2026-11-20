@@ -816,6 +816,13 @@ jobs:
 `, actionSetupGo))
 		}
 
+		if scriptName == "test-vxpu-image" || scriptName == "ap-e2e-vxpu" {
+			sb.WriteString(fmt.Sprintf(`
+      - name: Expose GitHub Actions cache runtime
+        uses: %s
+`, actionGithubRuntime))
+		}
+
 		if scriptName == "ap-build" {
 			cleanupTaskPath := filepath.Join(repoRoot, "dev", "tasks", "free-disk-space-on-github-actions-runner")
 			hasCleanup, err := fileutils.FileExists(cleanupTaskPath)

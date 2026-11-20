@@ -238,7 +238,7 @@ func TestPresubmitScriptsWithSkipConfig(t *testing.T) {
 // workflows must reference actions by full commit SHA, never by a
 // mutable tag.
 func TestPinnedActionRefs(t *testing.T) {
-	for _, ref := range []string{actionCheckout, actionSetupGo, actionUploadArtifact} {
+	for _, ref := range []string{actionCheckout, actionSetupGo, actionUploadArtifact, actionGithubRuntime} {
 		at := strings.Index(ref, "@")
 		if at < 0 {
 			t.Errorf("action ref %q has no @", ref)

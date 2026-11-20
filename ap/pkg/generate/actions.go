@@ -28,6 +28,7 @@ type actionVersions struct {
 	checkout       string
 	setupGo        string
 	uploadArtifact string
+	githubRuntime  string
 }
 
 var (
@@ -41,6 +42,7 @@ var (
 	actionCheckout       = actions.checkout
 	actionSetupGo        = actions.setupGo
 	actionUploadArtifact = actions.uploadArtifact
+	actionGithubRuntime  = actions.githubRuntime
 )
 
 // parseActionVersions parses action references from action.yml using plain string parsing.
@@ -78,6 +80,8 @@ func parseActionVersions(content []byte) (actionVersions, error) {
 			versions.setupGo = ref
 		case "actions/upload-artifact":
 			versions.uploadArtifact = ref
+		case "crazy-max/ghaction-github-runtime":
+			versions.githubRuntime = ref
 		default:
 			return actionVersions{}, fmt.Errorf("line %d: unknown action %q", lineNum+1, actionName)
 		}
@@ -90,6 +94,9 @@ func parseActionVersions(content []byte) (actionVersions, error) {
 	}
 	if versions.uploadArtifact == "" {
 		return actionVersions{}, fmt.Errorf("missing action actions/upload-artifact in action.yml")
+	}
+	if versions.githubRuntime == "" {
+		return actionVersions{}, fmt.Errorf("missing action crazy-max/ghaction-github-runtime in action.yml")
 	}
 	return versions, nil
 }

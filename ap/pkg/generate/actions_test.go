@@ -42,20 +42,22 @@ func TestParseActionVersions_Errors(t *testing.T) {
 	validCheckout := "    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7.0.1\n"
 	validSetupGo := "    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # ratchet:actions/setup-go@v7.0.0\n"
 	validUploadArtifact := "    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2\n"
+	validGithubRuntime := "    - uses: crazy-max/ghaction-github-runtime@3cb05d89e1f492524af3d41a1c98c83bc3025124 # ratchet:crazy-max/ghaction-github-runtime@v3.1.0\n"
 
 	cases := []struct {
 		name      string
 		content   string
 		errSubstr string
 	}{
-		{"missing checkout", validSetupGo + validUploadArtifact, "missing action actions/checkout"},
-		{"missing setup-go", validCheckout + validUploadArtifact, "missing action actions/setup-go"},
-		{"missing upload-artifact", validCheckout + validSetupGo, "missing action actions/upload-artifact"},
-		{"empty uses", validSetupGo + validUploadArtifact + "    - uses:\n", "empty uses reference"},
-		{"missing @", validSetupGo + validUploadArtifact + "    - uses: actions/checkout\n", "missing '@'"},
-		{"short SHA", validSetupGo + validUploadArtifact + "    - uses: actions/checkout@1234 # ratchet:actions/checkout@v7.0.1\n", "not pinned to a full 40-char commit SHA"},
-		{"missing ratchet comment", validSetupGo + validUploadArtifact + "    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n", "missing ratchet comment"},
-		{"unknown action", validCheckout + validSetupGo + validUploadArtifact + "    - uses: other/action@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:other/action@v1\n", "unknown action"},
+		{"missing checkout", validSetupGo + validUploadArtifact + validGithubRuntime, "missing action actions/checkout"},
+		{"missing setup-go", validCheckout + validUploadArtifact + validGithubRuntime, "missing action actions/setup-go"},
+		{"missing upload-artifact", validCheckout + validSetupGo + validGithubRuntime, "missing action actions/upload-artifact"},
+		{"missing github-runtime", validCheckout + validSetupGo + validUploadArtifact, "missing action crazy-max/ghaction-github-runtime"},
+		{"empty uses", validSetupGo + validUploadArtifact + validGithubRuntime + "    - uses:\n", "empty uses reference"},
+		{"missing @", validSetupGo + validUploadArtifact + validGithubRuntime + "    - uses: actions/checkout\n", "missing '@'"},
+		{"short SHA", validSetupGo + validUploadArtifact + validGithubRuntime + "    - uses: actions/checkout@1234 # ratchet:actions/checkout@v7.0.1\n", "not pinned to a full 40-char commit SHA"},
+		{"missing ratchet comment", validSetupGo + validUploadArtifact + validGithubRuntime + "    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n", "missing ratchet comment"},
+		{"unknown action", validCheckout + validSetupGo + validUploadArtifact + validGithubRuntime + "    - uses: other/action@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:other/action@v1\n", "unknown action"},
 	}
 
 	for _, tc := range cases {
