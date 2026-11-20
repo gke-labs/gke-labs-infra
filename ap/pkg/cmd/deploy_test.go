@@ -25,6 +25,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
@@ -1118,7 +1119,10 @@ func TestDeploy_BuildkitAndBuildx(t *testing.T) {
 		t.Fatalf("BuildDeployPlan buildx failed: %v", err)
 	}
 	for _, tsk := range tasksBuildx {
-		group := tsk.(*tasks.Group)
+		group, ok := tsk.(*tasks.Group)
+		if !ok {
+			continue
+		}
 		for _, c := range group.Tasks {
 			if bg, ok := c.(*tasks.Group); ok && bg.Name == "build-images" {
 				for _, bt := range bg.Tasks {
@@ -1149,7 +1153,10 @@ func TestDeploy_BuildkitAndBuildx(t *testing.T) {
 		t.Fatalf("BuildDeployPlan buildctl failed: %v", err)
 	}
 	for _, tsk := range tasksBuildctl {
-		group := tsk.(*tasks.Group)
+		group, ok := tsk.(*tasks.Group)
+		if !ok {
+			continue
+		}
 		for _, c := range group.Tasks {
 			if bg, ok := c.(*tasks.Group); ok && bg.Name == "build-images" {
 				for _, bt := range bg.Tasks {
@@ -1961,5 +1968,56 @@ func TestDeploy_URL_DryRun(t *testing.T) {
 	expectedTaskName := "kubectl-apply-cert-manager/kustomization.yaml"
 	if !strings.Contains(output, expectedTaskName) {
 		t.Errorf("expected dry-run output to contain %q, got:\n%s", expectedTaskName, output)
+	}
+}
+
+func TestDeploy_WaitFlag(t *testing.T) {
+	tempDir := setupFixtureRepo(t)
+	tree, err := sourcetree.Open(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	naming := images.ResolveImageNaming(nil)
+
+	// 1. By default, BuildDeployPlan includes WaitForWorkloadsTask
+	optDefault := DeployOptions{
+		RootOptions: &RootOptions{RepoRoot: tempDir, Dir: tempDir, DryRun: true},
+		Wait:        true,
+		Timeout:     5 * time.Minute,
+	}
+	if err := optDefault.Resolve(t.Context(), []string{"./k8s"}); err != nil {
+		t.Fatal(err)
+	}
+	tasksDefault, err := BuildDeployPlan(optDefault, tree, "", naming)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hasWait bool
+	for _, task := range tasksDefault {
+		if _, ok := task.(*k8s.WaitForWorkloadsTask); ok {
+			hasWait = true
+			break
+		}
+	}
+	if !hasWait {
+		t.Errorf("expected default deploy plan to include WaitForWorkloadsTask")
+	}
+
+	// 2. --wait=false adds no wait
+	optNoWait := DeployOptions{
+		RootOptions: &RootOptions{RepoRoot: tempDir, Dir: tempDir, DryRun: true},
+		Wait:        false,
+	}
+	if err := optNoWait.Resolve(t.Context(), []string{"./k8s"}); err != nil {
+		t.Fatal(err)
+	}
+	tasksNoWait, err := BuildDeployPlan(optNoWait, tree, "", naming)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range tasksNoWait {
+		if _, ok := task.(*k8s.WaitForWorkloadsTask); ok {
+			t.Errorf("expected plan with Wait=false to not include WaitForWorkloadsTask")
+		}
 	}
 }
