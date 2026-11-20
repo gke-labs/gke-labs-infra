@@ -20,6 +20,6 @@ import "github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 type IgnoreList = sourcetree.IgnoreList
 
 // NewIgnoreList creates a new IgnoreList.
-func NewIgnoreList(patterns []string) *IgnoreList {
+func NewIgnoreList(patterns []string) (*IgnoreList, error) {
 	return sourcetree.NewIgnoreList(patterns)
 }

@@ -95,7 +95,10 @@ func TestIgnoreList(t *testing.T) {
 	}
 
 	for _, g := range grid {
-		l := NewIgnoreList([]string{g.Pattern})
+		l, err := NewIgnoreList([]string{g.Pattern})
+		if err != nil {
+			t.Fatalf("unexpected error for pattern %q: %v", g.Pattern, err)
+		}
 
 		for _, path := range g.Matches {
 			isDir := strings.HasSuffix(path, "/")
@@ -118,8 +121,8 @@ func TestIgnoreList(t *testing.T) {
 func TestIgnoreList_InvalidPattern(t *testing.T) {
 	// A pattern with an unclosed bracket is invalid syntax in filepath.Match
 	invalidPattern := "foo/[a-"
-	l := NewIgnoreList([]string{invalidPattern})
-	if l.ShouldIgnore("foo/bar", false) {
-		t.Errorf("invalid pattern %q should not match foo/bar", invalidPattern)
+	_, err := NewIgnoreList([]string{invalidPattern})
+	if err == nil {
+		t.Errorf("expected error for invalid pattern %q, got nil", invalidPattern)
 	}
 }

@@ -47,7 +47,10 @@ func TestExpandPaths(t *testing.T) {
 		}
 	}
 
-	ignore := NewIgnoreList([]string{"ignored_dir/", "pkg/foo/b.go"})
+	ignore, err := NewIgnoreList([]string{"ignored_dir/", "pkg/foo/b.go"})
+	if err != nil {
+		t.Fatalf("failed to create ignore list: %v", err)
+	}
 
 	tests := []struct {
 		name     string

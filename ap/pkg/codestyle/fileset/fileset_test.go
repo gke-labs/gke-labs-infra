@@ -113,7 +113,10 @@ func TestPolicy_ShouldSkip(t *testing.T) {
 	}
 
 	// 1. SkipGenerated: false
-	pNoSkipGen := NewPolicy(false, false, nil, "")
+	pNoSkipGen, err := NewPolicy(false, false, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if pNoSkipGen.ShouldSkip("gen.go", genFile) {
 		t.Errorf("expected generated file to NOT be skipped when SkipGenerated is false")
 	}
@@ -122,7 +125,10 @@ func TestPolicy_ShouldSkip(t *testing.T) {
 	}
 
 	// 2. SkipGenerated: true
-	pSkipGen := NewPolicy(true, false, nil, "")
+	pSkipGen, err := NewPolicy(true, false, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !pSkipGen.ShouldSkip("gen.go", genFile) {
 		t.Errorf("expected generated file to be skipped when SkipGenerated is true")
 	}
@@ -131,17 +137,26 @@ func TestPolicy_ShouldSkip(t *testing.T) {
 	}
 
 	// 3. SkipTests: true vs false
-	pSkipTests := NewPolicy(false, true, nil, "")
+	pSkipTests, err := NewPolicy(false, true, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !pSkipTests.ShouldSkip("foo_test.go", nil) {
 		t.Errorf("expected test file to be skipped when SkipTests is true")
 	}
-	pNoSkipTests := NewPolicy(false, false, nil, "")
+	pNoSkipTests, err := NewPolicy(false, false, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if pNoSkipTests.ShouldSkip("foo_test.go", nil) {
 		t.Errorf("expected test file to NOT be skipped when SkipTests is false")
 	}
 
 	// 4. SkipVendored: true
-	pSkipVendored := NewPolicy(false, false, nil, "/repo")
+	pSkipVendored, err := NewPolicy(false, false, nil, "/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !pSkipVendored.ShouldSkip("/repo/vendor/lib/x.go", nil) {
 		t.Errorf("expected vendor file to be skipped when SkipVendored is true")
 	}
@@ -150,7 +165,10 @@ func TestPolicy_ShouldSkip(t *testing.T) {
 	}
 
 	// 5. SkipGlobs
-	pSkipGlobs := NewPolicy(false, false, []string{"testdata/**", "*.ignore.go"}, "/repo")
+	pSkipGlobs, err := NewPolicy(false, false, []string{"testdata/**", "*.ignore.go"}, "/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !pSkipGlobs.ShouldSkip("/repo/testdata/sub/a.go", nil) {
 		t.Errorf("expected /repo/testdata/sub/a.go to be skipped by glob")
 	}

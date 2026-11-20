@@ -33,6 +33,9 @@ func TestAnalyzer_GeneratedDefault(t *testing.T) {
 
 func TestAnalyzer_GeneratedSkip(t *testing.T) {
 	testdata := analysistest.TestData()
-	policy := fileset.NewPolicy(true, false, nil, "")
+	policy, err := fileset.NewPolicy(true, false, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	analysistest.Run(t, testdata, NewAnalyzer(Config{Policy: policy}), "generated_skip")
 }

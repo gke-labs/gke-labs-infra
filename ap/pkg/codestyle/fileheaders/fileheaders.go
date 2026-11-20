@@ -215,7 +215,10 @@ func Run(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files [
 
 	// Combine default ignores with config skips
 	allIgnores := append(opt.IgnoreFiles, config.Skip...)
-	ignoreList := walker.NewIgnoreList(allIgnores)
+	ignoreList, err := walker.NewIgnoreList(allIgnores)
+	if err != nil {
+		return fmt.Errorf("building ignore list: %w", err)
+	}
 
 	processor := &processor{
 		config:     config,

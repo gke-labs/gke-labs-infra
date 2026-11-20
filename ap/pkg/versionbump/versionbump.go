@@ -56,7 +56,10 @@ func Run(ctx context.Context, r *sourcetree.SourceTree, root string, targetGoVer
 	// Strip 'go' prefix from 'go1.26.1' -> '1.26.1'
 	version := strings.TrimPrefix(latestGo, "go")
 
-	ignore := walker.NewIgnoreList([]string{".git", "vendor", "node_modules"})
+	ignore, err := walker.NewIgnoreList([]string{".git", "vendor", "node_modules"})
+	if err != nil {
+		return fmt.Errorf("building ignore list: %w", err)
+	}
 
 	files, err := walker.Walk(r, root, ignore, func(path string, _ os.FileInfo) bool {
 		name := filepath.Base(path)

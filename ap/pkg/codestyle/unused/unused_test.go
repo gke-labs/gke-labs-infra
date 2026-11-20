@@ -34,10 +34,18 @@ func TestUnusedParameters(t *testing.T) {
 func TestUnused_GeneratedDefault(t *testing.T) {
 	testdata := analysistest.TestData()
 	// unused defaults to skipping generated files
-	analysistest.Run(t, testdata, NewAnalyzer(Config{Policy: fileset.NewPolicy(true, false, nil, "")}), "generated_skip")
+	p, err := fileset.NewPolicy(true, false, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	analysistest.Run(t, testdata, NewAnalyzer(Config{Policy: p}), "generated_skip")
 }
 
 func TestUnused_GeneratedCheckWhenNotSkipped(t *testing.T) {
 	testdata := analysistest.TestData()
-	analysistest.Run(t, testdata, NewAnalyzer(Config{Policy: fileset.NewPolicy(false, false, nil, "")}), "generated_check")
+	p, err := fileset.NewPolicy(false, false, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	analysistest.Run(t, testdata, NewAnalyzer(Config{Policy: p}), "generated_check")
 }

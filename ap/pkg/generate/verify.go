@@ -60,7 +60,10 @@ func FindGeneratedFiles(repoRoot string, scopes []*tasks.TaskContext) ([]*source
 	if rootCfg != nil && rootCfg.Generate != nil {
 		rootIgnorePatterns = rootCfg.Generate.IgnoreOrphans
 	}
-	rootIgnoreList := sourcetree.NewIgnoreList(rootIgnorePatterns)
+	rootIgnoreList, err := sourcetree.NewIgnoreList(rootIgnorePatterns)
+	if err != nil {
+		return nil, fmt.Errorf("building root ignore list: %w", err)
+	}
 
 	var generatedFiles []*sourcetree.File
 	seen := make(map[string]bool)
@@ -76,7 +79,10 @@ func FindGeneratedFiles(repoRoot string, scopes []*tasks.TaskContext) ([]*source
 		if scopeCfg != nil && scopeCfg.Generate != nil {
 			scopeIgnorePatterns = scopeCfg.Generate.IgnoreOrphans
 		}
-		scopeIgnoreList := sourcetree.NewIgnoreList(scopeIgnorePatterns)
+		scopeIgnoreList, err := sourcetree.NewIgnoreList(scopeIgnorePatterns)
+		if err != nil {
+			return nil, fmt.Errorf("building scope ignore list: %w", err)
+		}
 
 		var pluginOutputDirs []string
 		for _, task := range scope.GenerateTasks {

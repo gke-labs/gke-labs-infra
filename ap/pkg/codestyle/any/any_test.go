@@ -29,10 +29,18 @@ func TestAny(t *testing.T) {
 func TestAny_GeneratedDefault(t *testing.T) {
 	testdata := analysistest.TestData()
 	// any defaults to skipping generated files
-	analysistest.Run(t, testdata, NewAnalyzer(fileset.NewPolicy(true, false, nil, "")), "generated_skip")
+	p, err := fileset.NewPolicy(true, false, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	analysistest.Run(t, testdata, NewAnalyzer(p), "generated_skip")
 }
 
 func TestAny_GeneratedCheckWhenNotSkipped(t *testing.T) {
 	testdata := analysistest.TestData()
-	analysistest.Run(t, testdata, NewAnalyzer(fileset.NewPolicy(false, false, nil, "")), "generated_check")
+	p, err := fileset.NewPolicy(false, false, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	analysistest.Run(t, testdata, NewAnalyzer(p), "generated_check")
 }
