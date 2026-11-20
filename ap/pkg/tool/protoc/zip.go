@@ -16,29 +16,30 @@ package protoc
 
 import (
 	"archive/zip"
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"k8s.io/klog/v2"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 )
 
 // extractZip extracts all entries from a zip archive at zipPath into destDir.
-func extractZip(zipPath, destDir string) error {
+func extractZip(ctx context.Context, zipPath, destDir string) error {
 	reader, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return fmt.Errorf("failed to open zip file %s: %w", zipPath, err)
 	}
 	defer func() {
 		if closeErr := reader.Close(); closeErr != nil {
-			klog.V(2).Infof("failed to close zip reader %s: %v", zipPath, closeErr)
+			scoped.Log(ctx).Fine("failed to close zip reader", "path", zipPath, "error", closeErr)
 		}
 	}()
 
 	for _, file := range reader.File {
-		if err := extractZipEntry(file, destDir); err != nil {
+		if err := extractZipEntry(ctx, file, destDir); err != nil {
 			return err
 		}
 	}
@@ -46,7 +47,7 @@ func extractZip(zipPath, destDir string) error {
 	return nil
 }
 
-func extractZipEntry(file *zip.File, destDir string) error {
+func extractZipEntry(ctx context.Context, file *zip.File, destDir string) error {
 	cleanName := filepath.Clean(file.Name)
 	if strings.HasPrefix(cleanName, "..") || filepath.IsAbs(cleanName) {
 		return fmt.Errorf("illegal relative file path in zip: %s", file.Name)
@@ -61,10 +62,10 @@ func extractZipEntry(file *zip.File, destDir string) error {
 		return nil
 	}
 
-	return extractZipFile(file, targetPath)
+	return extractZipFile(ctx, file, targetPath)
 }
 
-func extractZipFile(file *zip.File, targetPath string) error {
+func extractZipFile(ctx context.Context, file *zip.File, targetPath string) error {
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
 		return fmt.Errorf("failed to create parent directory for %s: %w", targetPath, err)
 	}
@@ -75,7 +76,7 @@ func extractZipFile(file *zip.File, targetPath string) error {
 	}
 	defer func() {
 		if closeErr := rc.Close(); closeErr != nil {
-			klog.V(2).Infof("failed to close zip entry %s: %v", file.Name, closeErr)
+			scoped.Log(ctx).Fine("failed to close zip entry", "entry", file.Name, "error", closeErr)
 		}
 	}()
 

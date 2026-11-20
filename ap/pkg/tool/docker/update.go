@@ -30,7 +30,6 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/github"
 	toolversions "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/versions"
 	"gopkg.in/yaml.v3"
-	"k8s.io/klog/v2"
 )
 
 const maxReleases = 5
@@ -229,7 +228,7 @@ func fetchPlatformVersions(ctx context.Context, url, ext string) ([]string, erro
 	if err != nil {
 		return nil, err
 	}
-	defer github.CloseResponseBody(resp)
+	defer github.CloseResponseBody(ctx, resp)
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP status %s", resp.Status)
@@ -334,7 +333,7 @@ func fetchBuildxReleases(ctx context.Context) ([]toolversions.Release, error) {
 			if strings.HasPrefix(a.Name, "checksums") && strings.HasSuffix(a.Name, ".txt") {
 				content, err := github.GetText(ctx, a.BrowserDownloadURL)
 				if err != nil {
-					klog.V(2).Infof("failed to fetch buildx checksum asset %s: %v", a.BrowserDownloadURL, err)
+					scoped.Log(ctx).Fine("failed to fetch buildx checksum asset", "url", a.BrowserDownloadURL, "error", err)
 					continue
 				}
 				for _, line := range strings.Split(content, "\n") {

@@ -28,7 +28,6 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	toolversions "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/versions"
 	"gopkg.in/yaml.v3"
-	"k8s.io/klog/v2"
 )
 
 const maxReleases = 5
@@ -77,7 +76,7 @@ func Update(ctx context.Context, repoRoot string) error {
 	}
 	defer func() {
 		if closeErr := resp.Body.Close(); closeErr != nil {
-			klog.V(2).Infof("failed to close response body: %v", closeErr)
+			scoped.Log(ctx).Fine("failed to close response body", "error", closeErr)
 		}
 	}()
 

@@ -36,7 +36,6 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/github"
 	toolversions "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/versions"
 	"gopkg.in/yaml.v3"
-	"k8s.io/klog/v2"
 )
 
 // Archive defines the packaging layout and extraction of a tool distribution.
@@ -73,7 +72,7 @@ func extractTarGz(ctx context.Context, archivePath, binary, dest string) error {
 	}
 	defer func() {
 		if closeErr := archiveFile.Close(); closeErr != nil {
-			klog.V(2).Infof("failed to close %s: %v", archivePath, closeErr)
+			scoped.Log(ctx).Fine("failed to close archive", "path", archivePath, "error", closeErr)
 		}
 	}()
 
@@ -83,7 +82,7 @@ func extractTarGz(ctx context.Context, archivePath, binary, dest string) error {
 	}
 	defer func() {
 		if closeErr := gzipReader.Close(); closeErr != nil {
-			klog.V(2).Infof("failed to close gzip reader: %v", closeErr)
+			scoped.Log(ctx).Fine("failed to close gzip reader", "error", closeErr)
 		}
 	}()
 
@@ -323,7 +322,7 @@ func fetchTextAttempt(ctx context.Context, url string) (text string, retryable b
 	}
 	defer func() {
 		if closeErr := response.Body.Close(); closeErr != nil {
-			klog.V(2).Infof("failed to close response body: %v", closeErr)
+			scoped.Log(ctx).Fine("failed to close response body", "error", closeErr)
 		}
 	}()
 
@@ -535,7 +534,7 @@ func Ensure(ctx context.Context, spec *Spec, version string) (string, error) {
 		tag := NormalizeTag(version)
 		binPath := filepath.Join(cacheRoot, "tools", spec.Name, tag, "bin", binName)
 		if fileutils.IsExecutable(binPath) {
-			klog.V(2).Infof("Using %s %s", spec.Name, tag)
+			scoped.Log(ctx).Fine("Using tool", "name", spec.Name, "version", tag)
 			return binPath, nil
 		}
 	}
@@ -548,7 +547,7 @@ func Ensure(ctx context.Context, spec *Spec, version string) (string, error) {
 	tag := NormalizeTag(release.Version)
 	binPath := filepath.Join(cacheRoot, "tools", spec.Name, tag, "bin", binName)
 	if fileutils.IsExecutable(binPath) {
-		klog.V(2).Infof("Using %s %s", spec.Name, tag)
+		scoped.Log(ctx).Fine("Using tool", "name", spec.Name, "version", tag)
 		return binPath, nil
 	}
 
@@ -558,7 +557,7 @@ func Ensure(ctx context.Context, spec *Spec, version string) (string, error) {
 	}
 	defer func() {
 		if rmErr := os.Remove(tmpFile); rmErr != nil && !os.IsNotExist(rmErr) {
-			klog.V(2).Infof("failed to remove temporary file %s: %v", tmpFile, rmErr)
+			scoped.Log(ctx).Fine("failed to remove temporary file", "path", tmpFile, "error", rmErr)
 		}
 	}()
 
@@ -570,7 +569,7 @@ func Ensure(ctx context.Context, spec *Spec, version string) (string, error) {
 		return "", fmt.Errorf("failed to chmod %s binary %s: %w", spec.Name, binPath, err)
 	}
 
-	klog.Infof("Installed %s %s to %s", spec.Name, tag, binPath)
+	scoped.Log(ctx).Info(fmt.Sprintf("Installed %s %s to %s", spec.Name, tag, binPath))
 	return binPath, nil
 }
 
@@ -647,7 +646,7 @@ func ResolveRelease(ctx context.Context, spec *Spec, version string) (*ResolvedR
 	}
 
 	// On a miss: warn and resolve from source
-	klog.Warningf("%s %s is not in versions.yaml; resolving it from the GitHub API, which is rate limited; run 'ap tool update-versions' to add it", spec.Name, requestedVersion)
+	scoped.Log(ctx).Warn("tool is not in versions.yaml; resolving it from the GitHub API, which is rate limited; run 'ap tool update-versions' to add it", "tool", spec.Name, "version", requestedVersion)
 	tag := NormalizeTag(requestedVersion)
 	url := spec.DownloadURL(tag, runtime.GOOS, runtime.GOARCH)
 
@@ -693,7 +692,7 @@ func Update(ctx context.Context, spec *Spec, repoRoot string) error {
 
 			digest, err := spec.Source.Digest(ctx, version, goos, goarch)
 			if err != nil || digest == "" {
-				klog.V(2).Infof("failed to get digest for %s %s on %s: %v", spec.Name, version, plat, err)
+				scoped.Log(ctx).Fine("failed to get digest", "name", spec.Name, "version", version, "platform", plat, "error", err)
 				break
 			}
 			assetsMap[plat] = digest

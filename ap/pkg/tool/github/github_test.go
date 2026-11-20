@@ -197,7 +197,7 @@ func TestDoGitHubRequest(t *testing.T) {
 
 			resp, err := Do(ctx, req)
 			if resp != nil {
-				defer CloseResponseBody(resp)
+				defer CloseResponseBody(ctx, resp)
 			}
 
 			if reqCount != tt.wantRequests {
@@ -322,7 +322,7 @@ func TestDoGitHubRequest_Cache(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			defer CloseResponseBody(resp)
+			defer CloseResponseBody(ctx, resp)
 
 			if gotIfNoneMatch != tt.wantIfNoneMatch {
 				t.Errorf("got If-None-Match %q, want %q", gotIfNoneMatch, tt.wantIfNoneMatch)

@@ -21,6 +21,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -38,7 +39,6 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kustomize"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/spec"
 	toolversions "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/versions"
-	"k8s.io/klog/v2"
 )
 
 type failTransport struct{}
@@ -82,14 +82,9 @@ func TestSpec_Resolution_Offline(t *testing.T) {
 
 	// 3. Unlisted version (v0.20.0) warns and falls back to GitHub API (which fails via failing client)
 	var logBuf bytes.Buffer
-	klog.SetOutput(&logBuf)
-	klog.LogToStderr(false)
-	defer func() {
-		klog.SetOutput(os.Stderr)
-		klog.LogToStderr(true)
-	}()
+	testCtx := scoped.WithLog(ctx, scoped.NewLogger(slog.NewTextHandler(&logBuf, nil)))
 
-	_, err = spec.ResolveRelease(ctx, kind.Spec, "v0.20.0")
+	_, err = spec.ResolveRelease(testCtx, kind.Spec, "v0.20.0")
 	if err == nil {
 		t.Fatal("expected error from failed network request on unlisted version, got nil")
 	}
@@ -97,8 +92,8 @@ func TestSpec_Resolution_Offline(t *testing.T) {
 		t.Errorf("expected error to mention disabled network, got: %v", err)
 	}
 
-	wantWarn := "kind v0.20.0 is not in versions.yaml; resolving it from the GitHub API, which is rate limited; run 'ap tool update-versions' to add it"
-	if !strings.Contains(logBuf.String(), wantWarn) {
+	wantWarn := "tool is not in versions.yaml; resolving it from the GitHub API, which is rate limited; run 'ap tool update-versions' to add it"
+	if !strings.Contains(logBuf.String(), wantWarn) || !strings.Contains(logBuf.String(), "version=v0.20.0") {
 		t.Errorf("expected warning %q in log output, got: %s", wantWarn, logBuf.String())
 	}
 }
@@ -117,15 +112,8 @@ func TestSpec_Cached(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx := scoped.WithHTTPClient(t.Context(), &http.Client{Transport: &failTransport{}})
-
 	var logBuf bytes.Buffer
-	klog.SetOutput(&logBuf)
-	klog.LogToStderr(false)
-	defer func() {
-		klog.SetOutput(os.Stderr)
-		klog.LogToStderr(true)
-	}()
+	ctx := scoped.WithLog(scoped.WithHTTPClient(t.Context(), &http.Client{Transport: &failTransport{}}), scoped.NewLogger(slog.NewTextHandler(&logBuf, nil)))
 
 	gotBin, err := spec.Ensure(ctx, kind.Spec, "v0.33.0")
 	if err != nil {

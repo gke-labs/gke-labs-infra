@@ -17,6 +17,7 @@ package protoc
 import (
 	"bytes"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -28,7 +29,6 @@ import (
 	"testing"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
-	"k8s.io/klog/v2"
 )
 
 func TestResolveProtocAsset(t *testing.T) {
@@ -101,14 +101,9 @@ func TestEnsureProtoc_Resolution(t *testing.T) {
 
 	// 3. Unlisted version (24.4) warns and falls back to GitHub API (which fails via failing client)
 	var logBuf bytes.Buffer
-	klog.SetOutput(&logBuf)
-	klog.LogToStderr(false)
-	defer func() {
-		klog.SetOutput(os.Stderr)
-		klog.LogToStderr(true)
-	}()
+	testCtx := scoped.WithLog(ctx, scoped.NewLogger(slog.NewTextHandler(&logBuf, nil)))
 
-	_, _, _, err = resolveProtocRelease(ctx, "24.4")
+	_, _, _, err = resolveProtocRelease(testCtx, "24.4")
 	if err == nil {
 		t.Fatal("expected error from failed network request on unlisted version, got nil")
 	}
@@ -116,8 +111,8 @@ func TestEnsureProtoc_Resolution(t *testing.T) {
 		t.Errorf("expected error to mention disabled network, got: %v", err)
 	}
 
-	wantWarn := "protoc 24.4 is not in versions.yaml; resolving it from the GitHub API, which is rate limited; run 'ap tool update-versions' to add it"
-	if !strings.Contains(logBuf.String(), wantWarn) {
+	wantWarn := "protoc is not in versions.yaml; resolving it from the GitHub API, which is rate limited; run 'ap tool update-versions' to add it"
+	if !strings.Contains(logBuf.String(), wantWarn) || !strings.Contains(logBuf.String(), "version=24.4") {
 		t.Errorf("expected warning %q in log output, got: %s", wantWarn, logBuf.String())
 	}
 }
@@ -145,14 +140,9 @@ func TestEnsureProtoc_Cached(t *testing.T) {
 	}
 
 	var logBuf bytes.Buffer
-	klog.SetOutput(&logBuf)
-	klog.LogToStderr(false)
-	defer func() {
-		klog.SetOutput(os.Stderr)
-		klog.LogToStderr(true)
-	}()
+	ctx := scoped.WithLog(t.Context(), scoped.NewLogger(slog.NewTextHandler(&logBuf, nil)))
 
-	bin, inc, err := EnsureProtoc(t.Context(), version)
+	bin, inc, err := EnsureProtoc(ctx, version)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -239,14 +229,9 @@ func TestEnsurePlugin_Cached(t *testing.T) {
 	}
 
 	var logBuf bytes.Buffer
-	klog.SetOutput(&logBuf)
-	klog.LogToStderr(false)
-	defer func() {
-		klog.SetOutput(os.Stderr)
-		klog.LogToStderr(true)
-	}()
+	ctx := scoped.WithLog(t.Context(), scoped.NewLogger(slog.NewTextHandler(&logBuf, nil)))
 
-	dir, err := EnsurePlugin(t.Context(), pluginName, version, nil)
+	dir, err := EnsurePlugin(ctx, pluginName, version, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -25,7 +25,6 @@ import (
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
-	"k8s.io/klog/v2"
 )
 
 // Download downloads a file from downloadURL to a temporary file in dir, verifying its SHA-256 digest
@@ -45,7 +44,7 @@ func Download(ctx context.Context, downloadURL, expectedDigest, dir string) (str
 	defer func() {
 		if !closed {
 			if closeErr := tmpFile.Close(); closeErr != nil {
-				klog.V(2).Infof("failed to close temporary file %s: %v", tmpName, closeErr)
+				scoped.Log(ctx).Fine("failed to close temporary file", "path", tmpName, "error", closeErr)
 			}
 		}
 	}()
@@ -61,7 +60,7 @@ func Download(ctx context.Context, downloadURL, expectedDigest, dir string) (str
 	}
 	defer func() {
 		if closeErr := resp.Body.Close(); closeErr != nil {
-			klog.V(2).Infof("failed to close response body: %v", closeErr)
+			scoped.Log(ctx).Fine("failed to close response body", "error", closeErr)
 		}
 	}()
 
@@ -86,7 +85,7 @@ func Download(ctx context.Context, downloadURL, expectedDigest, dir string) (str
 		actualHash := hex.EncodeToString(hasher.Sum(nil))
 		if !strings.EqualFold(actualHash, expectedHash) {
 			if rmErr := os.Remove(tmpName); rmErr != nil && !os.IsNotExist(rmErr) {
-				klog.V(2).Infof("failed to remove temporary file %s: %v", tmpName, rmErr)
+				scoped.Log(ctx).Fine("failed to remove temporary file", "path", tmpName, "error", rmErr)
 			}
 			return "", fmt.Errorf("checksum mismatch: expected %s, got %s", expectedHash, actualHash)
 		}
@@ -110,7 +109,7 @@ func Digest(ctx context.Context, downloadURL string) (string, error) {
 	}
 	defer func() {
 		if closeErr := resp.Body.Close(); closeErr != nil {
-			klog.V(2).Infof("failed to close response body: %v", closeErr)
+			scoped.Log(ctx).Fine("failed to close response body", "error", closeErr)
 		}
 	}()
 
