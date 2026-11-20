@@ -37,5 +37,27 @@ func helperInTestFile(t testing.TB) {
 }
 
 func NotATest() {
-	_ = context.Background() // want "consider using t.Context().*"
+	_ = context.Background() // OK
+}
+
+func ExampleSomething() {
+	_ = context.Background() // OK
+	_ = context.TODO()       // OK
+}
+
+func TestWithClosure(t *testing.T) {
+	t.Run("subtest", func(t *testing.T) {
+		_ = context.Background() // want "consider using t.Context().*"
+	})
+	f := func() {
+		_ = context.Background() // want "consider using t.Context().*"
+	}
+	f()
+}
+
+func ExampleWithClosure() {
+	f := func() {
+		_ = context.Background() // OK
+	}
+	f()
 }

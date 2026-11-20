@@ -37,12 +37,9 @@ func run(pass *analysis.Pass, policy fileset.Policy) (any, error) {
 		if policy.ShouldSkipAST(pass.Fset, f) {
 			continue
 		}
-		filename := pass.Fset.Position(f.Pos()).Filename
-		isTestFile := fileset.IsTest(filename)
 
 		v := &visitor{
-			pass:       pass,
-			isTestFile: isTestFile,
+			pass: pass,
 		}
 		ast.Walk(v, f)
 	}
@@ -51,7 +48,6 @@ func run(pass *analysis.Pass, policy fileset.Policy) (any, error) {
 
 type visitor struct {
 	pass            *analysis.Pass
-	isTestFile      bool
 	currentFuncHasT bool
 }
 
@@ -71,7 +67,7 @@ func (v *visitor) Visit(node ast.Node) ast.Visitor {
 		return nil
 	case *ast.FuncLit:
 		oldHasT := v.currentFuncHasT
-		v.currentFuncHasT = hasTestingT(v.pass, n.Type.Params)
+		v.currentFuncHasT = oldHasT || hasTestingT(v.pass, n.Type.Params)
 		if n.Body != nil {
 			ast.Walk(v, n.Body)
 		}
@@ -93,7 +89,7 @@ func (v *visitor) checkCall(call *ast.CallExpr) {
 	if obj, ok := v.pass.TypesInfo.Uses[sel.Sel]; ok {
 		if pkg := obj.Pkg(); pkg != nil && pkg.Path() == "context" {
 			if obj.Name() == "Background" || obj.Name() == "TODO" {
-				if v.isTestFile || v.currentFuncHasT {
+				if v.currentFuncHasT {
 					v.pass.Reportf(call.Pos(), "consider using t.Context() instead of context.%s()", obj.Name())
 				}
 			}
