@@ -270,7 +270,7 @@ func loadSourceTree(ctx context.Context, root string, opts ...Option) (*SourceTr
 		}
 
 		hashPath = filepath.Join(codestyleDir, "hashes.bin")
-		rf, err := recordfile.Open(hashPath, HashesConfig)
+		rf, err := recordfile.Open(ctx, hashPath, HashesConfig)
 		if err != nil {
 			scoped.Log(ctx).Fine("falling back to empty hash cache", "path", hashPath, "error", err)
 			rf = recordfile.New(HashesConfig)
