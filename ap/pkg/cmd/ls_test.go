@@ -204,7 +204,7 @@ plugins:
 		t.Errorf("expected listing output to contain docs build-tasks demo-build, got:\n%s", listingOutput)
 	}
 
-	sourceTree, err := rootOptions.GetSourceTree()
+	sourceTree, err := rootOptions.GetSourceTree(t.Context())
 	if err != nil {
 		t.Fatalf("GetSourceTree failed: %v", err)
 	}

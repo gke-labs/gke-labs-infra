@@ -91,7 +91,7 @@ func TestAuditGeneratedDryRun(t *testing.T) {
 		AuditGenerated: true,
 	}
 
-	if err := opt.Resolve(nil); err != nil {
+	if err := opt.Resolve(t.Context(), nil); err != nil {
 		t.Fatalf("Resolve failed: %v", err)
 	}
 
@@ -124,7 +124,7 @@ func TestVerifyGenerateDryRun(t *testing.T) {
 		Verify:      true,
 	}
 
-	if err := opt.Resolve(nil); err != nil {
+	if err := opt.Resolve(t.Context(), nil); err != nil {
 		t.Fatalf("Resolve failed: %v", err)
 	}
 
@@ -162,7 +162,7 @@ func TestRunGenerate_UntidyGoMod(t *testing.T) {
 	opt := GenerateOptions{
 		RootOptions: rootOpt,
 	}
-	if err := opt.Resolve(nil); err != nil {
+	if err := opt.Resolve(t.Context(), nil); err != nil {
 		t.Fatalf("Resolve failed: %v", err)
 	}
 
@@ -254,7 +254,7 @@ func TestRunGenerate_VerifyReportsUntidyGoMod(t *testing.T) {
 		RootOptions: rootOpt,
 		Verify:      true,
 	}
-	if err := opt.Resolve(nil); err != nil {
+	if err := opt.Resolve(t.Context(), nil); err != nil {
 		t.Fatalf("Resolve failed: %v", err)
 	}
 
@@ -301,7 +301,7 @@ func TestRunGenerate_SecondRunOpensNoUnchangedFiles(t *testing.T) {
 		Dir:      tempDir,
 	}
 	opt1 := GenerateOptions{RootOptions: rootOpt1}
-	if err := opt1.Resolve(nil); err != nil {
+	if err := opt1.Resolve(t.Context(), nil); err != nil {
 		t.Fatalf("Resolve 1 failed: %v", err)
 	}
 	if err := RunGenerate(t.Context(), opt1); err != nil {
@@ -322,7 +322,7 @@ func TestRunGenerate_SecondRunOpensNoUnchangedFiles(t *testing.T) {
 		Dir:      tempDir,
 	}
 	opt2 := GenerateOptions{RootOptions: rootOpt2}
-	if err := opt2.Resolve(nil); err != nil {
+	if err := opt2.Resolve(t.Context(), nil); err != nil {
 		t.Fatalf("Resolve 2 failed: %v", err)
 	}
 	if err := RunGenerate(t.Context(), opt2); err != nil {

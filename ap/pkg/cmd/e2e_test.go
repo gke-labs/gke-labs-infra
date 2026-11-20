@@ -59,7 +59,7 @@ func TestRunE2e_InlineOutput(t *testing.T) {
 			Dir:      tempDir,
 		},
 	}
-	if err := opt.Resolve(nil); err != nil {
+	if err := opt.Resolve(t.Context(), nil); err != nil {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
 
@@ -103,7 +103,7 @@ func TestRunE2e_Artifacts(t *testing.T) {
 			Dir:      tempDir,
 		},
 	}
-	if err := opt.Resolve(nil); err != nil {
+	if err := opt.Resolve(t.Context(), nil); err != nil {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
 

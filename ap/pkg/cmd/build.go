@@ -66,7 +66,7 @@ func RunBuild(ctx context.Context, opt BuildOptions) error {
 		return err
 	}
 
-	r, err := opt.GetSourceTree()
+	r, err := opt.GetSourceTree(ctx)
 	if err != nil {
 		return err
 	}

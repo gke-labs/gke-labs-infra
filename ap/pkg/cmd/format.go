@@ -39,7 +39,7 @@ func BuildFormatCommand(rootOpt *RootOptions) *cobra.Command {
 		Short:   "Run formatting tasks",
 		Args:    cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := opt.Resolve(args); err != nil {
+			if err := opt.Resolve(cmd.Context(), args); err != nil {
 				return err
 			}
 			return RunFormat(cmd.Context(), opt)
@@ -55,7 +55,7 @@ func RunFormat(ctx context.Context, opt FormatOptions) error {
 		return err
 	}
 
-	r, err := opt.GetSourceTree()
+	r, err := opt.GetSourceTree(ctx)
 	if err != nil {
 		return err
 	}

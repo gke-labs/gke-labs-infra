@@ -76,7 +76,7 @@ func TestSingleWalkPerInvocation(t *testing.T) {
 		RepoRoot: tempDir,
 	}
 
-	if err := rootOpt.Resolve([]string{"//..."}); err != nil {
+	if err := rootOpt.Resolve(t.Context(), []string{"//..."}); err != nil {
 		t.Fatalf("Resolve failed: %v", err)
 	}
 
@@ -85,7 +85,7 @@ func TestSingleWalkPerInvocation(t *testing.T) {
 		t.Fatalf("expected WalkCount=1 after Resolve, got %d", count)
 	}
 
-	r, err := rootOpt.GetSourceTree()
+	r, err := rootOpt.GetSourceTree(t.Context())
 	if err != nil {
 		t.Fatalf("GetSourceTree failed: %v", err)
 	}
@@ -312,10 +312,10 @@ func TestDiscoverScopes_ScriptAndGoE2e(t *testing.T) {
 	}()
 
 	rootOpt := RootOptions{RepoRoot: tempDir, DryRun: true}
-	if err := rootOpt.Resolve([]string{"//..."}); err != nil {
+	if err := rootOpt.Resolve(t.Context(), []string{"//..."}); err != nil {
 		t.Fatalf("Resolve failed: %v", err)
 	}
-	r, err := rootOpt.GetSourceTree()
+	r, err := rootOpt.GetSourceTree(t.Context())
 	if err != nil {
 		t.Fatalf("GetSourceTree failed: %v", err)
 	}

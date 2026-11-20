@@ -184,7 +184,7 @@ func RunDroppedErrors(ctx context.Context, cmd *cobra.Command, opt DroppedErrors
 	if opt.RepoRoot == "" {
 		opt.RepoRoot = repoRoot
 	}
-	r, err := opt.GetSourceTree()
+	r, err := opt.GetSourceTree(ctx)
 	if err != nil {
 		return err
 	}

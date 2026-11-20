@@ -44,7 +44,7 @@ type RootOptions struct {
 }
 
 // GetSourceTree returns the source tree associated with the root options.
-func (opt *RootOptions) GetSourceTree() (*sourcetree.SourceTree, error) {
+func (opt *RootOptions) GetSourceTree(ctx context.Context) (*sourcetree.SourceTree, error) {
 	if opt.SourceTree != nil {
 		return opt.SourceTree, nil
 	}
@@ -93,12 +93,12 @@ func (opt *RootOptions) resolveTarget(r *sourcetree.SourceTree, target string) (
 }
 
 // Resolve resolves the target subtree path based on args.
-func (opt *RootOptions) Resolve(args []string) error {
+func (opt *RootOptions) Resolve(ctx context.Context, args []string) error {
 	if opt.RepoRoot == "" {
 		return fmt.Errorf("repo root is not set")
 	}
 
-	r, err := opt.GetSourceTree()
+	r, err := opt.GetSourceTree(ctx)
 	if err != nil {
 		return err
 	}
