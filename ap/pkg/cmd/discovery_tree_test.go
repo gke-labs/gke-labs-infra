@@ -171,7 +171,7 @@ func TestSkipUniformlyInvisibleToAllConsumers(t *testing.T) {
 		t.Fatalf("config.Load failed: %v", err)
 	}
 
-	r, err := sourcetree.Open(tempDir, sourcetree.WithSkip(cfg.Skip...))
+	r, err := sourcetree.Open(t.Context(), tempDir, sourcetree.WithSkip(cfg.Skip...))
 	if err != nil {
 		t.Fatalf("sourcetree.Open failed: %v", err)
 	}
@@ -384,7 +384,7 @@ func TestDiscoverScopes_SubdirectoryWithinModule(t *testing.T) {
 		}
 	}
 
-	sourceTree, err := sourcetree.Open(tempDir)
+	sourceTree, err := sourcetree.Open(t.Context(), tempDir)
 	if err != nil {
 		t.Fatalf("sourcetree.Open failed: %v", err)
 	}

@@ -59,7 +59,7 @@ func (opt *RootOptions) GetSourceTree(ctx context.Context) (*sourcetree.SourceTr
 	if cfg != nil {
 		skips = cfg.Skip
 	}
-	r, err := sourcetree.Open(opt.RepoRoot, sourcetree.WithSkip(skips...))
+	r, err := sourcetree.Open(ctx, opt.RepoRoot, sourcetree.WithSkip(skips...))
 	if err != nil {
 		return nil, err
 	}

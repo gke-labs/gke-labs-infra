@@ -71,7 +71,7 @@ func TestRepoSingleWalkAndCache(t *testing.T) {
 	ResetCache()
 	dir := setupTestRepo(t)
 
-	r1, err := Open(dir, WithSkip("skipped/**"))
+	r1, err := Open(t.Context(), dir, WithSkip("skipped/**"))
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestRepoSingleWalkAndCache(t *testing.T) {
 	}
 
 	// Second Open of the same root should use cache without walking
-	r2, err := Open(dir)
+	r2, err := Open(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("Open second time failed: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestModules(t *testing.T) {
 	ResetCache()
 	dir := setupTestRepo(t)
 
-	r, err := Open(dir, WithSkip("skipped/**"))
+	r, err := Open(t.Context(), dir, WithSkip("skipped/**"))
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestSkipUniformlyApplied(t *testing.T) {
 	ResetCache()
 	dir := setupTestRepo(t)
 
-	r, err := Open(dir, WithSkip("skipped/**"))
+	r, err := Open(t.Context(), dir, WithSkip("skipped/**"))
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestFileClassification(t *testing.T) {
 	ResetCache()
 	dir := setupTestRepo(t)
 
-	r, err := Open(dir, WithSkip("skipped/**"))
+	r, err := Open(t.Context(), dir, WithSkip("skipped/**"))
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestFindDockerfilesAndManifests(t *testing.T) {
 	ResetCache()
 	dir := setupTestRepo(t)
 
-	r, err := Open(dir, WithSkip("skipped/**"))
+	r, err := Open(t.Context(), dir, WithSkip("skipped/**"))
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestGlobAndQueries(t *testing.T) {
 	ResetCache()
 	dir := setupTestRepo(t)
 
-	r, err := Open(dir, WithSkip("skipped/**"))
+	r, err := Open(t.Context(), dir, WithSkip("skipped/**"))
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
@@ -281,7 +281,7 @@ func TestFilesInDir(t *testing.T) {
 	ResetCache()
 	dir := setupTestRepo(t)
 
-	r, err := Open(dir, WithSkip("skipped/**"))
+	r, err := Open(t.Context(), dir, WithSkip("skipped/**"))
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
@@ -316,7 +316,7 @@ func TestFilesInDir(t *testing.T) {
 
 func TestRepo_TrackFile(t *testing.T) {
 	dir := setupTestRepo(t)
-	r, err := Open(dir)
+	r, err := Open(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +345,7 @@ func TestRepo_TrackFile(t *testing.T) {
 
 func TestRepo_WriteFileAtomic(t *testing.T) {
 	dir := setupTestRepo(t)
-	r, err := Open(dir)
+	r, err := Open(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +394,7 @@ func TestRepo_WriteFileAtomic(t *testing.T) {
 
 func TestRepo_CopyFile(t *testing.T) {
 	dir := setupTestRepo(t)
-	r, err := Open(dir)
+	r, err := Open(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -427,7 +427,7 @@ func TestRepo_CopyFile(t *testing.T) {
 
 func TestRepo_Remove(t *testing.T) {
 	dir := setupTestRepo(t)
-	r, err := Open(dir)
+	r, err := Open(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -451,7 +451,7 @@ func TestRepo_Remove(t *testing.T) {
 
 func TestRepo_Invalidate(t *testing.T) {
 	dir := setupTestRepo(t)
-	r, err := Open(dir)
+	r, err := Open(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -523,7 +523,7 @@ func TestRepo_Invalidate(t *testing.T) {
 
 func TestRepo_WriteFile(t *testing.T) {
 	dir := setupTestRepo(t)
-	r, err := Open(dir)
+	r, err := Open(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -571,7 +571,7 @@ func TestRepo_WriteFile(t *testing.T) {
 
 func TestRepo_Track(t *testing.T) {
 	dir := setupTestRepo(t)
-	r, err := Open(dir)
+	r, err := Open(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -630,7 +630,7 @@ func TestFindManifests_ExcludesKustomization(t *testing.T) {
 		}
 	}
 
-	tree, err := Open(dir)
+	tree, err := Open(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}

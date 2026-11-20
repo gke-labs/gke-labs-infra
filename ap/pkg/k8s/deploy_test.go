@@ -102,7 +102,7 @@ func TestFindManifests(t *testing.T) {
 				}
 			}
 
-			r, err := sourcetree.Open(root)
+			r, err := sourcetree.Open(t.Context(), root)
 			if err != nil {
 				t.Fatalf("sourcetree.Open failed: %v", err)
 			}
@@ -217,7 +217,7 @@ exit 0
 		t.Fatal(err)
 	}
 
-	tree, err := sourcetree.Open(tempDir)
+	tree, err := sourcetree.Open(t.Context(), tempDir)
 	if err != nil {
 		t.Fatal(err)
 	}

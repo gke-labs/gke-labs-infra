@@ -160,7 +160,7 @@ func TestFile_HashAndRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := Open(tempDir)
+	r, err := Open(t.Context(), tempDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestFile_HashAndRefresh(t *testing.T) {
 	// Fresh repo view with same file on disk: still hits memo in hashes.bin
 	ResetCache()
 	ResetContentReadCount()
-	r2, err := Open(tempDir)
+	r2, err := Open(t.Context(), tempDir)
 	if err != nil {
 		t.Fatal(err)
 	}

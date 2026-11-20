@@ -142,7 +142,7 @@ func TestKindLoadTask_SharedReferenceMutation(t *testing.T) {
 func TestKindLoadTask_Run(t *testing.T) {
 	t.Run("empty images is a no-op", func(t *testing.T) {
 		tempDir := t.TempDir()
-		tree, err := sourcetree.Open(tempDir)
+		tree, err := sourcetree.Open(t.Context(), tempDir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -201,7 +201,7 @@ exit 1
 			Images:      []*imageref.ImageRef{ref1, ref2},
 		}
 
-		tree, err := sourcetree.Open(tempDir)
+		tree, err := sourcetree.Open(t.Context(), tempDir)
 		if err != nil {
 			t.Fatal(err)
 		}

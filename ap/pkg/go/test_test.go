@@ -27,7 +27,7 @@ func TestHasGoTests(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// 1. Non-existent directory should return false, nil
-	r1, err := sourcetree.Open(tmpDir)
+	r1, err := sourcetree.Open(t.Context(), tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestHasGoTests(t *testing.T) {
 	if err := os.Mkdir(emptyDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	r2, err := sourcetree.Open(emptyDir)
+	r2, err := sourcetree.Open(t.Context(), emptyDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestHasGoTests(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(noTestDir, "foo.go"), []byte("package foo"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	r3, err := sourcetree.Open(noTestDir)
+	r3, err := sourcetree.Open(t.Context(), noTestDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestHasGoTests(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(withTestDir, "foo_test.go"), []byte("package foo"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	r4, err := sourcetree.Open(withTestDir)
+	r4, err := sourcetree.Open(t.Context(), withTestDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestHasGoTests(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(subNested, "bar_test.go"), []byte("package bar"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	r5, err := sourcetree.Open(nestedDir)
+	r5, err := sourcetree.Open(t.Context(), nestedDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestHasGoTests(t *testing.T) {
 
 func TestRace(t *testing.T) {
 	tmpDir := t.TempDir()
-	tree, err := sourcetree.Open(tmpDir)
+	tree, err := sourcetree.Open(t.Context(), tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}

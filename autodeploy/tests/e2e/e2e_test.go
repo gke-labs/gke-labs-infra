@@ -71,7 +71,7 @@ func TestAutodeploy(t *testing.T) {
 			ClusterName: clusterName,
 			Images:      refs,
 		}
-		tree, err := sourcetree.Open(repoRoot)
+		tree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatalf("failed to open sourcetree: %v", err)
 		}

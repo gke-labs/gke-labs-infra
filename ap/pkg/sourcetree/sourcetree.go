@@ -35,7 +35,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/recordfile"
-	"k8s.io/klog/v2"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 )
 
 // HashesConfig is the recordfile configuration for hashes.bin.
@@ -134,7 +134,7 @@ type SourceTree struct {
 
 // Open opens an in-memory snapshot of the repository. If root has already been opened,
 // it returns the cached in-memory view without walking the filesystem again.
-func Open(root string, opts ...Option) (*SourceTree, error) {
+func Open(ctx context.Context, root string, opts ...Option) (*SourceTree, error) {
 	absRoot, err := filepath.Abs(filepath.Clean(root))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get absolute path for %s: %w", root, err)
@@ -147,7 +147,7 @@ func Open(root string, opts ...Option) (*SourceTree, error) {
 		return r, nil
 	}
 
-	r, err := loadSourceTree(absRoot, opts...)
+	r, err := loadSourceTree(ctx, absRoot, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -157,15 +157,15 @@ func Open(root string, opts ...Option) (*SourceTree, error) {
 }
 
 // Load loads a fresh in-memory view of the repository by walking root, bypassing the cache.
-func Load(root string, opts ...Option) (*SourceTree, error) {
+func Load(ctx context.Context, root string, opts ...Option) (*SourceTree, error) {
 	absRoot, err := filepath.Abs(filepath.Clean(root))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get absolute path for %s: %w", root, err)
 	}
-	return loadSourceTree(absRoot, opts...)
+	return loadSourceTree(ctx, absRoot, opts...)
 }
 
-func loadSourceTree(root string, opts ...Option) (*SourceTree, error) {
+func loadSourceTree(ctx context.Context, root string, opts ...Option) (*SourceTree, error) {
 	var opt options
 	for _, o := range opts {
 		o(&opt)
@@ -247,7 +247,7 @@ func loadSourceTree(root string, opts ...Option) (*SourceTree, error) {
 	if cacheDir == "" {
 		cDir, err := fileutils.CacheDir()
 		if err != nil {
-			klog.V(2).Infof("failed to determine cache dir: %v", err)
+			scoped.Log(ctx).Fine("failed to determine cache dir", "error", err)
 		} else {
 			cacheDir = cDir
 		}
@@ -265,14 +265,14 @@ func loadSourceTree(root string, opts ...Option) (*SourceTree, error) {
 		// Delete legacy metadata and done JSON files if found
 		for _, name := range []string{"metadata.json", "done.json", "gofmt.json"} {
 			if err := os.Remove(filepath.Join(codestyleDir, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-				klog.V(2).Infof("failed to remove legacy cache file %s: %v", name, err)
+				scoped.Log(ctx).Fine("failed to remove legacy cache file", "path", name, "error", err)
 			}
 		}
 
 		hashPath = filepath.Join(codestyleDir, "hashes.bin")
 		rf, err := recordfile.Open(hashPath, HashesConfig)
 		if err != nil {
-			klog.V(2).Infof("falling back to empty hash cache for %s: %v", hashPath, err)
+			scoped.Log(ctx).Fine("falling back to empty hash cache", "path", hashPath, "error", err)
 			rf = recordfile.New(HashesConfig)
 		}
 		hashIndex = rf

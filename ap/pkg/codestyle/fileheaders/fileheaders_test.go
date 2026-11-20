@@ -26,7 +26,7 @@ import (
 )
 
 func runTest(ctx context.Context, repoRoot string, files []string) error {
-	r, err := sourcetree.Load(repoRoot)
+	r, err := sourcetree.Load(ctx, repoRoot)
 	if err != nil {
 		return err
 	}

@@ -206,7 +206,7 @@ func EnsureDockerfilePluginImage(
 			return "", fmt.Errorf("plugin %q: URL %q: path %q not found at commit %s", pluginName, dockerfilePath, target.Path, target.Commit)
 		}
 
-		remoteTree, err := sourcetree.Load(cloneDir)
+		remoteTree, err := sourcetree.Load(ctx, cloneDir)
 		if err != nil {
 			return "", fmt.Errorf("plugin %q: URL %q: loading source tree for %s: %w", pluginName, dockerfilePath, cloneDir, err)
 		}

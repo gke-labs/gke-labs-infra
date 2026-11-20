@@ -86,7 +86,7 @@ func TestRunTask_InputAndOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tree, err := sourcetree.Open(repoRoot)
+	tree, err := sourcetree.Open(t.Context(), repoRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestRunTask_PathEscapesRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tree, err := sourcetree.Open(repoRoot)
+	tree, err := sourcetree.Open(t.Context(), repoRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +374,7 @@ func (server *escapingPluginServer) RunTask(stream api.PluginService_RunTaskServ
 
 func TestRunTask_FailedTaskResult(t *testing.T) {
 	repoRoot := t.TempDir()
-	tree, err := sourcetree.Open(repoRoot)
+	tree, err := sourcetree.Open(t.Context(), repoRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,7 +430,7 @@ func TestRunTask_FailedTaskResult(t *testing.T) {
 
 func TestRunTask_EarlyExitWithoutResult(t *testing.T) {
 	repoRoot := t.TempDir()
-	tree, err := sourcetree.Open(repoRoot)
+	tree, err := sourcetree.Open(t.Context(), repoRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -519,7 +519,7 @@ func TestVerifyMode_ReportsDifferenceWithoutTouchingCheckout(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tree, err := sourcetree.Open(repoRoot)
+	tree, err := sourcetree.Open(t.Context(), repoRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -594,7 +594,7 @@ func TestSymlinkRuleInRepositoryView(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tree, err := sourcetree.Open(repoRoot)
+	tree, err := sourcetree.Open(t.Context(), repoRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -664,7 +664,7 @@ func TestRunTask_DanglingSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tree, err := sourcetree.Open(repoRoot)
+	tree, err := sourcetree.Open(t.Context(), repoRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -743,7 +743,7 @@ func TestRunTask_SymlinkedRepoRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tree, err := sourcetree.Open(repoRoot)
+	tree, err := sourcetree.Open(t.Context(), repoRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -814,7 +814,7 @@ func TestRunTask_SymlinkedRepoRoot(t *testing.T) {
 
 func TestNetworkAuthorization(t *testing.T) {
 	repoRoot := t.TempDir()
-	tree, err := sourcetree.Open(repoRoot)
+	tree, err := sourcetree.Open(t.Context(), repoRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -942,7 +942,7 @@ plugins:
 		t.Fatal(err)
 	}
 
-	tree, err := sourcetree.Open(repoRoot)
+	tree, err := sourcetree.Open(t.Context(), repoRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1200,7 +1200,7 @@ plugins:
 		t.Fatal(err)
 	}
 
-	tree, err := sourcetree.Open(declaringRepoRoot)
+	tree, err := sourcetree.Open(t.Context(), declaringRepoRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1318,7 +1318,7 @@ func runVerifyTask(t *testing.T, outputs []string, repositoryFiles, mockFiles ma
 		}
 	}
 
-	tree, err := sourcetree.Open(repoRoot)
+	tree, err := sourcetree.Open(t.Context(), repoRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1443,7 +1443,7 @@ func (s *hangingPluginServer) Describe(ctx context.Context, _ *api.DescribeReque
 func TestDescribeContainer_Deadline(t *testing.T) {
 	repoRoot := t.TempDir()
 	cacheDir := t.TempDir()
-	tree, err := sourcetree.Open(repoRoot)
+	tree, err := sourcetree.Open(t.Context(), repoRoot)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -59,7 +59,7 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 	t.Run("stable across repeated invocations", func(t *testing.T) {
 		repoRoot := setupTestRepo(t)
 		sourcetree.ResetCache()
-		tree, err := sourcetree.Open(repoRoot)
+		tree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -80,7 +80,7 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 	t.Run("changes when context file content changes", func(t *testing.T) {
 		repoRoot := setupTestRepo(t)
 		sourcetree.ResetCache()
-		tree, err := sourcetree.Open(repoRoot)
+		tree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -96,7 +96,7 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 		}
 
 		sourcetree.ResetCache()
-		updatedTree, err := sourcetree.Open(repoRoot)
+		updatedTree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -113,7 +113,7 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 	t.Run("changes when context file mode changes", func(t *testing.T) {
 		repoRoot := setupTestRepo(t)
 		sourcetree.ResetCache()
-		tree, err := sourcetree.Open(repoRoot)
+		tree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -129,7 +129,7 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 		}
 
 		sourcetree.ResetCache()
-		updatedTree, err := sourcetree.Open(repoRoot)
+		updatedTree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -146,7 +146,7 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 	t.Run("changes when Dockerfile content changes", func(t *testing.T) {
 		repoRoot := setupTestRepo(t)
 		sourcetree.ResetCache()
-		tree, err := sourcetree.Open(repoRoot)
+		tree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -162,7 +162,7 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 		}
 
 		sourcetree.ResetCache()
-		updatedTree, err := sourcetree.Open(repoRoot)
+		updatedTree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -179,7 +179,7 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 	t.Run("changes when Dockerfile path changes", func(t *testing.T) {
 		repoRoot := setupTestRepo(t)
 		sourcetree.ResetCache()
-		tree, err := sourcetree.Open(repoRoot)
+		tree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -200,7 +200,7 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 	t.Run("changes when BuildKit host changes", func(t *testing.T) {
 		repoRoot := setupTestRepo(t)
 		sourcetree.ResetCache()
-		tree, err := sourcetree.Open(repoRoot)
+		tree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -221,7 +221,7 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 	t.Run("ignores ignored files", func(t *testing.T) {
 		repoRoot := setupTestRepo(t)
 		sourcetree.ResetCache()
-		tree, err := sourcetree.Open(repoRoot, sourcetree.WithIgnore("ignored.txt"))
+		tree, err := sourcetree.Open(t.Context(), repoRoot, sourcetree.WithIgnore("ignored.txt"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -237,7 +237,7 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 		}
 
 		sourcetree.ResetCache()
-		updatedTree, err := sourcetree.Open(repoRoot, sourcetree.WithIgnore("ignored.txt"))
+		updatedTree, err := sourcetree.Open(t.Context(), repoRoot, sourcetree.WithIgnore("ignored.txt"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -260,7 +260,7 @@ func TestEnsureDockerfilePluginImage(t *testing.T) {
 		repoRoot := setupTestRepo(t)
 		cacheDirectory := t.TempDir()
 		sourcetree.ResetCache()
-		tree, err := sourcetree.Open(repoRoot)
+		tree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -322,7 +322,7 @@ func TestEnsureDockerfilePluginImage(t *testing.T) {
 		repoRoot := setupTestRepo(t)
 		cacheDirectory := t.TempDir()
 		sourcetree.ResetCache()
-		tree, err := sourcetree.Open(repoRoot)
+		tree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -378,7 +378,7 @@ func TestEnsureDockerfilePluginImage(t *testing.T) {
 		repoRoot := setupTestRepo(t)
 		cacheDirectory := t.TempDir()
 		sourcetree.ResetCache()
-		tree, err := sourcetree.Open(repoRoot)
+		tree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -423,7 +423,7 @@ func TestEnsureDockerfilePluginImage(t *testing.T) {
 		repoRoot := setupTestRepo(t)
 		cacheDirectory := t.TempDir()
 		sourcetree.ResetCache()
-		tree, err := sourcetree.Open(repoRoot)
+		tree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -461,7 +461,7 @@ func TestEnsureDockerfilePluginImage(t *testing.T) {
 			t.Fatal(err)
 		}
 		sourcetree.ResetCache()
-		updatedTree, err := sourcetree.Open(repoRoot)
+		updatedTree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -485,14 +485,14 @@ func TestEnsureDockerfilePluginImage(t *testing.T) {
 		cacheDirectory := t.TempDir()
 
 		sourcetree.ResetCache()
-		treeA, err := sourcetree.Open(repoRootA)
+		treeA, err := sourcetree.Open(t.Context(), repoRootA)
 		if err != nil {
 			t.Fatal(err)
 		}
 		scopeA := tasks.NewTaskContext(repoRootA, repoRootA, treeA)
 
 		sourcetree.ResetCache()
-		treeB, err := sourcetree.Open(repoRootB)
+		treeB, err := sourcetree.Open(t.Context(), repoRootB)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -667,7 +667,7 @@ func TestEnsureDockerfilePluginImage_URL(t *testing.T) {
 		if err := os.WriteFile(declaringFile, []byte("declaring repo only\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
-		declaringTree, err := sourcetree.Open(declaringRepoDir)
+		declaringTree, err := sourcetree.Open(t.Context(), declaringRepoDir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -771,7 +771,7 @@ func TestEnsureDockerfilePluginImage_URL(t *testing.T) {
 		runRemoteGit("commit", "-m", "initial commit")
 
 		declaringRepoDir := t.TempDir()
-		declaringTree, err := sourcetree.Open(declaringRepoDir)
+		declaringTree, err := sourcetree.Open(t.Context(), declaringRepoDir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -851,7 +851,7 @@ func TestEnsureDockerfilePluginImage_URL(t *testing.T) {
 		runRemoteGit("commit", "-m", "initial commit")
 
 		declaringRepoDir := t.TempDir()
-		declaringTree, err := sourcetree.Open(declaringRepoDir)
+		declaringTree, err := sourcetree.Open(t.Context(), declaringRepoDir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -889,7 +889,7 @@ func TestEnsureDockerfilePluginImage_URL(t *testing.T) {
 
 	t.Run("unsupported URL fails with clear error", func(t *testing.T) {
 		declaringRepoDir := t.TempDir()
-		declaringTree, err := sourcetree.Open(declaringRepoDir)
+		declaringTree, err := sourcetree.Open(t.Context(), declaringRepoDir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -926,7 +926,7 @@ func TestEnsureDockerfilePluginImage_URL(t *testing.T) {
 
 	t.Run("relative path continues to build from declaring repository root", func(t *testing.T) {
 		declaringRepoDir := setupTestRepo(t)
-		declaringTree, err := sourcetree.Open(declaringRepoDir)
+		declaringTree, err := sourcetree.Open(t.Context(), declaringRepoDir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -972,7 +972,7 @@ func TestEnsureDockerfilePluginImage_URL(t *testing.T) {
 		pinnedCommit := runRemoteGit("rev-parse", "HEAD")
 
 		declaringRepoDir := t.TempDir()
-		declaringTree, err := sourcetree.Open(declaringRepoDir)
+		declaringTree, err := sourcetree.Open(t.Context(), declaringRepoDir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1042,7 +1042,7 @@ func TestEnsureDockerfilePluginImage_URL(t *testing.T) {
 		runRemoteGit("commit", "-m", "symlink pointing outside repo")
 
 		declaringRepoDir := t.TempDir()
-		declaringTree, err := sourcetree.Open(declaringRepoDir)
+		declaringTree, err := sourcetree.Open(t.Context(), declaringRepoDir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1096,7 +1096,7 @@ func TestBenchmarkHashingRepoRoot(t *testing.T) {
 	}
 
 	sourcetree.ResetCache()
-	tree, err := sourcetree.Open(dir)
+	tree, err := sourcetree.Open(t.Context(), dir)
 	if err != nil {
 		t.Skipf("cannot open repository root %s: %v", dir, err)
 	}
