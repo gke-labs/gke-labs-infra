@@ -50,7 +50,7 @@ func TestFindTaskScripts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := sourcetree.Open(tmpDir)
+	r, err := sourcetree.Open(t.Context(), tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestFindTaskScripts(t *testing.T) {
 
 func TestTaskContextSourceTree(t *testing.T) {
 	tmpDir := t.TempDir()
-	tree, err := sourcetree.Open(tmpDir)
+	tree, err := sourcetree.Open(t.Context(), tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestGroupRun_ContinueOnError(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	tree, err := sourcetree.Open(t.TempDir())
+	tree, err := sourcetree.Open(t.Context(), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func TestGroupRun_FailFast(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	tree, err := sourcetree.Open(t.TempDir())
+	tree, err := sourcetree.Open(t.Context(), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +264,7 @@ func TestTasksRun_ContinueOnError(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	tree, err := sourcetree.Open(t.TempDir())
+	tree, err := sourcetree.Open(t.Context(), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +318,7 @@ func TestTaskScript_ResolvesApOnPath(t *testing.T) {
 	tempCache := t.TempDir()
 	t.Setenv("AP_CACHE_DIR", tempCache)
 	t.Setenv("AP_EXECUTABLE", fakeAp)
-	tree, err := sourcetree.Open(tmpDir)
+	tree, err := sourcetree.Open(t.Context(), tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +362,7 @@ func TestTaskScript_ResolvesToolsOnPath(t *testing.T) {
 	}
 
 	t.Setenv("AP_EXECUTABLE", fakeAp)
-	tree, err := sourcetree.Open(tmpDir)
+	tree, err := sourcetree.Open(t.Context(), tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -403,7 +403,7 @@ func TestParallelGroup(t *testing.T) {
 		allowTask2Finish := make(chan struct{})
 
 		var outBuf syncBuffer
-		tree, err := sourcetree.Open(t.TempDir())
+		tree, err := sourcetree.Open(t.Context(), t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -545,7 +545,7 @@ func TestParallelGroup(t *testing.T) {
 		var task2Ran atomic.Bool
 
 		var outBuf syncBuffer
-		tree, err := sourcetree.Open(t.TempDir())
+		tree, err := sourcetree.Open(t.Context(), t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -619,7 +619,7 @@ func TestParallelGroup(t *testing.T) {
 
 		var ranA, ranB, ranC atomic.Bool
 		var outBuf syncBuffer
-		tree, err := sourcetree.Open(t.TempDir())
+		tree, err := sourcetree.Open(t.Context(), t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -685,7 +685,7 @@ func TestParallelGroup(t *testing.T) {
 
 func TestTaskOutputPolicy(t *testing.T) {
 	newScope := func(t *testing.T, out *syncBuffer) *TaskContext {
-		tree, err := sourcetree.Open(t.TempDir())
+		tree, err := sourcetree.Open(t.Context(), t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -952,7 +952,7 @@ func TestTaskOutputPolicy(t *testing.T) {
 func TestTaskOutputArtifacts(t *testing.T) {
 	artifactsDir := t.TempDir()
 
-	tree, err := sourcetree.Open(t.TempDir())
+	tree, err := sourcetree.Open(t.Context(), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1036,7 +1036,7 @@ func TestTaskOutputArtifacts(t *testing.T) {
 }
 
 func TestTaskOutputArtifacts_Unset(t *testing.T) {
-	tree, err := sourcetree.Open(t.TempDir())
+	tree, err := sourcetree.Open(t.Context(), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1063,7 +1063,7 @@ func TestTaskOutputArtifacts_UniquePathsAndHumanName(t *testing.T) {
 	artifactsDir := t.TempDir()
 	repoRoot := t.TempDir()
 
-	tree, err := sourcetree.Open(repoRoot)
+	tree, err := sourcetree.Open(t.Context(), repoRoot)
 	if err != nil {
 		t.Fatal(err)
 	}

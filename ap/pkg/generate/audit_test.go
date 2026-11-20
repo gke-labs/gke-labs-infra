@@ -81,7 +81,7 @@ func TestRunAudit_DryRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := sourcetree.Open(tempDir)
+	r, err := sourcetree.Open(t.Context(), tempDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ EOF
 		t.Fatal(err)
 	}
 
-	r, err := sourcetree.Open(tempDir)
+	r, err := sourcetree.Open(t.Context(), tempDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ EOF
 		t.Fatal(err)
 	}
 
-	r, err := sourcetree.Open(tempDir)
+	r, err := sourcetree.Open(t.Context(), tempDir)
 	if err != nil {
 		t.Fatal(err)
 	}

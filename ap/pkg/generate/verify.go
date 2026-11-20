@@ -301,7 +301,7 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext
 			rel = f.Path
 		}
 
-		preHash, err := f.Hash()
+		preHash, err := f.Hash(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to hash %s: %w", f.Path, err)
 		}
@@ -370,7 +370,7 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext
 	} else {
 		// Verify all perturbed files were restored byte-identical using content hashes
 		for _, pf := range perturbedFiles {
-			currentHash, err := pf.file.Hash()
+			currentHash, err := pf.file.Hash(ctx)
 			if err != nil {
 				findings = append(findings, fmt.Sprintf("file %q missing after generation: %v", pf.relPath, err))
 				continue

@@ -93,7 +93,7 @@ func TestHasImages(t *testing.T) {
 			os.MkdirAll(root, 0755)
 			tt.setup(root)
 
-			r, err := sourcetree.Open(root)
+			r, err := sourcetree.Open(t.Context(), root)
 			if err != nil {
 				t.Fatalf("sourcetree.Open failed: %v", err)
 			}
@@ -118,7 +118,7 @@ func TestBuildTasks(t *testing.T) {
 	os.MkdirAll(filepath.Join(tmpDir, "images", "foo"), 0755)
 	os.WriteFile(filepath.Join(tmpDir, "images", "foo", "Dockerfile"), []byte("FROM scratch"), 0644)
 
-	r, err := sourcetree.Open(tmpDir)
+	r, err := sourcetree.Open(t.Context(), tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestFindImageNames(t *testing.T) {
 	os.MkdirAll(filepath.Join(tmpDir, "sub", "images", "img-c"), 0755)
 	os.WriteFile(filepath.Join(tmpDir, "sub", "images", "img-c", "Dockerfile"), []byte("FROM scratch"), 0644)
 
-	r, err := sourcetree.Open(tmpDir)
+	r, err := sourcetree.Open(t.Context(), tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestFindImageNames(t *testing.T) {
 	os.WriteFile(filepath.Join(dupDir, "images", "dup", "Dockerfile"), []byte("FROM scratch"), 0644)
 	os.MkdirAll(filepath.Join(dupDir, "sub", "images", "dup"), 0755)
 	os.WriteFile(filepath.Join(dupDir, "sub", "images", "dup", "Dockerfile"), []byte("FROM scratch"), 0644)
-	rDup, err := sourcetree.Open(dupDir)
+	rDup, err := sourcetree.Open(t.Context(), dupDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +215,7 @@ func TestBuildTasksForImages(t *testing.T) {
 	os.MkdirAll(filepath.Join(tmpDir, "images", "b"), 0755)
 	os.WriteFile(filepath.Join(tmpDir, "images", "b", "Dockerfile"), []byte("FROM scratch"), 0644)
 
-	r, err := sourcetree.Open(tmpDir)
+	r, err := sourcetree.Open(t.Context(), tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -393,7 +393,7 @@ func TestBuildTasks_NoPortForward(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := sourcetree.Open(tmpDir)
+	r, err := sourcetree.Open(t.Context(), tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -464,7 +464,7 @@ func TestDockerBuildTask_Platforms(t *testing.T) {
 		Naming:     ImageNaming{Prefix: "gcr.io/my-org"},
 	}
 
-	r, err := sourcetree.Open(tmpDir)
+	r, err := sourcetree.Open(t.Context(), tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -799,7 +799,7 @@ func TestDockerBuildTask_ToolDocker(t *testing.T) {
 		Push:       false,
 	}
 
-	r, err := sourcetree.Open(tmpDir)
+	r, err := sourcetree.Open(t.Context(), tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -937,7 +937,7 @@ func TestDockerBuildTask_ConcurrentRef(t *testing.T) {
 		DockerBin:  "/mock/bin/docker",
 	}
 
-	r, err := sourcetree.Open(tmpDir)
+	r, err := sourcetree.Open(t.Context(), tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -56,7 +56,7 @@ func BuildTestCommand(rootOpt *RootOptions) *cobra.Command {
 
 // Resolve resolves arguments and config defaults for TestOptions.
 func (opt *TestOptions) Resolve(cmd *cobra.Command, args []string) error {
-	if err := opt.RootOptions.Resolve(args); err != nil {
+	if err := opt.RootOptions.Resolve(cmd.Context(), args); err != nil {
 		return err
 	}
 	if cmd.Flags().Changed("test.race") {
@@ -78,7 +78,7 @@ func RunTest(ctx context.Context, opt TestOptions) error {
 		return err
 	}
 
-	r, err := opt.GetSourceTree()
+	r, err := opt.GetSourceTree(ctx)
 	if err != nil {
 		return err
 	}

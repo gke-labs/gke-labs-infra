@@ -24,7 +24,7 @@ import (
 
 func TestFormatTasks_NotExist(t *testing.T) {
 	tmpDir := t.TempDir()
-	r, err := sourcetree.Open(tmpDir)
+	r, err := sourcetree.Open(t.Context(), tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestFormatTasks_WithTasks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := sourcetree.Open(tmpDir)
+	r, err := sourcetree.Open(t.Context(), tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestFormatTasks_UnreadableTasksDir(t *testing.T) {
 		}
 	})
 
-	_, err := sourcetree.Open(tmpDir)
+	_, err := sourcetree.Open(t.Context(), tmpDir)
 	if err == nil {
 		t.Fatal("expected error when dev/tasks is unreadable, got nil")
 	}

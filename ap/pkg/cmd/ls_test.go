@@ -204,7 +204,7 @@ plugins:
 		t.Errorf("expected listing output to contain docs build-tasks demo-build, got:\n%s", listingOutput)
 	}
 
-	sourceTree, err := rootOptions.GetSourceTree()
+	sourceTree, err := rootOptions.GetSourceTree(t.Context())
 	if err != nil {
 		t.Fatalf("GetSourceTree failed: %v", err)
 	}
@@ -239,7 +239,7 @@ plugins:
 	}
 
 	// Verify build cache record exists
-	buildCacheKey, err := plugins.DockerfilePluginCacheKey(sourceTree, "tools/demo/Dockerfile", "")
+	buildCacheKey, err := plugins.DockerfilePluginCacheKey(t.Context(), sourceTree, "tools/demo/Dockerfile", "")
 	if err != nil {
 		t.Fatalf("DockerfilePluginCacheKey failed: %v", err)
 	}

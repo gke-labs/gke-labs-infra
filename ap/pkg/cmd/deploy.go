@@ -148,7 +148,7 @@ func (opt *DeployOptions) Resolve(ctx context.Context, args []string) error {
 		opt.TargetCluster = tc
 	}
 
-	r, err := opt.GetSourceTree()
+	r, err := opt.GetSourceTree(ctx)
 	if err != nil {
 		return err
 	}
@@ -489,7 +489,7 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		return err
 	}
 
-	r, err := opt.GetSourceTree()
+	r, err := opt.GetSourceTree(ctx)
 	if err != nil {
 		return err
 	}

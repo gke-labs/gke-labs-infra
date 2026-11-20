@@ -167,7 +167,7 @@ generate:
 		t.Fatal(err)
 	}
 
-	r, err := sourcetree.Open(root)
+	r, err := sourcetree.Open(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func TestRunVerify_SuccessAndMtimePreservation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := sourcetree.Open(root)
+	r, err := sourcetree.Open(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +273,7 @@ func TestRunVerify_UnrestoredMarkerDetected(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := sourcetree.Open(root)
+	r, err := sourcetree.Open(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +316,7 @@ func TestRunVerify_StaleMarkerDetected(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := sourcetree.Open(root)
+	r, err := sourcetree.Open(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +365,7 @@ func TestRunVerify_FailingTaskFollowedByHealthyGenerator(t *testing.T) {
 		}
 	}
 
-	r, err := sourcetree.Open(root)
+	r, err := sourcetree.Open(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}

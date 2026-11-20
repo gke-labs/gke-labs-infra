@@ -385,7 +385,7 @@ metadata:
 		},
 	}
 
-	tree, err := sourcetree.Open(tempDir)
+	tree, err := sourcetree.Open(t.Context(), tempDir)
 	if err != nil {
 		t.Fatal(err)
 	}

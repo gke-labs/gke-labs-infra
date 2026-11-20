@@ -70,7 +70,7 @@ func TestTrivialPluginDiscoveryAndRun(t *testing.T) {
 	secondPlugin := &trivialPlugin{}
 	tempDir := t.TempDir()
 
-	tree, err := sourcetree.Open(tempDir)
+	tree, err := sourcetree.Open(t.Context(), tempDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestFindActivatedDirs(t *testing.T) {
 		}
 	}
 
-	tree, err := sourcetree.Open(tempDir, sourcetree.WithSkip("ignored/**"))
+	tree, err := sourcetree.Open(t.Context(), tempDir, sourcetree.WithSkip("ignored/**"))
 	if err != nil {
 		t.Fatalf("sourcetree.Open failed: %v", err)
 	}

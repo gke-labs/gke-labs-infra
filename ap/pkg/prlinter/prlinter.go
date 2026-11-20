@@ -77,7 +77,7 @@ func Lint(ctx context.Context, repoRoot string) error {
 	}
 	// prlinter is an independent entry point without an existing command scope;
 	// open a sourcetree once for the repo root.
-	tree, err := sourcetree.Open(repoRoot)
+	tree, err := sourcetree.Open(ctx, repoRoot)
 	if err != nil {
 		return err
 	}

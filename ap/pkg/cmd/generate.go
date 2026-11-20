@@ -43,7 +43,7 @@ func BuildGenerateCommand(rootOpt *RootOptions) *cobra.Command {
 		Short: "Run generation tasks",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := opt.Resolve(args); err != nil {
+			if err := opt.Resolve(cmd.Context(), args); err != nil {
 				return err
 			}
 			return RunGenerate(cmd.Context(), opt)
@@ -69,7 +69,7 @@ func BuildVerifyGenerateCommand(rootOpt *RootOptions) *cobra.Command {
 		Short: "Verify generator coverage by perturbing outputs and proving generators restore them",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := opt.Resolve(args); err != nil {
+			if err := opt.Resolve(cmd.Context(), args); err != nil {
 				return err
 			}
 			return RunGenerate(cmd.Context(), opt)
@@ -85,7 +85,7 @@ func RunGenerate(ctx context.Context, opt GenerateOptions) error {
 		return err
 	}
 
-	r, err := opt.GetSourceTree()
+	r, err := opt.GetSourceTree(ctx)
 	if err != nil {
 		return err
 	}

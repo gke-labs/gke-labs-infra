@@ -38,7 +38,7 @@ func BuildVersionBumpCommand(rootOpt *RootOptions) *cobra.Command {
 		Short: "Bump project versions (e.g. Go)",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := opt.Resolve(args); err != nil {
+			if err := opt.Resolve(cmd.Context(), args); err != nil {
 				return err
 			}
 			return RunVersionBump(cmd.Context(), opt)
@@ -55,7 +55,7 @@ func RunVersionBump(ctx context.Context, opt VersionBumpOptions) error {
 	if err := requireRepoRoot(opt.RootOptions); err != nil {
 		return err
 	}
-	r, err := opt.GetSourceTree()
+	r, err := opt.GetSourceTree(ctx)
 	if err != nil {
 		return err
 	}

@@ -261,7 +261,7 @@ func (h *Harness) KindLoad(tag string) {
 		Images:      []*imageref.ImageRef{ref},
 	}
 	if h.sourceTree == nil {
-		tree, err := sourcetree.Open(h.RepoRoot())
+		tree, err := sourcetree.Open(h.t.Context(), h.RepoRoot())
 		if err != nil {
 			h.t.Fatalf("failed to open sourcetree: %v", err)
 		}

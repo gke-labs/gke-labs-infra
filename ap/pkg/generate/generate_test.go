@@ -180,7 +180,7 @@ func writeTestHeadersConfig(t *testing.T, root string) {
 func TestPresubmitScriptsWithoutSkipConfig(t *testing.T) {
 	root := t.TempDir()
 	writeTestHeadersConfig(t, root)
-	r, err := sourcetree.Open(root)
+	r, err := sourcetree.Open(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func TestPresubmitScriptsWithSkipConfig(t *testing.T) {
 	if err := fileutils.WriteFileAtomic(t.Context(), filepath.Join(root, ".ap", "ap.yaml"), []byte(apYAML), 0644); err != nil {
 		t.Fatal(err)
 	}
-	r, err := sourcetree.Open(root)
+	r, err := sourcetree.Open(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +272,7 @@ func TestGithubActionsWorkflowArtifactUpload(t *testing.T) {
 		}
 	}
 
-	r, err := sourcetree.Open(root)
+	r, err := sourcetree.Open(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +304,7 @@ func TestGithubActionsWorkflowArtifactUpload(t *testing.T) {
 
 func TestPresubmitScriptsWithoutHeadersConfig(t *testing.T) {
 	root := t.TempDir()
-	r, err := sourcetree.Open(root)
+	r, err := sourcetree.Open(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +329,7 @@ func TestPresubmitScriptsWithLicenseNone(t *testing.T) {
 	if err := fileutils.WriteFileAtomic(t.Context(), filepath.Join(root, ".ap", "headers.yaml"), []byte("license: none\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	r, err := sourcetree.Open(root)
+	r, err := sourcetree.Open(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +348,7 @@ func TestPresubmitScriptsWithLicenseNone(t *testing.T) {
 
 func TestGenerateTasks_DevTasks(t *testing.T) {
 	root := t.TempDir()
-	r, err := sourcetree.Open(root)
+	r, err := sourcetree.Open(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +373,7 @@ func TestGenerateTasks_DevTasks(t *testing.T) {
 	}
 
 	sourcetree.ResetCache()
-	r, err = sourcetree.Open(root)
+	r, err = sourcetree.Open(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -436,7 +436,7 @@ func TestGenerateIdempotence(t *testing.T) {
 
 	// Run 1: initial generate
 	sourcetree.ResetCache()
-	r1, err := sourcetree.Open(root)
+	r1, err := sourcetree.Open(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -464,7 +464,7 @@ func TestGenerateIdempotence(t *testing.T) {
 
 	// Run 2: generate again
 	sourcetree.ResetCache()
-	r2, err := sourcetree.Open(root)
+	r2, err := sourcetree.Open(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -505,7 +505,7 @@ func TestAuditGeneratedGeneratorOptIn(t *testing.T) {
 	writeTestHeadersConfig(t, root)
 
 	scriptPath := filepath.Join(root, "dev", "ci", "presubmits", "ap-audit-generated")
-	r, err := sourcetree.Open(root)
+	r, err := sourcetree.Open(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -671,7 +671,7 @@ go run github.com/gke-labs/gke-labs-infra/ap@latest e2e .
 		t.Fatal(err)
 	}
 
-	r, err := sourcetree.Open(root)
+	r, err := sourcetree.Open(t.Context(), root)
 	if err != nil {
 		t.Fatal(err)
 	}

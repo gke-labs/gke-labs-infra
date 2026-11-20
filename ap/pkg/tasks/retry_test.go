@@ -32,7 +32,7 @@ import (
 
 func newTestScope(t *testing.T) *TaskContext {
 	dir := t.TempDir()
-	tree, err := sourcetree.Open(dir)
+	tree, err := sourcetree.Open(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}

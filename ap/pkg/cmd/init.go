@@ -165,7 +165,7 @@ func RunInit(ctx context.Context, opt InitOptions) error {
 				opt.RepoRoot = repoRoot
 			}
 			var err error
-			tree, err = opt.GetSourceTree()
+			tree, err = opt.GetSourceTree(ctx)
 			if err != nil {
 				return err
 			}

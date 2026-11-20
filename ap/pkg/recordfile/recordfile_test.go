@@ -133,7 +133,7 @@ func TestRecordFile_TreatAsEmptyOnCorruptOrWrongHeader(t *testing.T) {
 	if err := os.WriteFile(corruptFile, wrongMagicData, 0644); err != nil {
 		t.Fatal(err)
 	}
-	opened, err := Open(corruptFile, cfg)
+	opened, err := Open(t.Context(), corruptFile, cfg)
 	if err != nil {
 		t.Fatalf("expected Open to succeed for corrupt file, got: %v", err)
 	}
@@ -389,7 +389,7 @@ func TestRecordFile_SaveAndOpen(t *testing.T) {
 		t.Fatalf("Save failed: %v", err)
 	}
 
-	opened, err := Open(filePath, cfg)
+	opened, err := Open(t.Context(), filePath, cfg)
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
@@ -401,7 +401,7 @@ func TestRecordFile_SaveAndOpen(t *testing.T) {
 	}
 
 	// Open non-existent file returns empty file
-	nonExistent, err := Open(filepath.Join(tmpDir, "nonexistent.bin"), cfg)
+	nonExistent, err := Open(t.Context(), filepath.Join(tmpDir, "nonexistent.bin"), cfg)
 	if err != nil {
 		t.Fatalf("Open nonexistent failed: %v", err)
 	}

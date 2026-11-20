@@ -117,7 +117,7 @@ func TestHasGoFiles(t *testing.T) {
 				t.Fatalf("Failed to setup test: %v", err)
 			}
 
-			r, err := sourcetree.Open(root)
+			r, err := sourcetree.Open(t.Context(), root)
 			if err != nil {
 				t.Fatalf("sourcetree.Open failed: %v", err)
 			}
@@ -157,7 +157,7 @@ func TestLintTasks_DroppedErrors(t *testing.T) {
 			}
 			skips = cfg.Skip
 		}
-		r, err := sourcetree.Open(dir, sourcetree.WithSkip(skips...))
+		r, err := sourcetree.Open(t.Context(), dir, sourcetree.WithSkip(skips...))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -248,7 +248,7 @@ func TestLintTasks_SkipGenerated(t *testing.T) {
 			}
 			skips = cfg.Skip
 		}
-		r, err := sourcetree.Open(dir, sourcetree.WithSkip(skips...))
+		r, err := sourcetree.Open(t.Context(), dir, sourcetree.WithSkip(skips...))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -333,7 +333,7 @@ func TestLintTasks_PerCheckOverrides(t *testing.T) {
 			}
 			skips = cfg.Skip
 		}
-		r, err := sourcetree.Open(dir, sourcetree.WithSkip(skips...))
+		r, err := sourcetree.Open(t.Context(), dir, sourcetree.WithSkip(skips...))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -418,7 +418,7 @@ lint:
 		if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 			t.Fatal(err)
 		}
-		r, err := sourcetree.Open(dir)
+		r, err := sourcetree.Open(t.Context(), dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -447,7 +447,7 @@ lint:
 		if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc Foo(unusedParam int) {}\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
-		r, err := sourcetree.Open(dir)
+		r, err := sourcetree.Open(t.Context(), dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -490,7 +490,7 @@ func TestLintTasks_TestOnlyImports(t *testing.T) {
 			}
 			skips = cfg.Skip
 		}
-		r, err := sourcetree.Open(dir, sourcetree.WithSkip(skips...))
+		r, err := sourcetree.Open(t.Context(), dir, sourcetree.WithSkip(skips...))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -602,7 +602,7 @@ func TestLintTasks_CloseWriter(t *testing.T) {
 			}
 			skips = cfg.Skip
 		}
-		r, err := sourcetree.Open(dir, sourcetree.WithSkip(skips...))
+		r, err := sourcetree.Open(t.Context(), dir, sourcetree.WithSkip(skips...))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -697,7 +697,7 @@ func TestLintTasks_ContinueOnError(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	r, err := sourcetree.Open(dir)
+	r, err := sourcetree.Open(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -791,7 +791,7 @@ func TestLintTasks_GovulncheckAndDroppedErrorsBothReport(t *testing.T) {
 
 	ctx := t.Context()
 	tmpDir := t.TempDir()
-	tree, err := sourcetree.Open(tmpDir)
+	tree, err := sourcetree.Open(t.Context(), tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -830,7 +830,7 @@ func TestLintTasks_PackageLoadError(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\ninvalid syntax here\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	r, err := sourcetree.Open(dir)
+	r, err := sourcetree.Open(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -868,7 +868,7 @@ func TestLintTasks_MultiGOOS_LinuxOnDarwin(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := sourcetree.Open(dir)
+	r, err := sourcetree.Open(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -913,7 +913,7 @@ func TestLintTasks_MultiGOOS_SingleLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := sourcetree.Open(dir)
+	r, err := sourcetree.Open(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -958,7 +958,7 @@ func TestLintTasks_MultiGOOS_VendorIgnored(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := sourcetree.Open(dir)
+	r, err := sourcetree.Open(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1013,7 +1013,7 @@ lint:
 		t.Fatal(err)
 	}
 
-	r, err := sourcetree.Open(dir)
+	r, err := sourcetree.Open(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1057,7 +1057,7 @@ func main() {
 
 	baselinePath := filepath.Join(dir, ".ap", "droppederrors-baseline.txt")
 
-	r, err := sourcetree.Open(dir)
+	r, err := sourcetree.Open(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1112,7 +1112,7 @@ func main() {
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(codeV2), 0644); err != nil {
 		t.Fatal(err)
 	}
-	r, err = sourcetree.Open(dir)
+	r, err = sourcetree.Open(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1149,7 +1149,7 @@ func main() {
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(codeV3), 0644); err != nil {
 		t.Fatal(err)
 	}
-	r, err = sourcetree.Open(dir)
+	r, err = sourcetree.Open(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1208,7 +1208,7 @@ govulncheck:
 		t.Fatal(err)
 	}
 
-	r, err := sourcetree.Open(repoRoot)
+	r, err := sourcetree.Open(t.Context(), repoRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1270,7 +1270,7 @@ func TestGoTidyTask_UntidyFailsWithDiff(t *testing.T) {
 	}
 
 	task := &GoTidyTask{Dir: tmpDir}
-	r, err := sourcetree.Open(tmpDir)
+	r, err := sourcetree.Open(t.Context(), tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1312,7 +1312,7 @@ func TestLintTasks_TidyDisabled(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := sourcetree.Open(dir)
+	r, err := sourcetree.Open(t.Context(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -160,7 +160,7 @@ func RunAudit(ctx context.Context, repoRoot string, scopes []*tasks.TaskContext,
 		skipPatterns = goCfg.Skip
 	}
 
-	scratchRepo, err := sourcetree.Open(scratchDir, sourcetree.WithSkip(skipPatterns...))
+	scratchRepo, err := sourcetree.Open(ctx, scratchDir, sourcetree.WithSkip(skipPatterns...))
 	if err != nil {
 		return fmt.Errorf("failed to open scratch repo: %w", err)
 	}

@@ -59,16 +59,16 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 	t.Run("stable across repeated invocations", func(t *testing.T) {
 		repoRoot := setupTestRepo(t)
 		sourcetree.ResetCache()
-		tree, err := sourcetree.Open(repoRoot)
+		tree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		firstKey, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "")
+		firstKey, err := plugins.DockerfilePluginCacheKey(t.Context(), tree, dockerfilePath, "")
 		if err != nil {
 			t.Fatalf("first DockerfilePluginCacheKey failed: %v", err)
 		}
-		secondKey, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "")
+		secondKey, err := plugins.DockerfilePluginCacheKey(t.Context(), tree, dockerfilePath, "")
 		if err != nil {
 			t.Fatalf("second DockerfilePluginCacheKey failed: %v", err)
 		}
@@ -80,12 +80,12 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 	t.Run("changes when context file content changes", func(t *testing.T) {
 		repoRoot := setupTestRepo(t)
 		sourcetree.ResetCache()
-		tree, err := sourcetree.Open(repoRoot)
+		tree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		initialKey, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "")
+		initialKey, err := plugins.DockerfilePluginCacheKey(t.Context(), tree, dockerfilePath, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -96,12 +96,12 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 		}
 
 		sourcetree.ResetCache()
-		updatedTree, err := sourcetree.Open(repoRoot)
+		updatedTree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		newKey, err := plugins.DockerfilePluginCacheKey(updatedTree, dockerfilePath, "")
+		newKey, err := plugins.DockerfilePluginCacheKey(t.Context(), updatedTree, dockerfilePath, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -113,12 +113,12 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 	t.Run("changes when context file mode changes", func(t *testing.T) {
 		repoRoot := setupTestRepo(t)
 		sourcetree.ResetCache()
-		tree, err := sourcetree.Open(repoRoot)
+		tree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		initialKey, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "")
+		initialKey, err := plugins.DockerfilePluginCacheKey(t.Context(), tree, dockerfilePath, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -129,12 +129,12 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 		}
 
 		sourcetree.ResetCache()
-		updatedTree, err := sourcetree.Open(repoRoot)
+		updatedTree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		newKey, err := plugins.DockerfilePluginCacheKey(updatedTree, dockerfilePath, "")
+		newKey, err := plugins.DockerfilePluginCacheKey(t.Context(), updatedTree, dockerfilePath, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -146,12 +146,12 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 	t.Run("changes when Dockerfile content changes", func(t *testing.T) {
 		repoRoot := setupTestRepo(t)
 		sourcetree.ResetCache()
-		tree, err := sourcetree.Open(repoRoot)
+		tree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		initialKey, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "")
+		initialKey, err := plugins.DockerfilePluginCacheKey(t.Context(), tree, dockerfilePath, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -162,12 +162,12 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 		}
 
 		sourcetree.ResetCache()
-		updatedTree, err := sourcetree.Open(repoRoot)
+		updatedTree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		newKey, err := plugins.DockerfilePluginCacheKey(updatedTree, dockerfilePath, "")
+		newKey, err := plugins.DockerfilePluginCacheKey(t.Context(), updatedTree, dockerfilePath, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -179,16 +179,16 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 	t.Run("changes when Dockerfile path changes", func(t *testing.T) {
 		repoRoot := setupTestRepo(t)
 		sourcetree.ResetCache()
-		tree, err := sourcetree.Open(repoRoot)
+		tree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		keyA, err := plugins.DockerfilePluginCacheKey(tree, "images/plugin/Dockerfile", "")
+		keyA, err := plugins.DockerfilePluginCacheKey(t.Context(), tree, "images/plugin/Dockerfile", "")
 		if err != nil {
 			t.Fatal(err)
 		}
-		keyB, err := plugins.DockerfilePluginCacheKey(tree, "images/other/Dockerfile", "")
+		keyB, err := plugins.DockerfilePluginCacheKey(t.Context(), tree, "images/other/Dockerfile", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -200,16 +200,16 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 	t.Run("changes when BuildKit host changes", func(t *testing.T) {
 		repoRoot := setupTestRepo(t)
 		sourcetree.ResetCache()
-		tree, err := sourcetree.Open(repoRoot)
+		tree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		localKey, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "")
+		localKey, err := plugins.DockerfilePluginCacheKey(t.Context(), tree, dockerfilePath, "")
 		if err != nil {
 			t.Fatal(err)
 		}
-		remoteKey, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "tcp://127.0.0.1:2375")
+		remoteKey, err := plugins.DockerfilePluginCacheKey(t.Context(), tree, dockerfilePath, "tcp://127.0.0.1:2375")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -221,12 +221,12 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 	t.Run("ignores ignored files", func(t *testing.T) {
 		repoRoot := setupTestRepo(t)
 		sourcetree.ResetCache()
-		tree, err := sourcetree.Open(repoRoot, sourcetree.WithIgnore("ignored.txt"))
+		tree, err := sourcetree.Open(t.Context(), repoRoot, sourcetree.WithIgnore("ignored.txt"))
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		initialKey, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "")
+		initialKey, err := plugins.DockerfilePluginCacheKey(t.Context(), tree, dockerfilePath, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -237,12 +237,12 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 		}
 
 		sourcetree.ResetCache()
-		updatedTree, err := sourcetree.Open(repoRoot, sourcetree.WithIgnore("ignored.txt"))
+		updatedTree, err := sourcetree.Open(t.Context(), repoRoot, sourcetree.WithIgnore("ignored.txt"))
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		newKey, err := plugins.DockerfilePluginCacheKey(updatedTree, dockerfilePath, "")
+		newKey, err := plugins.DockerfilePluginCacheKey(t.Context(), updatedTree, dockerfilePath, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -260,7 +260,7 @@ func TestEnsureDockerfilePluginImage(t *testing.T) {
 		repoRoot := setupTestRepo(t)
 		cacheDirectory := t.TempDir()
 		sourcetree.ResetCache()
-		tree, err := sourcetree.Open(repoRoot)
+		tree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -322,7 +322,7 @@ func TestEnsureDockerfilePluginImage(t *testing.T) {
 		repoRoot := setupTestRepo(t)
 		cacheDirectory := t.TempDir()
 		sourcetree.ResetCache()
-		tree, err := sourcetree.Open(repoRoot)
+		tree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -378,7 +378,7 @@ func TestEnsureDockerfilePluginImage(t *testing.T) {
 		repoRoot := setupTestRepo(t)
 		cacheDirectory := t.TempDir()
 		sourcetree.ResetCache()
-		tree, err := sourcetree.Open(repoRoot)
+		tree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -423,7 +423,7 @@ func TestEnsureDockerfilePluginImage(t *testing.T) {
 		repoRoot := setupTestRepo(t)
 		cacheDirectory := t.TempDir()
 		sourcetree.ResetCache()
-		tree, err := sourcetree.Open(repoRoot)
+		tree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -461,7 +461,7 @@ func TestEnsureDockerfilePluginImage(t *testing.T) {
 			t.Fatal(err)
 		}
 		sourcetree.ResetCache()
-		updatedTree, err := sourcetree.Open(repoRoot)
+		updatedTree, err := sourcetree.Open(t.Context(), repoRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -485,14 +485,14 @@ func TestEnsureDockerfilePluginImage(t *testing.T) {
 		cacheDirectory := t.TempDir()
 
 		sourcetree.ResetCache()
-		treeA, err := sourcetree.Open(repoRootA)
+		treeA, err := sourcetree.Open(t.Context(), repoRootA)
 		if err != nil {
 			t.Fatal(err)
 		}
 		scopeA := tasks.NewTaskContext(repoRootA, repoRootA, treeA)
 
 		sourcetree.ResetCache()
-		treeB, err := sourcetree.Open(repoRootB)
+		treeB, err := sourcetree.Open(t.Context(), repoRootB)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -667,7 +667,7 @@ func TestEnsureDockerfilePluginImage_URL(t *testing.T) {
 		if err := os.WriteFile(declaringFile, []byte("declaring repo only\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
-		declaringTree, err := sourcetree.Open(declaringRepoDir)
+		declaringTree, err := sourcetree.Open(t.Context(), declaringRepoDir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -771,7 +771,7 @@ func TestEnsureDockerfilePluginImage_URL(t *testing.T) {
 		runRemoteGit("commit", "-m", "initial commit")
 
 		declaringRepoDir := t.TempDir()
-		declaringTree, err := sourcetree.Open(declaringRepoDir)
+		declaringTree, err := sourcetree.Open(t.Context(), declaringRepoDir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -851,7 +851,7 @@ func TestEnsureDockerfilePluginImage_URL(t *testing.T) {
 		runRemoteGit("commit", "-m", "initial commit")
 
 		declaringRepoDir := t.TempDir()
-		declaringTree, err := sourcetree.Open(declaringRepoDir)
+		declaringTree, err := sourcetree.Open(t.Context(), declaringRepoDir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -889,7 +889,7 @@ func TestEnsureDockerfilePluginImage_URL(t *testing.T) {
 
 	t.Run("unsupported URL fails with clear error", func(t *testing.T) {
 		declaringRepoDir := t.TempDir()
-		declaringTree, err := sourcetree.Open(declaringRepoDir)
+		declaringTree, err := sourcetree.Open(t.Context(), declaringRepoDir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -926,7 +926,7 @@ func TestEnsureDockerfilePluginImage_URL(t *testing.T) {
 
 	t.Run("relative path continues to build from declaring repository root", func(t *testing.T) {
 		declaringRepoDir := setupTestRepo(t)
-		declaringTree, err := sourcetree.Open(declaringRepoDir)
+		declaringTree, err := sourcetree.Open(t.Context(), declaringRepoDir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -972,7 +972,7 @@ func TestEnsureDockerfilePluginImage_URL(t *testing.T) {
 		pinnedCommit := runRemoteGit("rev-parse", "HEAD")
 
 		declaringRepoDir := t.TempDir()
-		declaringTree, err := sourcetree.Open(declaringRepoDir)
+		declaringTree, err := sourcetree.Open(t.Context(), declaringRepoDir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1042,7 +1042,7 @@ func TestEnsureDockerfilePluginImage_URL(t *testing.T) {
 		runRemoteGit("commit", "-m", "symlink pointing outside repo")
 
 		declaringRepoDir := t.TempDir()
-		declaringTree, err := sourcetree.Open(declaringRepoDir)
+		declaringTree, err := sourcetree.Open(t.Context(), declaringRepoDir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1096,13 +1096,13 @@ func TestBenchmarkHashingRepoRoot(t *testing.T) {
 	}
 
 	sourcetree.ResetCache()
-	tree, err := sourcetree.Open(dir)
+	tree, err := sourcetree.Open(t.Context(), dir)
 	if err != nil {
 		t.Skipf("cannot open repository root %s: %v", dir, err)
 	}
 
 	start := time.Now()
-	key, err := plugins.DockerfilePluginCacheKey(tree, "ap/images/ap-plugin-astro/Dockerfile", "")
+	key, err := plugins.DockerfilePluginCacheKey(t.Context(), tree, "ap/images/ap-plugin-astro/Dockerfile", "")
 	if err != nil {
 		t.Fatalf("DockerfilePluginCacheKey failed on repo root: %v", err)
 	}

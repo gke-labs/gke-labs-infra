@@ -26,7 +26,7 @@ import (
 	"sync"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
-	"k8s.io/klog/v2"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 )
 
 const (
@@ -115,7 +115,7 @@ func Load(data []byte, cfg Config) (*File, error) {
 
 // Open reads a recordfile from path and loads it. If the file does not exist
 // or is corrupt/invalid, it logs at V(2) and returns an empty File without returning an error.
-func Open(path string, cfg Config) (*File, error) {
+func Open(ctx context.Context, path string, cfg Config) (*File, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -125,7 +125,7 @@ func Open(path string, cfg Config) (*File, error) {
 	}
 	rf, err := Load(data, cfg)
 	if err != nil {
-		klog.V(2).Infof("recordfile: invalid file %s (%v), treating as empty", path, err)
+		scoped.Log(ctx).Fine("recordfile: invalid file, treating as empty", "path", path, "error", err)
 		return New(cfg), nil
 	}
 	return rf, nil
