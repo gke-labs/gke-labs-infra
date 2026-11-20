@@ -41,7 +41,7 @@ The generated workflow defines a concurrency group so that a new push to a pull 
 
 ### Pinned Action Versions
 
-The GitHub Actions used in generated workflows (`actions/checkout`, `actions/setup-go`, `actions/upload-artifact`) are defined in `ap/pkg/generate/action.yml`, pinned to full commit SHAs with `# ratchet:` comments. Dependabot is configured in `.github/dependabot.yml` to monitor both `/` and `/ap/pkg/generate` in a single group, so a single pull request updates both `action.yml` and `.github/workflows/ci-presubmits.yaml` and no manual step is expected; if a Dependabot pull request ever updates only one of the two files, the fix is `ap generate`. When merged, `ap generate` automatically emits the updated action versions in subsequent workflow regenerations across all consuming repositories.
+The GitHub Actions used in generated workflows (`actions/checkout`, `actions/setup-go`, `actions/upload-artifact`) are defined in `ap/pkg/generate/action.yml`, pinned to full commit SHAs with `# ratchet:` comments. Dependabot is configured in `.github/dependabot.yml` to monitor both `/` and `/ap/pkg/generate` in a single group, so a single pull request updates both `action.yml` and `.github/workflows/ci-presubmits.yaml` and no manual step is expected; if a Dependabot pull request ever updates only one of the two files, the fix is `ap generate`. When merged, `ap generate` automatically emits the updated action versions in subsequent workflow regenerations across all consuming repositories. Consumers should keep their own `github-actions` cooldown at 2 days or more, so that the generator is updated first.
 
 ### Presubmit Artifacts
 

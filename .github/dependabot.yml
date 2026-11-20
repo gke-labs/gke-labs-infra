@@ -50,8 +50,10 @@ updates:
     schedule:
       interval: "daily"
     open-pull-requests-limit: 50
+    # Shorter cooldown than other ecosystems: the generator's pins must move
+    # before consumers' Dependabot (2-day cooldown) bumps their generated workflows.
     cooldown:
-      default-days: 7
+      default-days: 1
     groups:
       github-actions:
         patterns:
