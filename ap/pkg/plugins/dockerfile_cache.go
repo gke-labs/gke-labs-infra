@@ -59,7 +59,7 @@ func URLPluginCacheKey(commit, dockerfilePath, buildkitHost string) string {
 // a Dockerfile plugin build: the plugin's Dockerfile path, the content and modes of all files
 // in the build context (the repository root view, excluding ignored files), and the BuildKit
 // host setting.
-func DockerfilePluginCacheKey(tree *sourcetree.SourceTree, dockerfilePath, buildkitHost string) (string, error) {
+func DockerfilePluginCacheKey(ctx context.Context, tree *sourcetree.SourceTree, dockerfilePath, buildkitHost string) (string, error) {
 	repoTree := tree.RepoTree()
 	repoRoot := repoTree.RepoRoot()
 	files := repoTree.Files()
@@ -89,7 +89,7 @@ func DockerfilePluginCacheKey(tree *sourcetree.SourceTree, dockerfilePath, build
 
 	var modeBytes [4]byte
 	for _, entry := range entries {
-		contentHash, err := entry.file.Hash()
+		contentHash, err := entry.file.Hash(ctx)
 		if err != nil {
 			return "", fmt.Errorf("hashing file %s: %w", entry.file.Path, err)
 		}
@@ -153,7 +153,7 @@ func EnsureDockerfilePluginImage(
 		target = resolvedTarget
 		key = URLPluginCacheKey(target.Commit, target.Path, options.BuildkitHost)
 	} else {
-		localKey, err := DockerfilePluginCacheKey(scope.SourceTree(), dockerfilePath, options.BuildkitHost)
+		localKey, err := DockerfilePluginCacheKey(ctx, scope.SourceTree(), dockerfilePath, options.BuildkitHost)
 		if err != nil {
 			return "", fmt.Errorf("computing plugin cache key for %s (%s): %w", pluginName, dockerfilePath, err)
 		}

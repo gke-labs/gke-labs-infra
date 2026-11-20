@@ -337,7 +337,7 @@ func TestRepo_TrackFile(t *testing.T) {
 	if r.File(newPath) != f {
 		t.Errorf("expected r.File(newPath) to return tracked file")
 	}
-	h, err := f.Hash()
+	h, err := f.Hash(t.Context())
 	if err != nil || h == "" {
 		t.Errorf("expected valid hash from tracked file, got err=%v", err)
 	}
@@ -356,7 +356,7 @@ func TestRepo_WriteFileAtomic(t *testing.T) {
 	if f == nil {
 		t.Fatal("expected main.go to exist in repo")
 	}
-	initialHash, err := f.Hash()
+	initialHash, err := f.Hash(t.Context())
 	if err != nil {
 		t.Fatalf("f.Hash() failed: %v", err)
 	}
@@ -366,7 +366,7 @@ func TestRepo_WriteFileAtomic(t *testing.T) {
 		t.Fatalf("r.WriteFileAtomic failed: %v", err)
 	}
 
-	updatedHash, err := f.Hash()
+	updatedHash, err := f.Hash(t.Context())
 	if err != nil {
 		t.Fatalf("f.Hash() after WriteFileAtomic failed: %v", err)
 	}
@@ -386,7 +386,7 @@ func TestRepo_WriteFileAtomic(t *testing.T) {
 	if newF == nil {
 		t.Fatal("expected brand_new.txt to be tracked in repo tree")
 	}
-	newHash, err := newF.Hash()
+	newHash, err := newF.Hash(t.Context())
 	if err != nil || newHash == "" {
 		t.Fatalf("expected valid hash for newly written file, got hash=%q, err=%v", newHash, err)
 	}
@@ -412,11 +412,11 @@ func TestRepo_CopyFile(t *testing.T) {
 	}
 
 	srcF := r.File(srcPath)
-	srcHash, err := srcF.Hash()
+	srcHash, err := srcF.Hash(t.Context())
 	if err != nil {
 		t.Fatalf("srcF.Hash failed: %v", err)
 	}
-	dstHash, err := dstF.Hash()
+	dstHash, err := dstF.Hash(t.Context())
 	if err != nil {
 		t.Fatalf("dstF.Hash failed: %v", err)
 	}
@@ -462,7 +462,7 @@ func TestRepo_Invalidate(t *testing.T) {
 	if f == nil {
 		t.Fatal("expected sub.go to exist in repo")
 	}
-	origHash, err := f.Hash()
+	origHash, err := f.Hash(t.Context())
 	if err != nil {
 		t.Fatalf("f.Hash failed: %v", err)
 	}
@@ -507,7 +507,7 @@ func TestRepo_Invalidate(t *testing.T) {
 	}
 
 	// Check modified file hash updated
-	newHash, err := f.Hash()
+	newHash, err := f.Hash(t.Context())
 	if err != nil {
 		t.Fatalf("f.Hash() after InvalidateTree failed: %v", err)
 	}
@@ -533,7 +533,7 @@ func TestRepo_WriteFile(t *testing.T) {
 	if f == nil {
 		t.Fatal("expected main.go to exist in repo")
 	}
-	initialHash, err := f.Hash()
+	initialHash, err := f.Hash(t.Context())
 	if err != nil {
 		t.Fatalf("f.Hash() failed: %v", err)
 	}
@@ -560,7 +560,7 @@ func TestRepo_WriteFile(t *testing.T) {
 	if err := r.WriteFile(t.Context(), existingPath, newContent, 0644); err != nil {
 		t.Fatalf("r.WriteFile failed: %v", err)
 	}
-	updatedHash, err := f.Hash()
+	updatedHash, err := f.Hash(t.Context())
 	if err != nil {
 		t.Fatalf("f.Hash() after WriteFile failed: %v", err)
 	}
@@ -602,7 +602,7 @@ func TestRepo_Track(t *testing.T) {
 	if modF == nil {
 		t.Fatal("expected go.mod to be tracked")
 	}
-	hash, err := modF.Hash()
+	hash, err := modF.Hash(t.Context())
 	if err != nil || hash == "" {
 		t.Errorf("expected valid hash for tidied go.mod, got err=%v", err)
 	}

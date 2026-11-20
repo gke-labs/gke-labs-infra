@@ -64,11 +64,11 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		firstKey, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "")
+		firstKey, err := plugins.DockerfilePluginCacheKey(t.Context(), tree, dockerfilePath, "")
 		if err != nil {
 			t.Fatalf("first DockerfilePluginCacheKey failed: %v", err)
 		}
-		secondKey, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "")
+		secondKey, err := plugins.DockerfilePluginCacheKey(t.Context(), tree, dockerfilePath, "")
 		if err != nil {
 			t.Fatalf("second DockerfilePluginCacheKey failed: %v", err)
 		}
@@ -85,7 +85,7 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		initialKey, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "")
+		initialKey, err := plugins.DockerfilePluginCacheKey(t.Context(), tree, dockerfilePath, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -101,7 +101,7 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		newKey, err := plugins.DockerfilePluginCacheKey(updatedTree, dockerfilePath, "")
+		newKey, err := plugins.DockerfilePluginCacheKey(t.Context(), updatedTree, dockerfilePath, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -118,7 +118,7 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		initialKey, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "")
+		initialKey, err := plugins.DockerfilePluginCacheKey(t.Context(), tree, dockerfilePath, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -134,7 +134,7 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		newKey, err := plugins.DockerfilePluginCacheKey(updatedTree, dockerfilePath, "")
+		newKey, err := plugins.DockerfilePluginCacheKey(t.Context(), updatedTree, dockerfilePath, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -151,7 +151,7 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		initialKey, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "")
+		initialKey, err := plugins.DockerfilePluginCacheKey(t.Context(), tree, dockerfilePath, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -167,7 +167,7 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		newKey, err := plugins.DockerfilePluginCacheKey(updatedTree, dockerfilePath, "")
+		newKey, err := plugins.DockerfilePluginCacheKey(t.Context(), updatedTree, dockerfilePath, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -184,11 +184,11 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		keyA, err := plugins.DockerfilePluginCacheKey(tree, "images/plugin/Dockerfile", "")
+		keyA, err := plugins.DockerfilePluginCacheKey(t.Context(), tree, "images/plugin/Dockerfile", "")
 		if err != nil {
 			t.Fatal(err)
 		}
-		keyB, err := plugins.DockerfilePluginCacheKey(tree, "images/other/Dockerfile", "")
+		keyB, err := plugins.DockerfilePluginCacheKey(t.Context(), tree, "images/other/Dockerfile", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -205,11 +205,11 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		localKey, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "")
+		localKey, err := plugins.DockerfilePluginCacheKey(t.Context(), tree, dockerfilePath, "")
 		if err != nil {
 			t.Fatal(err)
 		}
-		remoteKey, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "tcp://127.0.0.1:2375")
+		remoteKey, err := plugins.DockerfilePluginCacheKey(t.Context(), tree, dockerfilePath, "tcp://127.0.0.1:2375")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -226,7 +226,7 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		initialKey, err := plugins.DockerfilePluginCacheKey(tree, dockerfilePath, "")
+		initialKey, err := plugins.DockerfilePluginCacheKey(t.Context(), tree, dockerfilePath, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -242,7 +242,7 @@ func TestDockerfilePluginCacheKey(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		newKey, err := plugins.DockerfilePluginCacheKey(updatedTree, dockerfilePath, "")
+		newKey, err := plugins.DockerfilePluginCacheKey(t.Context(), updatedTree, dockerfilePath, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1102,7 +1102,7 @@ func TestBenchmarkHashingRepoRoot(t *testing.T) {
 	}
 
 	start := time.Now()
-	key, err := plugins.DockerfilePluginCacheKey(tree, "ap/images/ap-plugin-astro/Dockerfile", "")
+	key, err := plugins.DockerfilePluginCacheKey(t.Context(), tree, "ap/images/ap-plugin-astro/Dockerfile", "")
 	if err != nil {
 		t.Fatalf("DockerfilePluginCacheKey failed on repo root: %v", err)
 	}

@@ -127,7 +127,7 @@ func runGofmt(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, fi
 				dirtyFiles = append(dirtyFiles, f)
 				continue
 			}
-			hash, err := file.Hash()
+			hash, err := file.Hash(ctx)
 			if err != nil {
 				dirtyFiles = append(dirtyFiles, f)
 				continue
@@ -173,7 +173,7 @@ func runGofmt(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, fi
 		file := r.File(f)
 		if file != nil {
 			if cm != nil {
-				hash, err := file.Hash()
+				hash, err := file.Hash(ctx)
 				if err != nil {
 					continue
 				}
@@ -230,7 +230,7 @@ func runGoModTidy(ctx context.Context, r *sourcetree.SourceTree, repoRoot string
 			return !ignoreList.ShouldIgnore(filepath.ToSlash(rel), false)
 		})
 
-		key, err := computeModuleKey(modDir, r, goFiles)
+		key, err := computeModuleKey(ctx, modDir, r, goFiles)
 		if err != nil {
 			return err
 		}
@@ -252,7 +252,7 @@ func runGoModTidy(ctx context.Context, r *sourcetree.SourceTree, repoRoot string
 		}
 
 		if cm != nil {
-			postKey, err := computeModuleKey(modDir, r, goFiles)
+			postKey, err := computeModuleKey(ctx, modDir, r, goFiles)
 			if err != nil {
 				return err
 			}
@@ -263,17 +263,17 @@ func runGoModTidy(ctx context.Context, r *sourcetree.SourceTree, repoRoot string
 	return nil
 }
 
-func computeModuleKey(modDir string, r *sourcetree.SourceTree, goFiles []*sourcetree.File) (string, error) {
+func computeModuleKey(ctx context.Context, modDir string, r *sourcetree.SourceTree, goFiles []*sourcetree.File) (string, error) {
 	h := sha256.New()
 	if f := r.File(filepath.Join(modDir, "go.mod")); f != nil {
-		hash, err := f.Hash()
+		hash, err := f.Hash(ctx)
 		if err != nil {
 			return "", err
 		}
 		h.Write([]byte("go.mod:" + hash + "\n"))
 	}
 	if f := r.File(filepath.Join(modDir, "go.sum")); f != nil {
-		hash, err := f.Hash()
+		hash, err := f.Hash(ctx)
 		if err != nil && !os.IsNotExist(err) {
 			return "", err
 		}
@@ -282,7 +282,7 @@ func computeModuleKey(modDir string, r *sourcetree.SourceTree, goFiles []*source
 		}
 	}
 	for _, f := range goFiles {
-		hash, err := f.Hash()
+		hash, err := f.Hash(ctx)
 		if err != nil {
 			return "", err
 		}

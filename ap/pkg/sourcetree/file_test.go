@@ -170,7 +170,7 @@ func TestFile_HashAndRefresh(t *testing.T) {
 	}
 
 	ResetContentReadCount()
-	hash1, err := f.Hash()
+	hash1, err := f.Hash(t.Context())
 	if err != nil {
 		t.Fatalf("f.Hash() failed: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestFile_HashAndRefresh(t *testing.T) {
 
 	// Second call with same stat: should hit memo (no additional content read)
 	ResetContentReadCount()
-	hash2, err := f.Hash()
+	hash2, err := f.Hash(t.Context())
 	if err != nil {
 		t.Fatalf("second f.Hash() failed: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestFile_HashAndRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	f2 := r2.File(filePath)
-	hash2b, err := f2.Hash()
+	hash2b, err := f2.Hash(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestFile_HashAndRefresh(t *testing.T) {
 
 	ResetContentReadCount()
 	// With staleness guard, Hash() re-stats and detects the modification automatically
-	hash3, err := f2.Hash()
+	hash3, err := f2.Hash(t.Context())
 	if err != nil {
 		t.Fatalf("f2.Hash() after modification failed: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestFile_HashAndRefresh(t *testing.T) {
 	// InvalidateCachedInfo drops in-memory memo; next Hash() consults hashes.bin without re-reading
 	ResetContentReadCount()
 	f2.InvalidateCachedInfo()
-	hash4, err := f2.Hash()
+	hash4, err := f2.Hash(t.Context())
 	if err != nil {
 		t.Fatalf("f2.Hash() after InvalidateCachedInfo failed: %v", err)
 	}

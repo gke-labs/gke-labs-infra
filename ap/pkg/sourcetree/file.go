@@ -16,6 +16,7 @@ package sourcetree
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -31,7 +32,7 @@ import (
 	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/recordfile"
-	"k8s.io/klog/v2"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 )
 
 var knownOS = map[string]bool{
@@ -284,13 +285,13 @@ func ResetContentReadCount() {
 // and backed by the persistent hashes.bin cache.
 // It uses a fast path keyed on size, mtime (nanoseconds), and inode, re-stating on each
 // call and recomputing only when they changed.
-func (f *File) Hash() (string, error) {
+func (f *File) Hash(ctx context.Context) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.computeHashLocked()
+	return f.computeHashLocked(ctx)
 }
 
-func (f *File) computeHashLocked() (string, error) {
+func (f *File) computeHashLocked(ctx context.Context) (string, error) {
 	fi, err := os.Stat(f.Path)
 	if err != nil {
 		f.hash = ""
@@ -362,7 +363,7 @@ func (f *File) computeHashLocked() (string, error) {
 				binary.LittleEndian.PutUint64(payload[16:24], ino)
 				copy(payload[24:56], rawHash[:])
 				if setErr := f.tree.hashIndex.Set(key, payload[:]); setErr != nil {
-					klog.V(2).Infof("failed to set hash cache for %s: %v", relPath, setErr)
+					scoped.Log(ctx).Fine("failed to set hash cache", "path", relPath, "error", setErr)
 				}
 			}
 		}
