@@ -27,8 +27,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/gke-labs/clix/sandbox"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
@@ -46,35 +48,71 @@ import (
 // StartPluginFunc launches or connects to a plugin and returns a gRPC client and closer.
 type StartPluginFunc func(ctx context.Context, scope *tasks.TaskContext, imageRef string, allowNetwork bool, stderr io.Writer) (api.PluginServiceClient, io.Closer, error)
 
-// StartDockerPlugin launches a plugin container using docker run -i --rm.
-func StartDockerPlugin(ctx context.Context, scope *tasks.TaskContext, imageRef string, allowNetwork bool, stderr io.Writer) (api.PluginServiceClient, io.Closer, error) {
-	dockerPath, err := scope.Tool(ctx, "docker")
-	if err != nil {
-		return nil, nil, fmt.Errorf("plugin requires a container runtime (docker): %w", err)
-	}
-
-	commandArguments := []string{"run", "-i", "--rm"}
+// StartPlugin launches a plugin container through the clix sandbox library.
+func StartPlugin(
+	ctx context.Context,
+	scope *tasks.TaskContext,
+	backend sandbox.Sandbox,
+	imageRef string,
+	allowNetwork bool,
+	stderr io.Writer,
+) (api.PluginServiceClient, io.Closer, error) {
+	networkMode := ""
 	if !allowNetwork {
-		commandArguments = append(commandArguments, "--network", "none")
-	}
-	commandArguments = append(commandArguments, imageRef)
-
-	command := exec.CommandContext(ctx, dockerPath, commandArguments...)
-	command.Stderr = stderr
-	stdinPipe, err := command.StdinPipe()
-	if err != nil {
-		return nil, nil, fmt.Errorf("creating stdin pipe: %w", err)
-	}
-	stdoutPipe, err := command.StdoutPipe()
-	if err != nil {
-		return nil, nil, fmt.Errorf("creating stdout pipe: %w", err)
-	}
-	if err := command.Start(); err != nil {
-		return nil, nil, fmt.Errorf("starting plugin container (%s): %w", imageRef, err)
+		networkMode = "none"
 	}
 
-	commandConnection := stdio.NewCommandConn(command, stdinPipe, stdoutPipe)
-	return DialStdioConn(ctx, commandConnection)
+	config := sandbox.Config{
+		Image:   imageRef,
+		Network: networkMode,
+	}
+
+	stdinReader, stdinWriter := io.Pipe()
+	stdoutReader, stdoutWriter := io.Pipe()
+
+	runErrorChannel := make(chan error, 1)
+	runOptions := sandbox.RunOptions{
+		Stdin:  stdinReader,
+		Stdout: stdoutWriter,
+		Stderr: stderr,
+	}
+
+	go func() {
+		runError := backend.Run(ctx, config, nil, runOptions)
+		_ = stdoutWriter.CloseWithError(runError)
+		_ = stdinReader.CloseWithError(runError)
+		runErrorChannel <- runError
+	}()
+
+	connection := stdio.NewConn(stdoutReader, stdinWriter)
+	client, grpcCloser, err := DialStdioConn(ctx, connection)
+	if err != nil {
+		closeConnectionError := connection.Close()
+		runError := <-runErrorChannel
+		return nil, nil, errors.Join(err, closeConnectionError, runError)
+	}
+
+	var (
+		closeOnce  sync.Once
+		closeError error
+	)
+	closer := closerFunc(func() error {
+		closeOnce.Do(func() {
+			grpcCloseError := grpcCloser.Close()
+			runError := <-runErrorChannel
+			closeError = errors.Join(grpcCloseError, runError)
+		})
+		return closeError
+	})
+
+	return client, closer, nil
+}
+
+// NewSandboxStarter returns a StartPluginFunc that launches plugins through the given sandbox backend.
+func NewSandboxStarter(backend sandbox.Sandbox) StartPluginFunc {
+	return func(ctx context.Context, scope *tasks.TaskContext, imageRef string, allowNetwork bool, stderr io.Writer) (api.PluginServiceClient, io.Closer, error) {
+		return StartPlugin(ctx, scope, backend, imageRef, allowNetwork, stderr)
+	}
 }
 
 // describeTimeout is the deadline for a plugin to respond to the Describe RPC.
@@ -196,6 +234,9 @@ func DescribeContainer(ctx context.Context, scope *tasks.TaskContext, cacheDirec
 	if err != nil {
 		if isDeadlineExceeded(describeContext, err) {
 			return nil, fmt.Errorf("plugin %q (%s) did not answer Describe within %v", pluginName, imageRef, describeTimeout)
+		}
+		if closeError := closer.Close(); closeError != nil {
+			err = errors.Join(err, closeError)
 		}
 		stderrOutput := strings.TrimSpace(stderrBuffer.String())
 		if stderrOutput != "" {
@@ -319,6 +360,7 @@ type ContainerPluginOptions struct {
 	BuildkitHost string
 
 	// Starter starts a plugin container process and establishes a gRPC client connection.
+	// When nil, plugins are started through the first usable sandbox backend.
 	Starter StartPluginFunc
 
 	// BuildImage builds a Dockerfile plugin image and returns its resulting image ID.
@@ -339,11 +381,24 @@ func LoadContainerPlugins(ctx context.Context, scope *tasks.TaskContext, options
 		return nil, nil
 	}
 
+	var sandboxOptions []sandbox.Option
+	dockerPath, err := scope.Tool(ctx, "docker")
+	if err != nil {
+		scoped.Log(ctx).Fine("resolving docker tool", "error", err)
+	} else if dockerPath != "" {
+		sandboxOptions = append(sandboxOptions, sandbox.WithExecutable("docker", dockerPath))
+	}
+
 	var pluginNames []string
 	for name := range pluginsConfig.Plugins {
 		pluginNames = append(pluginNames, name)
 	}
 	sort.Strings(pluginNames)
+
+	starter := options.Starter
+	var selectedBackend sandbox.Sandbox
+	var dockerChecked bool
+	var dockerCheckError error
 
 	var result []Plugin
 	for _, name := range pluginNames {
@@ -353,13 +408,32 @@ func LoadContainerPlugins(ctx context.Context, scope *tasks.TaskContext, options
 		}
 		imageRef := declaration.Image
 		if declaration.Dockerfile != "" {
+			if !dockerChecked {
+				dockerCheckError = sandbox.CheckUsable(ctx, "docker", sandboxOptions...)
+				dockerChecked = true
+			}
+			if dockerCheckError != nil {
+				return nil, fmt.Errorf("plugin %q requires docker: %w", name, dockerCheckError)
+			}
 			var buildError error
 			imageRef, buildError = EnsureDockerfilePluginImage(ctx, scope, name, declaration.Dockerfile, options)
 			if buildError != nil {
 				return nil, buildError
 			}
 		}
-		manifest, err := DescribeContainer(ctx, scope, options.CacheDirectory, name, imageRef, options.Starter)
+
+		if starter == nil {
+			if selectedBackend == nil {
+				var selectError error
+				selectedBackend, selectError = SelectSandboxBackend(ctx, sandboxOptions...)
+				if selectError != nil {
+					return nil, selectError
+				}
+			}
+			starter = NewSandboxStarter(selectedBackend)
+		}
+
+		manifest, err := DescribeContainer(ctx, scope, options.CacheDirectory, name, imageRef, starter)
 		if err != nil {
 			return nil, err
 		}
@@ -369,7 +443,7 @@ func LoadContainerPlugins(ctx context.Context, scope *tasks.TaskContext, options
 			ImageRef:    imageRef,
 			Manifest:    manifest,
 			RepoRoot:    scope.RepoRoot(),
-			Starter:     options.Starter,
+			Starter:     starter,
 		})
 	}
 	return result, nil

@@ -1167,6 +1167,7 @@ esac
 		t.Fatal(err)
 	}
 
+	t.Setenv("PATH", dockerDir+":"+os.Getenv("PATH"))
 	return stateDir
 }
 
