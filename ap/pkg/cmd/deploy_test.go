@@ -1973,7 +1973,7 @@ func TestDeploy_URL_DryRun(t *testing.T) {
 
 func TestDeploy_WaitFlag(t *testing.T) {
 	tempDir := setupFixtureRepo(t)
-	tree, err := sourcetree.Open(tempDir)
+	tree, err := sourcetree.Open(t.Context(), tempDir)
 	if err != nil {
 		t.Fatal(err)
 	}

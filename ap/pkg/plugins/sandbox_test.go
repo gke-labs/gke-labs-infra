@@ -80,7 +80,7 @@ func serveTestPlugin(ctx context.Context, options sandbox.RunOptions) {
 
 func TestStartPlugin_ImagePluginDescribes(t *testing.T) {
 	tempDirectory := t.TempDir()
-	sourceTree, err := sourcetree.Open(tempDirectory)
+	sourceTree, err := sourcetree.Open(t.Context(), tempDirectory)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestStartPlugin_ImagePluginDescribes(t *testing.T) {
 
 func TestStartPlugin_NetworkIsolationError(t *testing.T) {
 	tempDirectory := t.TempDir()
-	sourceTree, err := sourcetree.Open(tempDirectory)
+	sourceTree, err := sourcetree.Open(t.Context(), tempDirectory)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ plugins:
 		t.Fatal(err)
 	}
 
-	sourceTree, err := sourcetree.Open(repoRoot)
+	sourceTree, err := sourcetree.Open(t.Context(), repoRoot)
 	if err != nil {
 		t.Fatal(err)
 	}

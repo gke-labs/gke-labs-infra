@@ -33,7 +33,7 @@ func TestWaitForWorkloadsTask_AllReadyReturnsNil(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tree, err := sourcetree.Open(tempDir)
+	tree, err := sourcetree.Open(t.Context(), tempDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ exit 0
 		t.Fatal(err)
 	}
 
-	tree, err := sourcetree.Open(tempDir)
+	tree, err := sourcetree.Open(t.Context(), tempDir)
 	if err != nil {
 		t.Fatal(err)
 	}
