@@ -81,7 +81,10 @@ func Run(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files [
 func runGofmt(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files []string, skip []string, cm *cache.Manager, stdout, stderr io.Writer) error {
 	log := scoped.Log(ctx)
 
-	ignoreList := walker.NewIgnoreList(append([]string{"vendor", ".git"}, skip...))
+	ignoreList, err := walker.NewIgnoreList(append([]string{"vendor", ".git"}, skip...))
+	if err != nil {
+		return fmt.Errorf("building ignore list: %w", err)
+	}
 	expandedFiles, err := walker.ExpandPaths(r, repoRoot, files, ignoreList)
 	if err != nil {
 		return err
@@ -188,7 +191,10 @@ func runGofmt(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, fi
 func runGoModTidy(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files []string, skip []string, cm *cache.Manager) error {
 	log := scoped.Log(ctx)
 
-	ignoreList := walker.NewIgnoreList(append([]string{"vendor", ".git"}, skip...))
+	ignoreList, err := walker.NewIgnoreList(append([]string{"vendor", ".git"}, skip...))
+	if err != nil {
+		return fmt.Errorf("building ignore list: %w", err)
+	}
 	expandedFiles, err := walker.ExpandPaths(r, repoRoot, files, ignoreList)
 	if err != nil {
 		return err

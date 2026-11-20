@@ -73,7 +73,10 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		opts.Packages = []string{"./..."}
 	}
 
-	policy := fileset.NewPolicy(opts.SkipGenerated, opts.SkipTests, opts.SkipGlobs, opts.RepoRoot)
+	policy, err := fileset.NewPolicy(opts.SkipGenerated, opts.SkipTests, opts.SkipGlobs, opts.RepoRoot)
+	if err != nil {
+		return nil, err
+	}
 	a := NewAnalyzer(Config{
 		Policy:             policy,
 		Exclude:            opts.Exclude,

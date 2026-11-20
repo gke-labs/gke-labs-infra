@@ -15,6 +15,7 @@
 package fileset
 
 import (
+	"fmt"
 	"go/ast"
 	"go/token"
 	"path/filepath"
@@ -67,7 +68,7 @@ type Policy struct {
 }
 
 // NewPolicy creates a Policy with eagerly compiled ignoreList to avoid data races.
-func NewPolicy(skipGenerated bool, skipTests bool, skipGlobs []string, repoRoot string) Policy {
+func NewPolicy(skipGenerated bool, skipTests bool, skipGlobs []string, repoRoot string) (Policy, error) {
 	p := Policy{
 		SkipGenerated: skipGenerated,
 		SkipTests:     skipTests,
@@ -76,9 +77,13 @@ func NewPolicy(skipGenerated bool, skipTests bool, skipGlobs []string, repoRoot 
 		RepoRoot:      repoRoot,
 	}
 	if len(skipGlobs) > 0 {
-		p.ignoreList = walker.NewIgnoreList(skipGlobs)
+		ignoreList, err := walker.NewIgnoreList(skipGlobs)
+		if err != nil {
+			return Policy{}, fmt.Errorf("compiling skip globs: %w", err)
+		}
+		p.ignoreList = ignoreList
 	}
-	return p
+	return p, nil
 }
 
 func (p Policy) isVendored(filename string) bool {
@@ -102,18 +107,14 @@ func (p Policy) ShouldSkip(filename string, file *ast.File) bool {
 	if p.SkipGenerated && IsGenerated(file) {
 		return true
 	}
-	ignoreList := p.ignoreList
-	if ignoreList == nil && len(p.SkipGlobs) > 0 {
-		ignoreList = walker.NewIgnoreList(p.SkipGlobs)
-	}
-	if ignoreList != nil && filename != "" {
+	if p.ignoreList != nil && filename != "" {
 		relPath := filename
 		if p.RepoRoot != "" {
 			if rel, err := filepath.Rel(p.RepoRoot, filename); err == nil && !strings.HasPrefix(rel, "..") {
 				relPath = rel
 			}
 		}
-		if ignoreList.ShouldIgnore(relPath, false) {
+		if p.ignoreList.ShouldIgnore(relPath, false) {
 			return true
 		}
 	}

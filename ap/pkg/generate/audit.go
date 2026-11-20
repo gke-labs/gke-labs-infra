@@ -300,7 +300,11 @@ func printAuditReport(ctx context.Context, findings []AuditFinding, skipped []st
 func findAuditCandidates(repoRoot string, r *sourcetree.SourceTree, auditPaths []string) ([]*candidateFileInfo, []string, error) {
 	var auditIgnoreList *sourcetree.IgnoreList
 	if len(auditPaths) > 0 {
-		auditIgnoreList = sourcetree.NewIgnoreList(auditPaths)
+		var err error
+		auditIgnoreList, err = sourcetree.NewIgnoreList(auditPaths)
+		if err != nil {
+			return nil, nil, fmt.Errorf("building audit ignore list: %w", err)
+		}
 	}
 
 	var candidates []*candidateFileInfo

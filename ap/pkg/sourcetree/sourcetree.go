@@ -176,7 +176,10 @@ func loadSourceTree(ctx context.Context, root string, opts ...Option) (*SourceTr
 	allIgnores = append(allIgnores, opt.skips...)
 	allIgnores = append(allIgnores, opt.ignores...)
 
-	ignoreList := NewIgnoreList(allIgnores)
+	ignoreList, err := NewIgnoreList(allIgnores)
+	if err != nil {
+		return nil, fmt.Errorf("building ignore list: %w", err)
+	}
 
 	atomic.AddInt64(&walkCounter, 1)
 
@@ -190,7 +193,7 @@ func loadSourceTree(ctx context.Context, root string, opts ...Option) (*SourceTr
 		modules = append(modules, root)
 	}
 
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

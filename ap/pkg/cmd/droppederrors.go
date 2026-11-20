@@ -149,7 +149,10 @@ func RunDroppedErrors(ctx context.Context, cmd *cobra.Command, opt DroppedErrors
 		goosList = cfg.LintGOOS()
 	}
 
-	policy := fileset.NewPolicy(skipGenerated, skipTests, skipGlobs, repoRoot)
+	policy, err := fileset.NewPolicy(skipGenerated, skipTests, skipGlobs, repoRoot)
+	if err != nil {
+		return err
+	}
 	analyzer := droppederrors.NewAnalyzer(droppederrors.Config{
 		Policy:             policy,
 		Exclude:            exclude,

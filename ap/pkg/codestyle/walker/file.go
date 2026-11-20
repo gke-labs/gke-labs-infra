@@ -15,6 +15,7 @@
 package walker
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
@@ -35,12 +36,16 @@ type FileView struct {
 }
 
 // NewFileView creates a new FileView backed by the sourcetree snapshot.
-func NewFileView(r *sourcetree.SourceTree, dir string, ignorePatterns []string) *FileView {
+func NewFileView(r *sourcetree.SourceTree, dir string, ignorePatterns []string) (*FileView, error) {
+	ignoreList, err := NewIgnoreList(ignorePatterns)
+	if err != nil {
+		return nil, fmt.Errorf("building ignore list: %w", err)
+	}
 	return &FileView{
 		Tree:   r,
 		Dir:    dir,
-		Ignore: NewIgnoreList(ignorePatterns),
-	}
+		Ignore: ignoreList,
+	}, nil
 }
 
 // Walk walks the directory tree and calls callback for each file.

@@ -15,10 +15,9 @@
 package sourcetree
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
-
-	"k8s.io/klog/v2"
 )
 
 // segmentMatcher matches a single path segment.
@@ -37,7 +36,6 @@ type globMatcher string
 func (m globMatcher) Match(segment string) bool {
 	matched, err := filepath.Match(string(m), segment)
 	if err != nil {
-		klog.Errorf("invalid glob pattern %q: %v", string(m), err)
 		return false
 	}
 	return matched
@@ -109,17 +107,16 @@ type IgnoreList struct {
 }
 
 // NewIgnoreList creates a new IgnoreList.
-func NewIgnoreList(patterns []string) *IgnoreList {
+func NewIgnoreList(patterns []string) (*IgnoreList, error) {
 	var matchers []*pathMatcher
 	for _, pattern := range patterns {
 		matcher, err := parsePattern(pattern, false)
 		if err != nil {
-			klog.Errorf("invalid ignore pattern %q: %v", pattern, err)
-			continue
+			return nil, fmt.Errorf("invalid ignore pattern %q: %w", pattern, err)
 		}
 		matchers = append(matchers, matcher)
 	}
-	return &IgnoreList{matchers: matchers}
+	return &IgnoreList{matchers: matchers}, nil
 }
 
 func parsePattern(pattern string, anchored bool) (*pathMatcher, error) {

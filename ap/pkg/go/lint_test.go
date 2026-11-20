@@ -885,7 +885,11 @@ func TestLintTasks_MultiGOOS_LinuxOnDarwin(t *testing.T) {
 
 	// Simulate running on macOS (darwin host)
 	task.HostGOOS = "darwin"
-	task.GOOS = determineTargetGOOS(r, dir, nil, "darwin")
+	targetGOOS, err := determineTargetGOOS(r, dir, nil, "darwin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.GOOS = targetGOOS
 
 	if len(task.GOOS) != 2 || task.GOOS[0] != "darwin" || task.GOOS[1] != "linux" {
 		t.Fatalf("expected target GOOS [darwin, linux], got %v", task.GOOS)
@@ -964,7 +968,10 @@ func TestLintTasks_MultiGOOS_VendorIgnored(t *testing.T) {
 	}
 
 	// Simulate macOS host where vendor has _linux.go
-	targets := determineTargetGOOS(r, dir, nil, "darwin")
+	targets, err := determineTargetGOOS(r, dir, nil, "darwin")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(targets) != 1 || targets[0] != "darwin" {
 		t.Fatalf("expected vendor _linux.go to not trigger extra load; got targets: %v", targets)
 	}

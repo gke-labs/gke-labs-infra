@@ -350,7 +350,7 @@ func (t *AnalyzersTask) GetChildren() []tasks.Task {
 	return nil
 }
 
-func determineTargetGOOS(r *sourcetree.SourceTree, dir string, skipGlobs []string, hostGOOS string) []string {
+func determineTargetGOOS(r *sourcetree.SourceTree, dir string, skipGlobs []string, hostGOOS string) ([]string, error) {
 	if hostGOOS == "" {
 		hostGOOS = runtime.GOOS
 	}
@@ -358,7 +358,11 @@ func determineTargetGOOS(r *sourcetree.SourceTree, dir string, skipGlobs []strin
 
 	var ignoreList *walker.IgnoreList
 	if len(skipGlobs) > 0 {
-		ignoreList = walker.NewIgnoreList(skipGlobs)
+		var err error
+		ignoreList, err = walker.NewIgnoreList(skipGlobs)
+		if err != nil {
+			return nil, fmt.Errorf("building ignore list: %w", err)
+		}
 	}
 
 	view := r.Under(dir)
@@ -391,7 +395,7 @@ func determineTargetGOOS(r *sourcetree.SourceTree, dir string, skipGlobs []strin
 		sort.Strings(nonHost)
 		res = append(res, nonHost...)
 	}
-	return res
+	return res, nil
 }
 
 // LintTasks returns a task group for running go linting in discovered modules.
@@ -444,7 +448,11 @@ func LintTasks(r *sourcetree.SourceTree, root string) (tasks.Task, error) {
 		if explicitGOOS := cfg.LintGOOS(); len(explicitGOOS) > 0 {
 			analyzersTask.GOOS = explicitGOOS
 		} else {
-			analyzersTask.GOOS = determineTargetGOOS(r, dir, cfg.Skip, runtime.GOOS)
+			targetGOOS, err := determineTargetGOOS(r, dir, cfg.Skip, runtime.GOOS)
+			if err != nil {
+				return nil, fmt.Errorf("determining target GOOS for %s: %w", dir, err)
+			}
+			analyzersTask.GOOS = targetGOOS
 		}
 
 		for _, reg := range codestyle.Analyzers {
@@ -456,7 +464,10 @@ func LintTasks(r *sourcetree.SourceTree, root string) (tasks.Task, error) {
 
 			skipGen := reg.ResolveSkipGenerated(cfg)
 			skipTests := reg.ResolveSkipTests(cfg)
-			policy := fileset.NewPolicy(skipGen, skipTests, cfg.Skip, root)
+			policy, err := fileset.NewPolicy(skipGen, skipTests, cfg.Skip, root)
+			if err != nil {
+				return nil, fmt.Errorf("creating policy for %s: %w", reg.Name, err)
+			}
 			analyzersTask.Policies[reg.Name] = policy
 			analyzersTask.Settings[reg.Name] = cfg.Linter(reg.ConfigKey())
 

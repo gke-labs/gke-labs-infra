@@ -33,5 +33,9 @@ func TestTestContext_GeneratedDefault(t *testing.T) {
 
 func TestTestContext_GeneratedSkip(t *testing.T) {
 	testdata := analysistest.TestData()
-	analysistest.Run(t, testdata, NewAnalyzer(fileset.NewPolicy(true, false, nil, "")), "generated_skip")
+	p, err := fileset.NewPolicy(true, false, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	analysistest.Run(t, testdata, NewAnalyzer(p), "generated_skip")
 }
