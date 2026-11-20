@@ -69,8 +69,9 @@ For a local push to `images.local`, `ap` executes three sequential steps:
    `registrypush.Push`. Requests route directly through the Kubernetes API server's
    service proxy subresource:
    `/api/v1/namespaces/in-cluster-image-registry-system/services/in-cluster-image-registry:5000/proxy`
-   The pusher issues HTTP `HEAD` checks to skip blobs that already exist in the
-   registry, uploads missing layer and config blobs, and writes the manifest.
+   Blobs the registry already has are not uploaded again (go-containerregistry
+   does this); missing layer and config blobs are uploaded, followed by the
+   manifest.
 
 Throughout this process, no process listens on a local TCP port on the
 developer workstation. This eliminates port collisions (such as conflicts with
@@ -80,11 +81,10 @@ container previously required on macOS.
 
 ## 2. What Users Notice and Need
 
-- **BuildKit Cache vs. Docker Cache**: Builds rely on BuildKit's internal cache
-  stored in a dedicated Docker volume (`buildx_buildkit_ap-builder0_state` mounted
-  at `/var/lib/buildkit`) rather than the host Docker daemon's storage. The first
-  build after container creation is cold, but subsequent builds leverage
-  BuildKit layer caching.
+- **BuildKit Cache vs. Docker Cache**: Builds rely on BuildKit's internal cache,
+  which lives in the BuildKit container's volume rather than the host Docker
+  daemon's storage. The first build after container creation is cold, but
+  subsequent builds leverage BuildKit layer caching.
 - **Image Not in `docker images`**: Because images are exported directly to an
   OCI directory and pushed via the Kubernetes API server, built images do not
   appear in the host Docker daemon image list (`docker images`).
@@ -107,17 +107,15 @@ container previously required on macOS.
   independently selects an endpoint for each HTTP request. This behaves reliably
   because `in-cluster-image-registry` is deployed as a single-replica StatefulSet
   (`replicas: 1`), ensuring all requests reach the same registry pod.
-- **Performance and Recorded Timings**:
-  - Initial cold build (200 MB layer): ~6.5 s (context transfer, base image
-    pull, and layer blob creation).
-  - Unchanged rebuild: ~0.21 s (BuildKit caches all layers and reports layer
-    export completed in 0.0 s).
-  - Small change rebuild: ~0.27 s (cached layers retain original inodes, writing
-    only the new 118-byte layer, configuration, and manifest).
-  - Against the previous path: `docker save` archive export added an unconditional
-    2.0–2.4 s delay on every rebuild even when nothing changed; pushing two
-    400 MiB layers over the service proxy on Kind completed in 2.4 s, and
-    subsequent pushes required only two HTTP requests to confirm existing blobs.
+- **Performance and Recorded Timings**: Recorded when the change landed for
+  `autodeploy/examples/helloworld` on kind, comparing the new path against the
+  previous one:
+  - First build: 20.6 s against 16.5 s.
+  - Unchanged rebuild: 0.4 s against 0.5 s.
+  - Small change: 3.3 s against 1.4 s (small changes are about 2 s slower than
+    before).
+  In a standalone probe, two 400 MiB layers were pushed through the service proxy
+  in 2.4 s.
 
 ## 4. Alternatives Considered
 
