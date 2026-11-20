@@ -16,6 +16,8 @@ package testcontext
 
 import (
 	"go/ast"
+	"go/token"
+	"go/types"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
 	"golang.org/x/tools/go/analysis"
@@ -37,12 +39,9 @@ func run(pass *analysis.Pass, policy fileset.Policy) (any, error) {
 		if policy.ShouldSkipAST(pass.Fset, f) {
 			continue
 		}
-		filename := pass.Fset.Position(f.Pos()).Filename
-		isTestFile := fileset.IsTest(filename)
 
 		v := &visitor{
-			pass:       pass,
-			isTestFile: isTestFile,
+			pass: pass,
 		}
 		ast.Walk(v, f)
 	}
@@ -50,9 +49,7 @@ func run(pass *analysis.Pass, policy fileset.Policy) (any, error) {
 }
 
 type visitor struct {
-	pass            *analysis.Pass
-	isTestFile      bool
-	currentFuncHasT bool
+	pass *analysis.Pass
 }
 
 func (v *visitor) Visit(node ast.Node) ast.Visitor {
@@ -60,25 +57,8 @@ func (v *visitor) Visit(node ast.Node) ast.Visitor {
 		return nil
 	}
 
-	switch n := node.(type) {
-	case *ast.FuncDecl:
-		oldHasT := v.currentFuncHasT
-		v.currentFuncHasT = hasTestingT(v.pass, n.Type.Params)
-		if n.Body != nil {
-			ast.Walk(v, n.Body)
-		}
-		v.currentFuncHasT = oldHasT
-		return nil
-	case *ast.FuncLit:
-		oldHasT := v.currentFuncHasT
-		v.currentFuncHasT = hasTestingT(v.pass, n.Type.Params)
-		if n.Body != nil {
-			ast.Walk(v, n.Body)
-		}
-		v.currentFuncHasT = oldHasT
-		return nil
-	case *ast.CallExpr:
-		v.checkCall(n)
+	if call, ok := node.(*ast.CallExpr); ok {
+		v.checkCall(call)
 	}
 
 	return v
@@ -93,7 +73,7 @@ func (v *visitor) checkCall(call *ast.CallExpr) {
 	if obj, ok := v.pass.TypesInfo.Uses[sel.Sel]; ok {
 		if pkg := obj.Pkg(); pkg != nil && pkg.Path() == "context" {
 			if obj.Name() == "Background" || obj.Name() == "TODO" {
-				if v.isTestFile || v.currentFuncHasT {
+				if hasTestingInScope(v.pass, call.Pos()) {
 					v.pass.Reportf(call.Pos(), "consider using t.Context() instead of context.%s()", obj.Name())
 				}
 			}
@@ -101,25 +81,56 @@ func (v *visitor) checkCall(call *ast.CallExpr) {
 	}
 }
 
-func hasTestingT(pass *analysis.Pass, params *ast.FieldList) bool {
-	if params == nil {
+func hasTestingInScope(pass *analysis.Pass, pos token.Pos) bool {
+	if pass.Pkg == nil || pass.Pkg.Scope() == nil {
 		return false
 	}
-	for _, field := range params.List {
-		if isTestingT(pass, field.Type) {
-			return true
+	inner := pass.Pkg.Scope().Innermost(pos)
+	if inner == nil {
+		return false
+	}
+
+	seen := make(map[string]bool)
+	for s := inner; s != nil && s != pass.Pkg.Scope() && s.Parent() != pass.Pkg.Scope(); s = s.Parent() {
+		for _, name := range s.Names() {
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+			obj := s.Lookup(name)
+			if obj == nil {
+				continue
+			}
+			if isTestingType(obj.Type()) {
+				return true
+			}
 		}
 	}
 	return false
 }
 
-func isTestingT(pass *analysis.Pass, expr ast.Expr) bool {
-	typ := pass.TypesInfo.TypeOf(expr)
+func isTestingType(typ types.Type) bool {
 	if typ == nil {
 		return false
 	}
-
+	typ = types.Unalias(typ)
 	s := typ.String()
-	// Check for standard testing types
-	return s == "*testing.T" || s == "*testing.B" || s == "*testing.F" || s == "testing.TB"
+	if s == "*testing.T" || s == "*testing.B" || s == "*testing.F" || s == "testing.TB" {
+		return true
+	}
+	switch t := typ.(type) {
+	case *types.Pointer:
+		elem := types.Unalias(t.Elem())
+		if named, ok := elem.(*types.Named); ok {
+			if pkg := named.Obj().Pkg(); pkg != nil && pkg.Path() == "testing" {
+				name := named.Obj().Name()
+				return name == "T" || name == "B" || name == "F"
+			}
+		}
+	case *types.Named:
+		if pkg := t.Obj().Pkg(); pkg != nil && pkg.Path() == "testing" {
+			return t.Obj().Name() == "TB"
+		}
+	}
+	return false
 }
