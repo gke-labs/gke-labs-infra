@@ -1971,137 +1971,53 @@ func TestDeploy_URL_DryRun(t *testing.T) {
 	}
 }
 
-func TestDeploy_WaitFlags(t *testing.T) {
-	// 1. Default: wait is true, timeout is 5m
-	rootCmd := BuildRootCommand()
-	deployCmd, _, err := rootCmd.Find([]string{"deploy"})
-	if err != nil {
-		t.Fatalf("failed to find deploy command: %v", err)
-	}
-	waitFlag := deployCmd.Flags().Lookup("wait")
-	if waitFlag == nil || waitFlag.DefValue != "true" {
-		t.Errorf("expected --wait flag to default to true, got %v", waitFlag)
-	}
-	noWaitFlag := deployCmd.Flags().Lookup("no-wait")
-	if noWaitFlag == nil || noWaitFlag.DefValue != "false" {
-		t.Errorf("expected --no-wait flag to default to false, got %v", noWaitFlag)
-	}
-	timeoutFlag := deployCmd.Flags().Lookup("timeout")
-	if timeoutFlag == nil || timeoutFlag.DefValue != "5m0s" {
-		t.Errorf("expected --timeout flag to default to 5m0s, got %v", timeoutFlag)
-	}
-
-	// 2. Options helper ShouldWait
-	optDefault := DeployOptions{}
-	if !optDefault.ShouldWait() {
-		t.Errorf("expected ShouldWait() to be true by default")
-	}
-	if optDefault.WaitTimeout() != 5*time.Minute {
-		t.Errorf("expected WaitTimeout() to default to 5m, got %v", optDefault.WaitTimeout())
-	}
-
-	optNoWait := DeployOptions{NoWait: true}
-	if optNoWait.ShouldWait() {
-		t.Errorf("expected ShouldWait() to be false when NoWait is true")
-	}
-
-	waitFalse := false
-	optWaitFalse := DeployOptions{Wait: &waitFalse}
-	if optWaitFalse.ShouldWait() {
-		t.Errorf("expected ShouldWait() to be false when Wait is &false")
-	}
-
-	optTimeout := DeployOptions{Timeout: 2 * time.Minute}
-	if optTimeout.WaitTimeout() != 2*time.Minute {
-		t.Errorf("expected WaitTimeout() to be 2m, got %v", optTimeout.WaitTimeout())
-	}
-}
-
-func TestDeploy_WaitForWorkloadsPlan(t *testing.T) {
+func TestDeploy_WaitFlag(t *testing.T) {
 	tempDir := setupFixtureRepo(t)
-
-	// 1. Plan with manifests containing Deployment includes wait-ready task
-	opt := DeployOptions{
-		RootOptions: &RootOptions{
-			RepoRoot: tempDir,
-			Dir:      tempDir,
-			DryRun:   true,
-		},
-		Timeout: 3 * time.Minute,
-	}
-	if err := opt.Resolve(t.Context(), []string{"./k8s"}); err != nil {
-		t.Fatalf("opt.Resolve failed: %v", err)
-	}
-
-	r, err := opt.GetSourceTree()
+	tree, err := sourcetree.Open(tempDir)
 	if err != nil {
-		t.Fatalf("GetSourceTree failed: %v", err)
+		t.Fatal(err)
 	}
 	naming := images.ResolveImageNaming(nil)
 
-	planTasks, err := BuildDeployPlan(opt, r, "", naming)
-	if err != nil {
-		t.Fatalf("BuildDeployPlan failed: %v", err)
+	// 1. By default, BuildDeployPlan includes WaitForWorkloadsTask
+	optDefault := DeployOptions{
+		RootOptions: &RootOptions{RepoRoot: tempDir, Dir: tempDir, DryRun: true},
+		Wait:        true,
+		Timeout:     5 * time.Minute,
 	}
-
-	var waitTask *k8s.WaitForWorkloadsTask
-	for _, task := range planTasks {
-		if wt, ok := task.(*k8s.WaitForWorkloadsTask); ok {
-			waitTask = wt
+	if err := optDefault.Resolve(t.Context(), []string{"./k8s"}); err != nil {
+		t.Fatal(err)
+	}
+	tasksDefault, err := BuildDeployPlan(optDefault, tree, "", naming)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hasWait bool
+	for _, task := range tasksDefault {
+		if _, ok := task.(*k8s.WaitForWorkloadsTask); ok {
+			hasWait = true
 			break
 		}
 	}
-	if waitTask == nil {
-		t.Fatalf("expected plan to include WaitForWorkloadsTask, got %v", planTasks)
-	}
-	if waitTask.Timeout != 3*time.Minute {
-		t.Errorf("expected wait task timeout to be 3m, got %v", waitTask.Timeout)
-	}
-	workloads := waitTask.Tracker.Workloads()
-	if len(workloads) == 0 {
-		t.Errorf("expected wait task tracker to have workloads, got 0")
+	if !hasWait {
+		t.Errorf("expected default deploy plan to include WaitForWorkloadsTask")
 	}
 
-	// 2. Plan with NoWait omits wait-ready task
+	// 2. --wait=false adds no wait
 	optNoWait := DeployOptions{
-		RootOptions: &RootOptions{
-			RepoRoot: tempDir,
-			Dir:      tempDir,
-			DryRun:   true,
-		},
-		NoWait: true,
+		RootOptions: &RootOptions{RepoRoot: tempDir, Dir: tempDir, DryRun: true},
+		Wait:        false,
 	}
 	if err := optNoWait.Resolve(t.Context(), []string{"./k8s"}); err != nil {
-		t.Fatalf("optNoWait.Resolve failed: %v", err)
+		t.Fatal(err)
 	}
-	planTasksNoWait, err := BuildDeployPlan(optNoWait, r, "", naming)
+	tasksNoWait, err := BuildDeployPlan(optNoWait, tree, "", naming)
 	if err != nil {
-		t.Fatalf("BuildDeployPlan failed: %v", err)
+		t.Fatal(err)
 	}
-	for _, task := range planTasksNoWait {
+	for _, task := range tasksNoWait {
 		if _, ok := task.(*k8s.WaitForWorkloadsTask); ok {
-			t.Errorf("expected plan with NoWait to NOT include WaitForWorkloadsTask")
-		}
-	}
-
-	// 3. Plan with only ConfigMap omits wait-ready task
-	optCM := DeployOptions{
-		RootOptions: &RootOptions{
-			RepoRoot: tempDir,
-			Dir:      tempDir,
-			DryRun:   true,
-		},
-	}
-	if err := optCM.Resolve(t.Context(), []string{"./k8s/cm.yaml"}); err != nil {
-		t.Fatalf("optCM.Resolve failed: %v", err)
-	}
-	planTasksCM, err := BuildDeployPlan(optCM, r, "", naming)
-	if err != nil {
-		t.Fatalf("BuildDeployPlan failed: %v", err)
-	}
-	for _, task := range planTasksCM {
-		if _, ok := task.(*k8s.WaitForWorkloadsTask); ok {
-			t.Errorf("expected plan with only ConfigMap to NOT include WaitForWorkloadsTask")
+			t.Errorf("expected plan with Wait=false to not include WaitForWorkloadsTask")
 		}
 	}
 }

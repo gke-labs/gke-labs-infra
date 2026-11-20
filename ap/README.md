@@ -73,7 +73,7 @@ ap deploy path/to/k8s/controller.yaml -n my-namespace --cluster my-context --bui
 
 Pass `--applyset=[RESOURCE[.GROUP]/]NAME` to track deployments using the KEP-3659 ApplySet specification. `ap deploy` stamps `applyset.kubernetes.io/part-of: <id>` on every applied object and updates the pre-existing parent object with the ApplySet ID label, tooling version (`ap/<version>`), and `contains-group-kinds` (and `additional-namespaces` when applicable) annotations. The deploy fails if the parent does not exist, carries a conflicting tooling annotation, or is namespace-scoped without `--namespace`.
 
-At the end of the rollout, `ap deploy` automatically waits in parallel for all applied Deployments, DaemonSets, and StatefulSets to be ready within a single overall timeout (`--timeout`, defaults to `5m`). On failure or timeout, `ap deploy` details which workloads were not ready, unavailable replicas, and pod container waiting reasons or termination messages. Pass `--no-wait` or `--wait=false` to skip waiting.
+At the end of the rollout, `ap deploy` automatically waits in parallel for all applied Deployments, DaemonSets, and StatefulSets to be ready within a single overall timeout (`--timeout`, defaults to `5m`). On failure or timeout, `ap deploy` details which workloads were not ready, unavailable replicas, and pod container waiting reasons or termination messages. Pass `--wait=false` to skip waiting.
 
 ## End-to-End Testing (e2e)
 

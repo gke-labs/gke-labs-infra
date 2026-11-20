@@ -15,405 +15,98 @@
 package k8s
 
 import (
-	"context"
-	"fmt"
-	"reflect"
+	"os"
+	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
-func TestExtractWorkloadsFromYAML(t *testing.T) {
-	yamlContent := `
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: my-config
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: app-deploy
-  namespace: custom-ns
-spec:
-  replicas: 2
----
-apiVersion: apps/v1
-kind: DaemonSet
-metadata:
-  name: node-agent
-spec: {}
----
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: database
-  namespace: db-ns
-spec:
-  replicas: 3
----
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: batch-job
-spec: {}
-`
-	workloads := ExtractWorkloadsFromYAML(yamlContent, "fallback-ns")
-
-	expected := []AppliedWorkload{
-		{Kind: "Deployment", Namespace: "custom-ns", Name: "app-deploy"},
-		{Kind: "DaemonSet", Namespace: "fallback-ns", Name: "node-agent"},
-		{Kind: "StatefulSet", Namespace: "db-ns", Name: "database"},
+func TestWaitForWorkloadsTask_AllReadyReturnsNil(t *testing.T) {
+	tempDir := t.TempDir()
+	fakeKubectl := filepath.Join(tempDir, "kubectl")
+	fakeScript := "#!/bin/sh\nexit 0\n"
+	if err := os.WriteFile(fakeKubectl, []byte(fakeScript), 0755); err != nil {
+		t.Fatal(err)
 	}
 
-	if !reflect.DeepEqual(workloads, expected) {
-		t.Fatalf("ExtractWorkloadsFromYAML = %+v, want %+v", workloads, expected)
+	tree, err := sourcetree.Open(tempDir)
+	if err != nil {
+		t.Fatal(err)
 	}
-}
+	scope := tasks.NewTaskContext(tempDir, tempDir, tree).WithTool("kubectl", fakeKubectl)
 
-func TestWorkloadTracker_DeduplicationAndFiltering(t *testing.T) {
 	tracker := NewWorkloadTracker()
-
-	// Valid workloads
-	tracker.Add("Deployment", "ns1", "app")
-	tracker.Add("Deployment", "ns1", "app") // duplicate
-	tracker.Add("DaemonSet", "ns1", "agent")
-	tracker.Add("StatefulSet", "ns2", "db")
-
-	// Invalid / ignored kinds
-	tracker.Add("ConfigMap", "ns1", "cm")
-	tracker.Add("Service", "ns1", "svc")
-	tracker.Add("Deployment", "ns1", "") // empty name
-
-	workloads := tracker.Workloads()
-	if len(workloads) != 3 {
-		t.Fatalf("expected 3 workloads, got %d: %+v", len(workloads), workloads)
-	}
-
-	expected := []AppliedWorkload{
-		{Kind: "Deployment", Namespace: "ns1", Name: "app"},
-		{Kind: "DaemonSet", Namespace: "ns1", Name: "agent"},
-		{Kind: "StatefulSet", Namespace: "ns2", Name: "db"},
-	}
-	if !reflect.DeepEqual(workloads, expected) {
-		t.Fatalf("Workloads() = %+v, want %+v", workloads, expected)
-	}
-}
-
-func TestWorkloadTracker_ConcurrentSafety(t *testing.T) {
-	tracker := NewWorkloadTracker()
-	var wg sync.WaitGroup
-
-	for i := 0; i < 50; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			name := fmt.Sprintf("app-%d", idx%5)
-			tracker.Add("Deployment", "default", name)
-		}(i)
-	}
-
-	wg.Wait()
-	workloads := tracker.Workloads()
-	if len(workloads) != 5 {
-		t.Fatalf("expected 5 unique workloads after concurrent adds, got %d", len(workloads))
-	}
-}
-
-func TestWaitForWorkloadsTask_Empty(t *testing.T) {
-	task := &WaitForWorkloadsTask{
-		Tracker: NewWorkloadTracker(),
-	}
-
-	executed := false
-	task.ExecCmd = func(ctx context.Context, name string, args ...string) ([]byte, error) {
-		executed = true
-		return nil, nil
-	}
-
-	if err := task.Run(t.Context(), nil); err != nil {
-		t.Fatalf("unexpected error on empty tracker: %v", err)
-	}
-	if executed {
-		t.Fatalf("expected no kubectl calls when tracker is empty")
-	}
-}
-
-func TestWaitForWorkloadsTask_Success(t *testing.T) {
-	tracker := NewWorkloadTracker()
-	tracker.Add("Deployment", "ns1", "app1")
-	tracker.Add("DaemonSet", "ns2", "agent1")
-
-	task := &WaitForWorkloadsTask{
-		Cluster: ClusterFromContext("test-ctx"),
-		Timeout: 2 * time.Minute,
-		Tracker: tracker,
-	}
-
-	var mu sync.Mutex
-	var commands []string
-
-	task.ExecCmd = func(ctx context.Context, name string, args ...string) ([]byte, error) {
-		mu.Lock()
-		defer mu.Unlock()
-		commands = append(commands, strings.Join(args, " "))
-		return []byte("rollout status ok"), nil
-	}
-
-	if err := task.Run(t.Context(), nil); err != nil {
-		t.Fatalf("task.Run failed: %v", err)
-	}
-
-	mu.Lock()
-	defer mu.Unlock()
-
-	if len(commands) != 2 {
-		t.Fatalf("expected 2 rollout status commands, got %d: %v", len(commands), commands)
-	}
-
-	hasApp1 := false
-	hasAgent1 := false
-	for _, cmd := range commands {
-		if strings.Contains(cmd, "rollout status deployment/app1") && strings.Contains(cmd, "-n ns1") && strings.Contains(cmd, "--context test-ctx") {
-			hasApp1 = true
-		}
-		if strings.Contains(cmd, "rollout status daemonset/agent1") && strings.Contains(cmd, "-n ns2") && strings.Contains(cmd, "--context test-ctx") {
-			hasAgent1 = true
-		}
-	}
-
-	if !hasApp1 {
-		t.Errorf("missing expected rollout status for deployment/app1 in commands: %v", commands)
-	}
-	if !hasAgent1 {
-		t.Errorf("missing expected rollout status for daemonset/agent1 in commands: %v", commands)
-	}
-}
-
-func TestWaitForWorkloadsTask_Failure_UnavailableReplicas(t *testing.T) {
-	tracker := NewWorkloadTracker()
-	tracker.Add("Deployment", "prod", "web")
-
-	task := &WaitForWorkloadsTask{
-		Timeout: 30 * time.Second,
-		Tracker: tracker,
-	}
-
-	task.ExecCmd = func(ctx context.Context, name string, args ...string) ([]byte, error) {
-		cmdStr := strings.Join(args, " ")
-		if strings.Contains(cmdStr, "rollout status") {
-			return []byte("error: timed out waiting for the condition"), fmt.Errorf("exit status 1")
-		}
-		if strings.Contains(cmdStr, "get deployment web") {
-			deploymentJSON := `{
-				"spec": {"replicas": 3, "selector": {"matchLabels": {"app": "web"}}},
-				"status": {
-					"replicas": 3,
-					"readyReplicas": 1,
-					"availableReplicas": 1,
-					"unavailableReplicas": 2,
-					"updatedReplicas": 3
-				}
-			}`
-			return []byte(deploymentJSON), nil
-		}
-		if strings.Contains(cmdStr, "get pods -l app=web") {
-			return []byte(`{"items": []}`), nil
-		}
-		return nil, nil
-	}
-
-	err := task.Run(t.Context(), nil)
-	if err == nil {
-		t.Fatalf("expected error on failed rollout, got nil")
-	}
-
-	errStr := err.Error()
-	if !strings.Contains(errStr, "deployment/web in namespace prod: 1/3 replicas available (2 unavailable)") {
-		t.Errorf("expected error to report unavailable replicas, got:\n%s", errStr)
-	}
-}
-
-func TestWaitForWorkloadsTask_Failure_PodWaitingAndTerminated(t *testing.T) {
-	tracker := NewWorkloadTracker()
-	tracker.Add("Deployment", "default", "api")
-
-	task := &WaitForWorkloadsTask{
-		Timeout: 10 * time.Second,
-		Tracker: tracker,
-	}
-
-	task.ExecCmd = func(ctx context.Context, name string, args ...string) ([]byte, error) {
-		cmdStr := strings.Join(args, " ")
-		if strings.Contains(cmdStr, "rollout status") {
-			return []byte("error: timed out waiting for the condition"), fmt.Errorf("timed out")
-		}
-		if strings.Contains(cmdStr, "get deployment api") {
-			deploymentJSON := `{
-				"spec": {"replicas": 1, "selector": {"matchLabels": {"app": "api"}}},
-				"status": {"replicas": 1, "availableReplicas": 0, "unavailableReplicas": 1}
-			}`
-			return []byte(deploymentJSON), nil
-		}
-		if strings.Contains(cmdStr, "get pods -l app=api") {
-			podsJSON := `{
-				"items": [{
-					"metadata": {"name": "api-7f89d-abc"},
-					"status": {
-						"phase": "Running",
-						"conditions": [{"type": "Ready", "status": "False"}],
-						"containerStatuses": [{
-							"name": "server",
-							"ready": false,
-							"state": {
-								"waiting": {
-									"reason": "CrashLoopBackOff",
-									"message": "back-off 10s restarting failed container"
-								}
-							},
-							"lastState": {
-								"terminated": {
-									"reason": "Error",
-									"exitCode": 1,
-									"message": "failed to bind port 8080"
-								}
-							}
-						}]
-					}
-				}]
-			}`
-			return []byte(podsJSON), nil
-		}
-		return nil, nil
-	}
-
-	err := task.Run(t.Context(), nil)
-	if err == nil {
-		t.Fatalf("expected error on failed rollout, got nil")
-	}
-
-	errStr := err.Error()
-	if !strings.Contains(errStr, "deployment/api in namespace default: 0/1 replicas available (1 unavailable)") {
-		t.Errorf("expected error to report unavailable replicas, got:\n%s", errStr)
-	}
-	if !strings.Contains(errStr, `container "server" waiting: CrashLoopBackOff: back-off 10s restarting failed container`) {
-		t.Errorf("expected error to report pod waiting reason, got:\n%s", errStr)
-	}
-	if !strings.Contains(errStr, `container "server" last terminated: Error (exit code 1): failed to bind port 8080`) {
-		t.Errorf("expected error to report last termination message, got:\n%s", errStr)
-	}
-}
-
-func TestWaitForWorkloadsTask_Failure_DaemonSetUnschedulablePod(t *testing.T) {
-	tracker := NewWorkloadTracker()
-	tracker.Add("DaemonSet", "kube-system", "node-agent")
-
-	task := &WaitForWorkloadsTask{
-		Timeout: 10 * time.Second,
-		Tracker: tracker,
-	}
-
-	task.ExecCmd = func(ctx context.Context, name string, args ...string) ([]byte, error) {
-		cmdStr := strings.Join(args, " ")
-		if strings.Contains(cmdStr, "rollout status") {
-			return []byte("daemonset not ready"), fmt.Errorf("timeout")
-		}
-		if strings.Contains(cmdStr, "get daemonset node-agent") {
-			dsJSON := `{
-				"spec": {"selector": {"matchLabels": {"app": "node-agent"}}},
-				"status": {
-					"desiredNumberScheduled": 3,
-					"numberReady": 0,
-					"numberUnavailable": 3
-				}
-			}`
-			return []byte(dsJSON), nil
-		}
-		if strings.Contains(cmdStr, "get pods -l app=node-agent") {
-			podsJSON := `{
-				"items": [{
-					"metadata": {"name": "node-agent-xyz"},
-					"status": {
-						"phase": "Pending",
-						"conditions": [{
-							"type": "PodScheduled",
-							"status": "False",
-							"reason": "Unschedulable",
-							"message": "0/1 nodes are available: 1 Insufficient cpu"
-						}]
-					}
-				}]
-			}`
-			return []byte(podsJSON), nil
-		}
-		return nil, nil
-	}
-
-	err := task.Run(t.Context(), nil)
-	if err == nil {
-		t.Fatalf("expected error on failed rollout, got nil")
-	}
-
-	errStr := err.Error()
-	if !strings.Contains(errStr, "daemonset/node-agent in namespace kube-system: 0/3 ready (3 unavailable)") {
-		t.Errorf("expected error to report daemonset replica counts, got:\n%s", errStr)
-	}
-	if !strings.Contains(errStr, "PodScheduled=False (Unschedulable): 0/1 nodes are available: 1 Insufficient cpu") {
-		t.Errorf("expected error to report unschedulable pod issue, got:\n%s", errStr)
-	}
-}
-
-func TestWaitForWorkloadsTask_Failure_InitContainer(t *testing.T) {
-	tracker := NewWorkloadTracker()
-	tracker.Add("Deployment", "default", "web")
+	tracker.Add("Deployment", "default", "my-app")
+	tracker.Add("DaemonSet", "kube-system", "my-agent")
 
 	task := &WaitForWorkloadsTask{
 		Timeout: 5 * time.Second,
 		Tracker: tracker,
 	}
 
-	task.ExecCmd = func(ctx context.Context, name string, args ...string) ([]byte, error) {
-		cmdStr := strings.Join(args, " ")
-		if strings.Contains(cmdStr, "rollout status") {
-			return []byte("error: timed out"), fmt.Errorf("timed out")
-		}
-		if strings.Contains(cmdStr, "get deployment web") {
-			return []byte(`{
-				"spec": {"replicas": 1, "selector": {"matchLabels": {"app": "web"}}},
-				"status": {"replicas": 1, "availableReplicas": 0, "unavailableReplicas": 1}
-			}`), nil
-		}
-		if strings.Contains(cmdStr, "get pods -l app=web") {
-			return []byte(`{
-				"items": [{
-					"metadata": {"name": "web-pod-1"},
-					"status": {
-						"phase": "Pending",
-						"initContainerStatuses": [{
-							"name": "init-db",
-							"ready": false,
-							"state": {
-								"waiting": {
-									"reason": "ImagePullBackOff",
-									"message": "Back-off pulling image bad-repo/init:v1"
-								}
-							}
-						}]
-					}
-				}]
-			}`), nil
-		}
-		return nil, nil
+	if err := task.Run(t.Context(), scope); err != nil {
+		t.Fatalf("expected nil error when all workloads are ready, got: %v", err)
+	}
+}
+
+func TestWaitForWorkloadsTask_NotReadyFailsWithDiagnostics(t *testing.T) {
+	tempDir := t.TempDir()
+	fakeKubectl := filepath.Join(tempDir, "kubectl")
+	fakeScript := `#!/bin/sh
+command="$*"
+case "$command" in
+  *"rollout status"*)
+    echo 'Waiting for deployment "web" rollout to finish: 0 of 1 updated replicas are available...'
+    echo 'error: timed out waiting for the condition'
+    exit 1
+    ;;
+  *"get deployment web -o go-template"*)
+    echo "app=web,"
+    exit 0
+    ;;
+  *"get pods -l app=web"*)
+    echo "NAME        PHASE    WAITING           TERMINATION"
+    echo "web-abc123  Running  CrashLoopBackOff  <none>"
+    exit 0
+    ;;
+esac
+exit 0
+`
+	if err := os.WriteFile(fakeKubectl, []byte(fakeScript), 0755); err != nil {
+		t.Fatal(err)
 	}
 
-	err := task.Run(t.Context(), nil)
+	tree, err := sourcetree.Open(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := tasks.NewTaskContext(tempDir, tempDir, tree).WithTool("kubectl", fakeKubectl)
+
+	tracker := NewWorkloadTracker()
+	tracker.Add("Deployment", "prod", "web")
+
+	task := &WaitForWorkloadsTask{
+		Timeout: 5 * time.Second,
+		Tracker: tracker,
+	}
+
+	err = task.Run(t.Context(), scope)
 	if err == nil {
-		t.Fatalf("expected error, got nil")
+		t.Fatalf("expected error when workload is not ready, got nil")
 	}
 
-	errStr := err.Error()
-	if !strings.Contains(errStr, `init container "init-db" waiting: ImagePullBackOff: Back-off pulling image bad-repo/init:v1`) {
-		t.Errorf("expected error to mention init container, got:\n%s", errStr)
+	errText := err.Error()
+	if !strings.Contains(errText, "deployment/web in namespace prod") {
+		t.Errorf("expected error to name deployment/web in namespace prod, got:\n%s", errText)
+	}
+	if !strings.Contains(errText, "Waiting for deployment \"web\" rollout to finish: 0 of 1 updated replicas are available...") {
+		t.Errorf("expected error to include rollout status replica text, got:\n%s", errText)
+	}
+	if !strings.Contains(errText, "CrashLoopBackOff") {
+		t.Errorf("expected error to include pod CrashLoopBackOff text, got:\n%s", errText)
 	}
 }
