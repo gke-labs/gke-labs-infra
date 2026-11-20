@@ -17,10 +17,12 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/applyset"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
@@ -45,6 +47,9 @@ type DeployOptions struct {
 	Cluster      string
 	ApplySet     string
 	Targets      []string
+	Wait         *bool
+	NoWait       bool
+	Timeout      time.Duration
 
 	TargetCluster k8s.KubeCluster
 	kindCluster   string
@@ -53,10 +58,31 @@ type DeployOptions struct {
 	plans []deployPlan
 }
 
+// ShouldWait reports whether deploy should wait for applied workloads to be ready.
+func (opt DeployOptions) ShouldWait() bool {
+	if opt.NoWait {
+		return false
+	}
+	if opt.Wait != nil && !*opt.Wait {
+		return false
+	}
+	return true
+}
+
+// WaitTimeout returns the timeout for waiting for workloads to be ready.
+func (opt DeployOptions) WaitTimeout() time.Duration {
+	if opt.Timeout > 0 {
+		return opt.Timeout
+	}
+	return 5 * time.Minute
+}
+
 // BuildDeployCommand constructs the cobra command for "deploy".
 func BuildDeployCommand(rootOpt *RootOptions) *cobra.Command {
+	defaultWait := true
 	opt := DeployOptions{
 		RootOptions: rootOpt,
+		Wait:        &defaultWait,
 	}
 
 	cmd := &cobra.Command{
@@ -84,6 +110,9 @@ Flags configure the target cluster (--cluster), target namespace (-n, --namespac
 	cmd.Flags().StringVarP(&opt.Namespace, "namespace", "n", "", "Target namespace for namespaced manifests")
 	cmd.Flags().StringVar(&opt.Cluster, "cluster", "", "Target cluster (kind://<name> or kubeconfig context)")
 	cmd.Flags().StringVar(&opt.ApplySet, "applyset", "", "ApplySet parent object ([RESOURCE[.GROUP]/]NAME)")
+	cmd.Flags().BoolVar(opt.Wait, "wait", true, "Wait for deployed workloads (Deployments, DaemonSets, StatefulSets) to be ready")
+	cmd.Flags().BoolVar(&opt.NoWait, "no-wait", false, "Skip waiting for deployed workloads to be ready")
+	cmd.Flags().DurationVar(&opt.Timeout, "timeout", 5*time.Minute, "Timeout for waiting for workloads to be ready")
 
 	return cmd
 }
@@ -404,10 +433,10 @@ func BuildDeployPlan(opt DeployOptions, r *sourcetree.SourceTree, buildkitHost s
 		parentRef.Namespace = opt.Namespace
 	}
 	push := !opt.SkipPush && !tc.IsKind()
-	return buildDeployTasks(r, opt.plans, push, buildkitHost, opt.Namespace, tc, naming, parentRef)
+	return buildDeployTasks(r, opt.plans, push, buildkitHost, opt.Namespace, tc, naming, parentRef, opt.ShouldWait(), opt.WaitTimeout())
 }
 
-func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, buildkitHost string, namespace string, targetCluster k8s.KubeCluster, naming images.ImageNaming, parentRef *applyset.ParentRef) ([]tasks.Task, error) {
+func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, buildkitHost string, namespace string, targetCluster k8s.KubeCluster, naming images.ImageNaming, parentRef *applyset.ParentRef, wait bool, timeout time.Duration) ([]tasks.Task, error) {
 	repoRoot := r.RepoRoot()
 	var allTasks []tasks.Task
 
@@ -440,6 +469,27 @@ func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, b
 		originalNamespace = k8s.FindOriginalNamespaceInFiles(allManifests, nil)
 	}
 
+	tracker := k8s.NewWorkloadTracker()
+	hasKustomization := false
+
+	for _, plan := range plans {
+		for _, manifestPath := range plan.manifests {
+			if k8s.IsKustomization(manifestPath) {
+				hasKustomization = true
+				continue
+			}
+			content, err := os.ReadFile(manifestPath)
+			if err != nil {
+				scoped.Log(context.Background()).Fine("could not read manifest for pre-scanning workloads", "path", manifestPath, "error", err)
+				continue
+			}
+			workloads := k8s.ExtractWorkloadsFromYAML(string(content), namespace)
+			for _, w := range workloads {
+				tracker.Add(w.Kind, w.Namespace, w.Name)
+			}
+		}
+	}
+
 	for _, plan := range plans {
 		group := &tasks.Group{
 			Name: fmt.Sprintf("deploy-%s", filepath.Base(plan.dir)),
@@ -470,6 +520,7 @@ func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, b
 			Cluster:           targetCluster,
 			ApplySetID:        applySetID,
 			Membership:        membership,
+			Tracker:           tracker,
 		})
 		group.Tasks = append(group.Tasks, deployTasks)
 
@@ -478,6 +529,15 @@ func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, b
 
 	if updateTask != nil {
 		allTasks = append(allTasks, updateTask)
+	}
+
+	if wait && (len(tracker.Workloads()) > 0 || hasKustomization) {
+		allTasks = append(allTasks, &k8s.WaitForWorkloadsTask{
+			Cluster:   targetCluster,
+			Namespace: namespace,
+			Timeout:   timeout,
+			Tracker:   tracker,
+		})
 	}
 
 	return allTasks, nil

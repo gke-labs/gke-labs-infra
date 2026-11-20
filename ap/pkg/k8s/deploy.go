@@ -405,6 +405,7 @@ type DeployTaskOptions struct {
 	Cluster           KubeCluster
 	ApplySetID        string
 	Membership        *applyset.Membership
+	Tracker           *WorkloadTracker
 }
 
 // KubectlApplyTask represents a task to apply a single k8s manifest.
@@ -419,6 +420,7 @@ type KubectlApplyTask struct {
 	Cluster           KubeCluster
 	ApplySetID        string
 	Membership        *applyset.Membership
+	Tracker           *WorkloadTracker
 }
 
 func kustomizeBuild(ctx context.Context, scope *tasks.TaskContext, kustomizationPath string) ([]byte, error) {
@@ -569,6 +571,13 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 		return fmt.Errorf("kubectl apply failed for %s: %w", relPath, err)
 	}
 
+	if t.Tracker != nil {
+		workloads := ExtractWorkloadsFromYAML(replaced, t.Namespace)
+		for _, w := range workloads {
+			t.Tracker.Add(w.Kind, w.Namespace, w.Name)
+		}
+	}
+
 	// If this was a CRD, wait for it to be established
 	crdNames, err := getCRDNames(content)
 	if err != nil {
@@ -711,6 +720,7 @@ func DeployTasksForManifests(manifests []string, opts ...DeployTaskOptions) task
 			Cluster:           opt.Cluster,
 			ApplySetID:        opt.ApplySetID,
 			Membership:        opt.Membership,
+			Tracker:           opt.Tracker,
 		})
 	}
 

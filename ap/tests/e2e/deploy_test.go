@@ -119,7 +119,10 @@ spec:
 	t.Setenv("IMAGE_PREFIX", imagePrefix)
 
 	h.RunCmd(apBin, "deploy", "--cluster=kind-ap-deploy-kind-e2e")
-	h.RunCmd("kubectl", "rollout", "status", "deployment/my-app", "-n", ns, "--timeout=60s")
+	readyReplicas1 := strings.TrimSpace(h.RunCmd("kubectl", "get", "deployment", "my-app", "-n", ns, "-o", "jsonpath={.status.readyReplicas}"))
+	if readyReplicas1 != "1" {
+		t.Fatalf("expected 1 ready replica immediately after ap deploy, got %q", readyReplicas1)
+	}
 
 	appliedImage1 := strings.TrimSpace(h.RunCmd("kubectl", "get", "deployment", "my-app", "-n", ns, "-o", "jsonpath={.spec.template.spec.containers[0].image}"))
 	expectedPrefix1 := fmt.Sprintf("%s/my-app:latest-", imagePrefix)
@@ -135,7 +138,10 @@ spec:
 	}
 
 	h.RunCmd(apBin, "deploy", "--cluster=kind-ap-deploy-kind-e2e")
-	h.RunCmd("kubectl", "rollout", "status", "deployment/my-app", "-n", ns, "--timeout=60s")
+	readyReplicas2 := strings.TrimSpace(h.RunCmd("kubectl", "get", "deployment", "my-app", "-n", ns, "-o", "jsonpath={.status.readyReplicas}"))
+	if readyReplicas2 != "1" {
+		t.Fatalf("expected 1 ready replica immediately after ap deploy redeploy, got %q", readyReplicas2)
+	}
 
 	appliedImage2 := strings.TrimSpace(h.RunCmd("kubectl", "get", "deployment", "my-app", "-n", ns, "-o", "jsonpath={.spec.template.spec.containers[0].image}"))
 	if appliedImage2 == appliedImage1 {
@@ -153,7 +159,10 @@ spec:
 	// 3. Explicit IMAGE_TAG=v1.0 -> exact tag as given (no unique hex suffix)
 	t.Setenv("IMAGE_TAG", "v1.0")
 	h.RunCmd(apBin, "deploy", "--cluster=kind-ap-deploy-kind-e2e")
-	h.RunCmd("kubectl", "rollout", "status", "deployment/my-app", "-n", ns, "--timeout=60s")
+	readyReplicas3 := strings.TrimSpace(h.RunCmd("kubectl", "get", "deployment", "my-app", "-n", ns, "-o", "jsonpath={.status.readyReplicas}"))
+	if readyReplicas3 != "1" {
+		t.Fatalf("expected 1 ready replica immediately after ap deploy with explicit tag, got %q", readyReplicas3)
+	}
 
 	appliedImage3 := strings.TrimSpace(h.RunCmd("kubectl", "get", "deployment", "my-app", "-n", ns, "-o", "jsonpath={.spec.template.spec.containers[0].image}"))
 	expectedImage3 := fmt.Sprintf("%s/my-app:v1.0", imagePrefix)
