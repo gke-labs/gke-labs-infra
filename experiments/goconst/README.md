@@ -30,7 +30,7 @@ func main() {
     cfg := &MyConfig{Port: 8080, Host: "localhost"}
     c := goconst.WrapConst(cfg)
 
-    fmt.Println(c.Read().Port)
+    fmt.Println(c.Port)
 }
 ```
 
