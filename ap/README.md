@@ -401,7 +401,7 @@ When `ARTIFACTS` is set (for example, in CI workflows where it points to `/tmp/a
 
 Tasks should log via `scoped.Log(ctx)`, which returns a `scoped.Logger` writing into that leaf task's output buffer (command-level lines use the same form). Log messages should be constant strings with structured key/value pairs (`log.Info("msg", "key", "val")`, `log.Warn("msg", ...)`, `log.Error("msg", "error", err)`). The seven named levels and their `-v` values are: `Error`, `Warn`, and `Info` are always shown (`-v=0`), `Debug` shows at `-v=1`, `Fine` at `-v=2`, `Finer` at `-v=3`, and `Finest` at `-v=4`. Because task log lines and command outputs share the same buffer, log lines stay synchronized with command output and follow the unified task output policy.
 
-For built images, `ap` logs a summary line at default verbosity: `built <image> with <builder> in <duration>; sent <bytes>`. The builder is `docker` or the buildkit host (`k8s://namespace/service`). For `buildctl`, `bytes` is the build-context transfer total sent from the workstation, parsed from its progress stream. For Docker, the bytes clause is omitted because Docker buildx does not expose pushed-layer transfer totals.
+For built images, `ap` logs a summary line at default verbosity: `built image image=<image> builder=<builder> duration=<duration>` (with `sent=<bytes>` when built with `buildctl`). The builder is `docker` or the buildkit host (`k8s://namespace/service`). For `buildctl`, `bytes` is the build-context transfer total sent from the workstation, parsed from its progress stream. For Docker, the `sent` key is omitted because Docker buildx does not expose pushed-layer transfer totals.
 
 Commands:
 - `init`: Initialize `.ap/` configuration for a repository

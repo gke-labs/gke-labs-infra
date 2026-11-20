@@ -388,11 +388,11 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 	if !t.Quiet {
 		contextSize := parseContextSizeFromPlain(&progressBuffer)
 		duration := time.Since(start)
+		kvs := []any{"image", t.ImageName, "builder", invocation.description, "duration", formatDuration(duration)}
 		if contextSize != "" {
-			scoped.Log(ctx).Info(fmt.Sprintf("built %s with %s in %s; sent %s", t.ImageName, invocation.description, formatDuration(duration), contextSize))
-		} else {
-			scoped.Log(ctx).Info(fmt.Sprintf("built %s with %s in %s", t.ImageName, invocation.description, formatDuration(duration)))
+			kvs = append(kvs, "sent", contextSize)
 		}
+		scoped.Log(ctx).Info("built image", kvs...)
 	}
 
 	return nil
@@ -543,7 +543,7 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContex
 
 	if !t.Quiet {
 		duration := time.Since(start)
-		scoped.Log(ctx).Info(fmt.Sprintf("built %s with docker in %s", t.ImageName, formatDuration(duration)))
+		scoped.Log(ctx).Info("built image", "image", t.ImageName, "builder", "docker", "duration", formatDuration(duration))
 	}
 
 	return nil
