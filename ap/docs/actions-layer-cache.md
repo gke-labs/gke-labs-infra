@@ -18,22 +18,26 @@ limitations under the License.
 
 ## Recommendation
 
-Adopt `actions/cache` with BuildKit `type=local` (configured with `mode=min` and
-`compression=uncompressed`) if eliminating credential access from pull request
-code is the primary requirement, or BuildKit native `type=gha` if fine-grained
-per-layer caching and zero host disk footprint take precedence.
+Adopt `actions/cache` with BuildKit `type=local` (configured with
+`compression=uncompressed` and save scoped strictly to the default branch). It
+is the only mechanism that satisfies the requirement that cache credentials
+never reach code executed by a pull request.
 
-Under `type=gha`, any step that runs `ap build` in a pull request must receive
-`ACTIONS_RUNTIME_TOKEN` to authenticate cache reads. Because that step executes
-presubmit scripts from the pull request's own branch (`dev/ci/presubmits/`), PR
-code can inspect its environment and read the token. While GitHub scopes PR
-writes to `refs/pull/<PR>/merge`, PR writes count against the repository's 10 GB
-quota and can evict the default branch's entries.
+BuildKit's native `type=gha` backend cannot meet this requirement: reading from
+the cache API requires `ACTIONS_RUNTIME_TOKEN`, which must be supplied to the
+build step. Because that step executes the presubmit script
+(`dev/ci/presubmits/ap-build`) and workspace code from the pull request's own
+tree, untrusted PR code can read the token. While GitHub scopes PR writes to
+`refs/pull/<PR>/merge`, PR writes still count against the repository's 10 GB
+quota and can evict canonical entries via LRU. Adopting `type=gha` would require
+formally relaxing the security requirement to permit PR-scoped token exposure
+during presubmits.
 
-Under `actions/cache` with `type=local`, the cache is restored in a separate
-action step before the build runs and saved after; the presubmit script and PR
-code receive zero credentials. In return, it requires ~8.0 GB of disk space
-during save on a 3.1 GB image and restores monolithically.
+Under `actions/cache` with `type=local`, cache is restored in a dedicated action
+step before the presubmit script runs and saved in an action step after; the
+presubmit script and PR code receive zero credentials. In return, it requires
+~8.0–10.6 GB of runner disk space during save on multi-gigabyte images and
+restores as a monolithic archive.
 
 ## 1. Credential Distribution and Scoping
 
@@ -48,12 +52,13 @@ v0.38.1].
 
 Four mechanisms exist to manage these credentials:
 
-- **`actions/cache` with BuildKit `type=local` (Zero Credentials in PR Code)**:
-  Evaluated first. The generated workflow invokes `actions/cache/restore` before
-  the build and `actions/cache/save` on push to the default branch. BuildKit
-  reads cache via `--cache-from type=local,src=<dir>` and writes via
-  `--cache-to type=local,dest=<dir>,mode=min,compression=uncompressed` [tried:
-  local buildx v0.38.1].
+- **`actions/cache` with BuildKit `type=local` (Meets Requirement: Zero
+  Credentials in PR Code)**: Evaluated first. The generated workflow invokes
+  `actions/cache/restore` before the build and `actions/cache/save` on push to
+  the default branch. BuildKit reads cache via `--cache-from
+  type=local,src=<dir>` and writes via `--cache-to
+  type=local,dest=<dir>,mode=min|max,compression=uncompressed` [tried: local
+  buildx v0.38.1].
   - *Who reads token*: No process in the job environment ever sees credentials.
     GitHub's runner passes the token internally to `actions/cache` [not tried:
     live workflow].
@@ -61,23 +66,33 @@ Four mechanisms exist to manage these credentials:
     step entirely, preventing any PR script from calling the cache API [not
     tried: live workflow].
   - *Third-party publisher*: None; uses official `actions/cache`.
-  - *Measurements (3.1 GB image)*: Uncompressed local cache export takes 3.1 GB
-    on disk and ~15 s [tried: local buildx v0.38.1]. `actions/cache` compresses
-    this into a ~1.8 GB archive (~30 s) and uploads (~25 s) [tried: local tar/
-    gzip; not tried in CI]. Total disk footprint during save: 3.1 GB (daemon) +
-    3.1 GB (layout) + 1.8 GB (tar) = 8.0 GB (fits on the ~14 GB runner disk
-    when workspace cleanup runs). In contrast, `mode=min,compression=gzip` takes
-    6.7 GB disk but suffers double compression. `mode=max` includes intermediate
-    build stages, reaching 9.3 GB disk [tried: local buildx v0.38.1].
+  - *`mode=min` vs. `mode=max` in multi-stage builds*: `mode=min` exports only
+    the layers of the final image. Intermediate build stages (e.g., compiling
+    native C++/CUDA kernels or building dependencies in builder stages) are not
+    cached. For images with heavy compilation stages, such as `vxpu-executor` in
+    gke-labs/generation-ai#752 where native compilation accounts for most of the
+    4–5 min build, `mode=min` saves very little time, failing to match the
+    562 s → 176 s saving measured with `type=gha` (which used `mode=max`).
+    Caching those intermediate stages requires `mode=max`.
+  - *Disk measurements (3.1 GB final image)*:
+    - `mode=min, compression=uncompressed`: Cache directory takes 3.1 GB on
+      disk (~15 s export). `actions/cache` compresses this to ~1.8 GB (~30 s)
+      [tried: local buildx v0.38.1 and tar]. Total disk footprint during save:
+      3.1 GB (daemon) + 3.1 GB (layout) + 1.8 GB (tar) = 8.0 GB.
+    - `mode=max, compression=uncompressed`: Intermediate builder layers add ~1.0
+      GB [tried: local buildx v0.38.1 multi-stage benchmark]. The uncompressed
+      cache layout is ~4.1 GB, and the tar archive is ~2.4 GB. Total disk
+      footprint during save: 4.1 GB (daemon) + 4.1 GB (layout) + 2.4 GB (tar) =
+      ~10.6 GB. On a runner with ~14 GB free space, 10.6 GB leaves ~3.4 GB
+      headroom.
 - **Small Action in this Repository (`gke-labs-infra/actions/cache-token`)**:
   Extracts runtime credentials from the action context and provides them as
   masked step outputs to the build step [not tried: action implementation].
-  - *Who reads token*: In push to default branch, trusted code from the default
-    branch holds the token. In pull requests (internal or fork), the presubmit
-    script (`dev/ci/presubmits/ap-build`) and any tools invoked from the PR tree
-    run inside that step and *can* read `ACTIONS_RUNTIME_TOKEN`. Step outputs
-    prevent *later* steps from seeing the token, but cannot isolate it from code
-    executed in the build step itself.
+  - *Who reads token*: In push to default branch, trusted code holds the token.
+    In pull requests, the presubmit script (`dev/ci/presubmits/ap-build`) and
+    any tools invoked from the PR tree run inside that step and *can* read
+    `ACTIONS_RUNTIME_TOKEN`. Step outputs keep the token from *later* steps, but
+    cannot isolate it from code executed in the build step itself.
   - *Scoping & cleanup*: The token cannot be stripped by `ap` because BuildKit
     needs it in its process environment to authenticate HTTP cache requests.
   - *Third-party publisher*: None; maintained in this repository.
@@ -117,7 +132,7 @@ Four mechanisms exist to manage these credentials:
     saving the same key collide with "unable to reserve cache" [tried: gke-labs/
     generation-ai#752]. Only `ap-build` saves; `ap-e2e-*` jobs strictly restore.
 
-## 3. Cost of a Cache Miss and Layer Selection
+## 3. Cost of a Cache Miss, Cost of a Hit, and Layer Selection
 
 - **Miss Cost in Pull Requests**:
   - With `actions/cache` + `type=local`: Restore probe is a single HTTP GET
@@ -136,17 +151,22 @@ Four mechanisms exist to manage these credentials:
     vs baseline, -173 s vs miss) [tried: gke-labs/generation-ai#752].
   - With `actions/cache` + `type=local`: Local export takes ~15 s, tarring
     takes ~30 s, and upload takes ~25 s, totaling ~70 s overhead on push [tried:
-    local buildx v0.38.1 and tar; not tried in CI]. On restore, download (25 s),
-    extraction (15 s), and BuildKit import (20 s) total ~60 s to restore.
+    local buildx v0.38.1 and tar; not tried in CI].
+- **Cost of a Hit and Break-Even**: With `actions/cache` + `type=local`, a cache
+  hit restores one archive every run (~60 s total: ~25 s download, ~15 s
+  extract, ~20 s BuildKit import [tried: local buildx v0.38.1 and tar; not tried
+  in CI]). A build must take longer than ~60 s from scratch for restoring to pay,
+  and the duration threshold for saving must be set above it (e.g., > 90 s) so
+  fast builds are not slowed down.
 - **Layer Selection Without Dockerfile Parsing**:
   Regex matching on Dockerfile instructions (`pip install`, `cuda`, `cmake`) is
   brittle and misclassifies custom build steps [not tried]. Two non-parsing
   alternatives exist:
   1. *Build Duration Threshold (Recommended)*: Always restore (`--cache-from`).
      Save (`--cache-to`) on the default branch only if the build that just ran
-     took longer than a threshold (e.g., > 60 s). Fast builds (< 15 s) skip cache
-     export entirely, avoiding upload overhead and preserving quota [not tried:
-     ap implementation].
+     took longer than a threshold (e.g., > 90 s, above the ~60 s restore
+     break-even). Fast builds skip cache export, avoiding upload overhead and
+     preserving quota [not tried: ap implementation].
   2. *Export Size Threshold*: Save only if the built image or exported layers
      exceed a minimum size (e.g., > 500 MB) [not tried: ap implementation].
 
@@ -186,12 +206,19 @@ Four mechanisms exist to manage these credentials:
 
 ## Decisions for the Maintainer
 
-1. **Security vs. Cache Granularity**: Choose `actions/cache` + `type=local`
-   (`mode=min, compression=uncompressed`) to guarantee zero credential exposure
-   to pull request code (accepting monolithic archives and ~8 GB save disk usage),
-   or native `type=gha` to gain layer-by-layer streaming (accepting that PR code
-   in the build step can access a PR-scoped runtime token).
-2. **Layer Selection Mechanism**: Select build duration threshold (e.g., save
-   only if build > 60 s, no Dockerfile parsing) vs. static instruction matching.
-3. **Dedicated Exporter Job**: Confirm that only `ap-build` saves cache on push
+1. **Adopt Zero-Credential Mechanism or Relax Requirement**: Adopt
+   `actions/cache` + `type=local` (recommended: the only option where pull
+   request code never holds cache credentials, accepting ~8.0–10.6 GB disk
+   footprint during save and monolithic restores), or formally relax the
+   security requirement to allow `type=gha` (exposing PR-scoped runtime tokens
+   to presubmit scripts in exchange for per-layer network streaming and zero host
+   disk footprint).
+2. **Multi-Stage Cache Mode for `type=local`**: Choose `mode=min` (safer ~8.0 GB
+   save disk footprint, but does not cache intermediate compiler stages) vs.
+   `mode=max` (caches intermediate stages like native compilation to achieve
+   speedup, but consumes ~10.6 GB disk during save).
+3. **Duration Threshold vs. Heuristics**: Set the save duration threshold above
+   the ~60 s restore break-even (e.g., > 90 s, no Dockerfile parsing) vs. static
+   Dockerfile instruction matching.
+4. **Dedicated Exporter Job**: Confirm that only `ap-build` saves cache on push
    to the default branch, while all other jobs (`ap-e2e-*`) strictly restore.
