@@ -28,6 +28,8 @@ type actionVersions struct {
 	checkout       string
 	setupGo        string
 	uploadArtifact string
+	cacheRestore   string
+	cacheSave      string
 }
 
 var (
@@ -41,6 +43,8 @@ var (
 	actionCheckout       = actions.checkout
 	actionSetupGo        = actions.setupGo
 	actionUploadArtifact = actions.uploadArtifact
+	actionCacheRestore   = actions.cacheRestore
+	actionCacheSave      = actions.cacheSave
 )
 
 // parseActionVersions parses action references from action.yml using plain string parsing.
@@ -78,6 +82,10 @@ func parseActionVersions(content []byte) (actionVersions, error) {
 			versions.setupGo = ref
 		case "actions/upload-artifact":
 			versions.uploadArtifact = ref
+		case "actions/cache/restore":
+			versions.cacheRestore = ref
+		case "actions/cache/save":
+			versions.cacheSave = ref
 		default:
 			return actionVersions{}, fmt.Errorf("line %d: unknown action %q", lineNum+1, actionName)
 		}
@@ -90,6 +98,12 @@ func parseActionVersions(content []byte) (actionVersions, error) {
 	}
 	if versions.uploadArtifact == "" {
 		return actionVersions{}, fmt.Errorf("missing action actions/upload-artifact in action.yml")
+	}
+	if versions.cacheRestore == "" {
+		return actionVersions{}, fmt.Errorf("missing action actions/cache/restore in action.yml")
+	}
+	if versions.cacheSave == "" {
+		return actionVersions{}, fmt.Errorf("missing action actions/cache/save in action.yml")
 	}
 	return versions, nil
 }

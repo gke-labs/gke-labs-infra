@@ -42,20 +42,26 @@ func TestParseActionVersions_Errors(t *testing.T) {
 	validCheckout := "    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7.0.1\n"
 	validSetupGo := "    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # ratchet:actions/setup-go@v7.0.0\n"
 	validUploadArtifact := "    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2\n"
+	validCacheRestore := "    - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # ratchet:actions/cache/restore@v6.1.0\n"
+	validCacheSave := "    - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # ratchet:actions/cache/save@v6.1.0\n"
+
+	allValid := validCheckout + validSetupGo + validUploadArtifact + validCacheRestore + validCacheSave
 
 	cases := []struct {
 		name      string
 		content   string
 		errSubstr string
 	}{
-		{"missing checkout", validSetupGo + validUploadArtifact, "missing action actions/checkout"},
-		{"missing setup-go", validCheckout + validUploadArtifact, "missing action actions/setup-go"},
-		{"missing upload-artifact", validCheckout + validSetupGo, "missing action actions/upload-artifact"},
-		{"empty uses", validSetupGo + validUploadArtifact + "    - uses:\n", "empty uses reference"},
-		{"missing @", validSetupGo + validUploadArtifact + "    - uses: actions/checkout\n", "missing '@'"},
-		{"short SHA", validSetupGo + validUploadArtifact + "    - uses: actions/checkout@1234 # ratchet:actions/checkout@v7.0.1\n", "not pinned to a full 40-char commit SHA"},
-		{"missing ratchet comment", validSetupGo + validUploadArtifact + "    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n", "missing ratchet comment"},
-		{"unknown action", validCheckout + validSetupGo + validUploadArtifact + "    - uses: other/action@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:other/action@v1\n", "unknown action"},
+		{"missing checkout", validSetupGo + validUploadArtifact + validCacheRestore + validCacheSave, "missing action actions/checkout"},
+		{"missing setup-go", validCheckout + validUploadArtifact + validCacheRestore + validCacheSave, "missing action actions/setup-go"},
+		{"missing upload-artifact", validCheckout + validSetupGo + validCacheRestore + validCacheSave, "missing action actions/upload-artifact"},
+		{"missing cache-restore", validCheckout + validSetupGo + validUploadArtifact + validCacheSave, "missing action actions/cache/restore"},
+		{"missing cache-save", validCheckout + validSetupGo + validUploadArtifact + validCacheRestore, "missing action actions/cache/save"},
+		{"empty uses", allValid + "    - uses:\n", "empty uses reference"},
+		{"missing @", allValid + "    - uses: actions/checkout\n", "missing '@'"},
+		{"short SHA", allValid + "    - uses: actions/checkout@1234 # ratchet:actions/checkout@v7.0.1\n", "not pinned to a full 40-char commit SHA"},
+		{"missing ratchet comment", allValid + "    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n", "missing ratchet comment"},
+		{"unknown action", allValid + "    - uses: other/action@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:other/action@v1\n", "unknown action"},
 	}
 
 	for _, tc := range cases {
