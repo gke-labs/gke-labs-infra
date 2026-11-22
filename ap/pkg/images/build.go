@@ -362,12 +362,26 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 		buildctlArgs = append(buildctlArgs, "--opt", "platform="+strings.Join(platforms, ","))
 	}
 
+	cache := setupLayerCache(ctx, t.ImageName, filepath.Join(root, relDockerfilePath))
+	if cache.importArg != "" {
+		buildctlArgs = append(buildctlArgs, "--import-cache", cache.importArg)
+	}
+	if cache.exportArg != "" {
+		buildctlArgs = append(buildctlArgs, "--export-cache", cache.exportArg)
+	}
+
 	var progressBuffer bytes.Buffer
 
 	command := execCommandContext(ctx, buildctlBinary, buildctlArgs...)
 	command.Dir = root
-	command.Stdout = scope.Stdout()
-	command.Stderr = io.MultiWriter(scope.Stderr(), &progressBuffer)
+	if scope.Stdout() == scope.Stderr() {
+		merged := io.MultiWriter(scope.Stderr(), &progressBuffer)
+		command.Stdout = merged
+		command.Stderr = merged
+	} else {
+		command.Stdout = scope.Stdout()
+		command.Stderr = io.MultiWriter(scope.Stderr(), &progressBuffer)
+	}
 
 	environment := fileutils.PrependPath(os.Environ(), filepath.Dir(buildctlBinary))
 	if invocation.extraPathDirectory != "" {
@@ -376,8 +390,15 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 	command.Env = append(environment, "BUILDKIT_HOST="+invocation.address)
 
 	if err := command.Run(); err != nil {
+		if cache.stagingDirectory != "" {
+			if rmErr := os.RemoveAll(cache.stagingDirectory); rmErr != nil && !os.IsNotExist(rmErr) {
+				scoped.Log(ctx).Warn("failed to clean staging directory", "dir", cache.stagingDirectory, "error", rmErr)
+			}
+		}
 		return fmt.Errorf("buildctl build failed for %s: %w", t.ImageName, err)
 	}
+
+	cache.evaluate(ctx, t.ImageName, &progressBuffer)
 
 	digest := extractDigestFromMetadataFile(metadataFile)
 	if naming.Tag == "latest" && digest != "" {
@@ -478,6 +499,7 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContex
 
 	args := []string{
 		"build",
+		"--progress=plain",
 		"-t", fullImageName,
 		"-f", relDockerfilePath,
 		"--build-arg", "IMAGE_PREFIX=" + naming.Prefix,
@@ -503,16 +525,39 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContex
 			args = append(args, "--platform", platforms[0])
 		}
 	}
+	cache := setupLayerCache(ctx, t.ImageName, filepath.Join(root, relDockerfilePath))
+	if cache.importArg != "" {
+		args = append(args, "--cache-from", cache.importArg)
+	}
+	if cache.exportArg != "" {
+		args = append(args, "--cache-to", cache.exportArg)
+	}
 	args = append(args, ".")
 
+	var progressBuffer bytes.Buffer
 	cmd := execCommandContext(ctx, buildxBin, args...)
 	cmd.Dir = root
-	cmd.Stdout = scope.Stdout()
-	cmd.Stderr = scope.Stderr()
+	if scope.Stdout() == scope.Stderr() {
+		merged := io.MultiWriter(scope.Stderr(), &progressBuffer)
+		cmd.Stdout = merged
+		cmd.Stderr = merged
+	} else {
+		cmd.Stdout = scope.Stdout()
+		cmd.Stderr = io.MultiWriter(scope.Stderr(), &progressBuffer)
+	}
 	cmd.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(buildxBin))
 	if err := cmd.Run(); err != nil {
+		if cache.stagingDirectory != "" {
+			if rmErr := os.RemoveAll(cache.stagingDirectory); rmErr != nil && !os.IsNotExist(rmErr) {
+				scoped.Log(ctx).Warn("failed to clean staging directory", "dir", cache.stagingDirectory, "error", rmErr)
+			}
+		}
 		return fmt.Errorf("docker build failed for %s: %w", t.ImageName, err)
 	}
+
+	duration := time.Since(start)
+
+	cache.evaluate(ctx, t.ImageName, &progressBuffer)
 
 	digest := extractDigestFromMetadataFile(metaFile)
 	if digest == "" {
@@ -542,11 +587,363 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContex
 	}
 
 	if !t.Quiet {
-		duration := time.Since(start)
 		scoped.Log(ctx).Info("built image", "image", t.ImageName, "builder", "docker", "duration", formatDuration(duration))
 	}
 
 	return nil
+}
+
+const layerCacheDirectoryName = "ap-layer-cache"
+
+type imageCacheMetadata struct {
+	DockerfileHash string             `json:"dockerfileHash"`
+	ExportDuration float64            `json:"exportDurationSeconds"`
+	StepDurations  map[string]float64 `json:"stepDurations"`
+	Dropped        bool               `json:"dropped,omitempty"`
+}
+
+type layerCache struct {
+	importArg        string
+	exportArg        string
+	finalDirectory   string
+	stagingDirectory string
+	dockerfileHash   string
+	hasExistingMeta  bool
+	existingMeta     imageCacheMetadata
+}
+
+func getLayerCacheRoot() string {
+	if os.Getenv("GITHUB_ACTIONS") != "true" {
+		return ""
+	}
+	runnerTemp := os.Getenv("RUNNER_TEMP")
+	if runnerTemp == "" {
+		return ""
+	}
+	return filepath.Join(runnerTemp, layerCacheDirectoryName)
+}
+
+func hashDockerfile(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:])
+}
+
+func setupLayerCache(ctx context.Context, imageName, dockerfilePath string) layerCache {
+	cacheRoot := getLayerCacheRoot()
+	if cacheRoot == "" {
+		return layerCache{}
+	}
+
+	finalDirectory := filepath.Join(cacheRoot, imageName)
+	stagingDirectory := filepath.Join(cacheRoot, imageName+"-stage")
+	metaFile := filepath.Join(finalDirectory, "metadata.json")
+	dockerfileHash := hashDockerfile(dockerfilePath)
+
+	var existingMeta imageCacheMetadata
+	hasExistingMeta := false
+	data, err := os.ReadFile(metaFile)
+	if err == nil {
+		if unmarshalErr := json.Unmarshal(data, &existingMeta); unmarshalErr == nil {
+			hasExistingMeta = true
+		} else {
+			scoped.Log(ctx).Warn("failed to parse metadata file", "path", metaFile, "error", unmarshalErr)
+		}
+	} else if !os.IsNotExist(err) {
+		scoped.Log(ctx).Warn("failed to read metadata file", "path", metaFile, "error", err)
+	}
+
+	if hasExistingMeta && existingMeta.Dropped && existingMeta.DockerfileHash == dockerfileHash {
+		return layerCache{}
+	}
+
+	var importArg string
+	if _, statErr := os.Stat(filepath.Join(finalDirectory, "index.json")); statErr == nil {
+		importArg = "type=local,src=" + finalDirectory
+		scoped.Log(ctx).Info("restoring layer cache", "image", imageName, "src", finalDirectory)
+	} else if !os.IsNotExist(statErr) {
+		scoped.Log(ctx).Warn("failed to check layer cache index", "dir", finalDirectory, "error", statErr)
+	}
+
+	var exportArg string
+	if isCacheSaveAllowed() {
+		exportArg = fmt.Sprintf("type=local,dest=%s,mode=max,compression=uncompressed", stagingDirectory)
+		if err := os.RemoveAll(stagingDirectory); err != nil && !os.IsNotExist(err) {
+			scoped.Log(ctx).Warn("failed to clean staging layer cache directory", "dir", stagingDirectory, "error", err)
+		}
+		if err := os.MkdirAll(stagingDirectory, 0755); err != nil {
+			scoped.Log(ctx).Warn("failed to create staging layer cache directory", "dir", stagingDirectory, "error", err)
+		}
+	}
+
+	return layerCache{
+		importArg:        importArg,
+		exportArg:        exportArg,
+		finalDirectory:   finalDirectory,
+		stagingDirectory: stagingDirectory,
+		dockerfileHash:   dockerfileHash,
+		hasExistingMeta:  hasExistingMeta,
+		existingMeta:     existingMeta,
+	}
+}
+
+func (c layerCache) evaluate(ctx context.Context, imageName string, progress io.Reader) {
+	if c.exportArg == "" {
+		return
+	}
+	stats := parseBuildKitProgress(progress)
+	exportDuration := stats.exportDuration
+	if exportDuration <= 0 {
+		exportDuration = 5.0
+	}
+
+	if !c.hasExistingMeta || len(c.existingMeta.StepDurations) == 0 {
+		meta := imageCacheMetadata{
+			DockerfileHash: c.dockerfileHash,
+			ExportDuration: exportDuration,
+			StepDurations:  stats.stepDurations,
+		}
+		data, marshalErr := json.MarshalIndent(meta, "", "  ")
+		if marshalErr != nil {
+			scoped.Log(ctx).Warn("failed to marshal metadata", "error", marshalErr)
+			return
+		}
+		if writeErr := os.WriteFile(filepath.Join(c.stagingDirectory, "metadata.json"), data, 0644); writeErr != nil {
+			scoped.Log(ctx).Warn("failed to write metadata file", "error", writeErr)
+			return
+		}
+		if rmErr := os.RemoveAll(c.finalDirectory); rmErr != nil && !os.IsNotExist(rmErr) {
+			scoped.Log(ctx).Warn("failed to clean final directory", "dir", c.finalDirectory, "error", rmErr)
+		}
+		if renameErr := os.Rename(c.stagingDirectory, c.finalDirectory); renameErr != nil {
+			scoped.Log(ctx).Warn("failed to promote staging directory", "error", renameErr)
+			return
+		}
+		scoped.Log(ctx).Info("evaluated layer cache", "image", imageName, "saved", "0s", "cost", formatDuration(time.Duration(exportDuration*float64(time.Second))), "action", "kept")
+		finalizeLayerCache(ctx)
+		return
+	}
+
+	var savedSeconds float64
+	for step := range stats.cachedSteps {
+		if d, ok := c.existingMeta.StepDurations[step]; ok {
+			savedSeconds += d
+		}
+	}
+	costSeconds := c.existingMeta.ExportDuration + 5.0
+
+	if savedSeconds <= costSeconds {
+		if rmErr := os.RemoveAll(c.stagingDirectory); rmErr != nil && !os.IsNotExist(rmErr) {
+			scoped.Log(ctx).Warn("failed to clean staging directory", "dir", c.stagingDirectory, "error", rmErr)
+		}
+		if rmErr := os.RemoveAll(c.finalDirectory); rmErr != nil && !os.IsNotExist(rmErr) {
+			scoped.Log(ctx).Warn("failed to clean final directory", "dir", c.finalDirectory, "error", rmErr)
+		}
+		if mkdirErr := os.MkdirAll(c.finalDirectory, 0755); mkdirErr != nil {
+			scoped.Log(ctx).Warn("failed to create final directory", "dir", c.finalDirectory, "error", mkdirErr)
+			return
+		}
+		droppedMeta := imageCacheMetadata{
+			DockerfileHash: c.dockerfileHash,
+			Dropped:        true,
+		}
+		data, marshalErr := json.MarshalIndent(droppedMeta, "", "  ")
+		if marshalErr != nil {
+			scoped.Log(ctx).Warn("failed to marshal metadata", "error", marshalErr)
+			return
+		}
+		if writeErr := os.WriteFile(filepath.Join(c.finalDirectory, "metadata.json"), data, 0644); writeErr != nil {
+			scoped.Log(ctx).Warn("failed to write metadata file", "error", writeErr)
+			return
+		}
+		scoped.Log(ctx).Info("evaluated layer cache", "image", imageName, "saved", formatDuration(time.Duration(savedSeconds*float64(time.Second))), "cost", formatDuration(time.Duration(costSeconds*float64(time.Second))), "action", "dropped")
+		finalizeLayerCache(ctx)
+		return
+	}
+
+	hasNewSteps := false
+	for step := range stats.stepDurations {
+		if !stats.cachedSteps[step] {
+			hasNewSteps = true
+			break
+		}
+	}
+
+	if hasNewSteps {
+		if c.existingMeta.StepDurations == nil {
+			c.existingMeta.StepDurations = make(map[string]float64)
+		}
+		for k, v := range stats.stepDurations {
+			c.existingMeta.StepDurations[k] = v
+		}
+		c.existingMeta.ExportDuration = exportDuration
+		c.existingMeta.DockerfileHash = c.dockerfileHash
+		data, marshalErr := json.MarshalIndent(c.existingMeta, "", "  ")
+		if marshalErr != nil {
+			scoped.Log(ctx).Warn("failed to marshal metadata", "error", marshalErr)
+			return
+		}
+		if writeErr := os.WriteFile(filepath.Join(c.stagingDirectory, "metadata.json"), data, 0644); writeErr != nil {
+			scoped.Log(ctx).Warn("failed to write metadata file", "error", writeErr)
+			return
+		}
+		if rmErr := os.RemoveAll(c.finalDirectory); rmErr != nil && !os.IsNotExist(rmErr) {
+			scoped.Log(ctx).Warn("failed to clean final directory", "dir", c.finalDirectory, "error", rmErr)
+		}
+		if renameErr := os.Rename(c.stagingDirectory, c.finalDirectory); renameErr != nil {
+			scoped.Log(ctx).Warn("failed to promote staging directory", "error", renameErr)
+			return
+		}
+	} else {
+		if rmErr := os.RemoveAll(c.stagingDirectory); rmErr != nil && !os.IsNotExist(rmErr) {
+			scoped.Log(ctx).Warn("failed to clean staging directory", "dir", c.stagingDirectory, "error", rmErr)
+		}
+	}
+	scoped.Log(ctx).Info("evaluated layer cache", "image", imageName, "saved", formatDuration(time.Duration(savedSeconds*float64(time.Second))), "cost", formatDuration(time.Duration(costSeconds*float64(time.Second))), "action", "kept")
+	finalizeLayerCache(ctx)
+}
+
+func finalizeLayerCache(ctx context.Context) {
+	if !isCacheSaveAllowed() {
+		return
+	}
+	cacheRoot := getLayerCacheRoot()
+	if cacheRoot == "" {
+		return
+	}
+
+	entries, err := os.ReadDir(cacheRoot)
+	if err != nil {
+		return
+	}
+
+	h := sha256.New()
+	hasAnyMetadata := false
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		imageDir := filepath.Join(cacheRoot, entry.Name())
+		metaPath := filepath.Join(imageDir, "metadata.json")
+		data, err := os.ReadFile(metaPath)
+		if err != nil {
+			continue
+		}
+		hasAnyMetadata = true
+		h.Write([]byte(entry.Name()))
+		h.Write(data)
+	}
+
+	if !hasAnyMetadata {
+		return
+	}
+
+	hash := hex.EncodeToString(h.Sum(nil))
+	if len(hash) > 16 {
+		hash = hash[:16]
+	}
+	runnerOS := os.Getenv("RUNNER_OS")
+	if runnerOS == "" {
+		runnerOS = "Linux"
+	}
+	key := fmt.Sprintf("ap-layer-cache-%s-%s", runnerOS, hash)
+	if err := setGitHubActionsEnv(ctx, "AP_LAYER_CACHE_KEY", key); err != nil {
+		scoped.Log(ctx).Warn("failed to set AP_LAYER_CACHE_KEY in GITHUB_ENV", "error", err)
+	}
+	scoped.Log(ctx).Info("layer cache finalized", "key", key)
+}
+
+func setGitHubActionsEnv(ctx context.Context, name, value string) error {
+	githubEnv := os.Getenv("GITHUB_ENV")
+	if githubEnv == "" {
+		return nil
+	}
+	f, err := os.OpenFile(githubEnv, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	_, printErr := fmt.Fprintf(f, "%s=%s\n", name, value)
+	closeErr := f.Close()
+	if printErr != nil {
+		return printErr
+	}
+	return closeErr
+}
+
+func isCacheSaveAllowed() bool {
+	return os.Getenv("GITHUB_ACTIONS") == "true" && os.Getenv("GITHUB_EVENT_NAME") == "push"
+}
+
+type buildStepStats struct {
+	stepDurations  map[string]float64
+	cachedSteps    map[string]bool
+	exportDuration float64
+}
+
+func isBuildStep(desc string) bool {
+	if !strings.HasPrefix(desc, "[") {
+		return false
+	}
+	if strings.HasPrefix(desc, "[internal]") || strings.HasPrefix(desc, "[auth]") {
+		return false
+	}
+	return true
+}
+
+func parseBuildKitProgress(r io.Reader) buildStepStats {
+	scanner := bufio.NewScanner(r)
+	stepDescriptions := make(map[string]string)
+	stepDurations := make(map[string]float64)
+	cachedSteps := make(map[string]bool)
+	var exportDuration float64
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line[1:], " ", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		vertexID := parts[0]
+		rest := strings.TrimSpace(parts[1])
+
+		if strings.HasPrefix(rest, "[") || strings.Contains(rest, "exporting cache") {
+			stepDescriptions[vertexID] = rest
+		} else if rest == "CACHED" || strings.HasPrefix(rest, "CACHED ") {
+			if desc, ok := stepDescriptions[vertexID]; ok {
+				cachedSteps[desc] = true
+			}
+		} else if strings.HasPrefix(rest, "DONE ") {
+			fields := strings.Fields(rest)
+			if len(fields) >= 2 {
+				durStr := fields[1]
+				dur, parseErr := time.ParseDuration(durStr)
+				if parseErr != nil {
+					continue
+				}
+				sec := dur.Seconds()
+				if desc, ok := stepDescriptions[vertexID]; ok {
+					if strings.Contains(desc, "exporting cache") {
+						exportDuration = sec
+					} else if isBuildStep(desc) {
+						stepDurations[desc] = sec
+					}
+				}
+			}
+		}
+	}
+
+	return buildStepStats{
+		stepDurations:  stepDurations,
+		cachedSteps:    cachedSteps,
+		exportDuration: exportDuration,
+	}
 }
 
 // parseContextSizeFromPlain parses a buildctl --progress=plain stream and returns
