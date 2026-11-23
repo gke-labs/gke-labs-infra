@@ -335,7 +335,7 @@ func TestGithubActionsWorkflowLayerCache(t *testing.T) {
         uses: %s
         with:
           path: ${{ runner.temp }}/ap-layer-cache
-          key: ${{ env.AP_LAYER_CACHE_KEY || format('ap-layer-cache-{0}-{1}', runner.os, github.sha) }}
+          key: ap-layer-cache-${{ runner.os }}-
           restore-keys: |
             ap-layer-cache-${{ runner.os }}-`, actionCacheRestore)
 

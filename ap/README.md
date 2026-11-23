@@ -49,7 +49,7 @@ Presubmit scripts may write anything to `$ARTIFACTS` (set to `/tmp/artifacts` in
 
 ### Image Layer Caching in CI
 
-When building container images inside GitHub Actions (`GITHUB_ACTIONS=true`), `ap` caches image layers in GitHub's Actions cache using a local BuildKit cache directory under the runner's temporary directory (`${{ runner.temp }}/ap-layer-cache`). Layer caches are restored before `ap-build` and saved only on pushes to the default branch after builds complete. Fast builds skip cache saving to preserve cache quota. Pull requests strictly restore layer caches and cannot write or overwrite cache entries. Outside GitHub Actions, layer caching is inactive and behavior is unchanged.
+When building container images inside GitHub Actions (`GITHUB_ACTIONS=true`), `ap` caches image layers in GitHub's Actions cache using a local BuildKit cache directory under the runner's temporary directory (`${{ runner.temp }}/ap-layer-cache`). Layer caches are restored before `ap-build` and saved only on pushes to the default branch after builds complete. Pull requests strictly restore layer caches and cannot write or overwrite cache entries. At export `ap` records per-step durations next to the image cache; on subsequent builds importing that cache, `ap` compares the time saved by cached steps against the cache cost (export time plus restore share), dropping and bypassing unprofitable image caches until their Dockerfile changes. Outside GitHub Actions, layer caching is inactive and behavior is unchanged.
 
 
 ### Output Atomicity and Verification

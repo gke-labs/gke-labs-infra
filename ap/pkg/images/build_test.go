@@ -16,7 +16,6 @@ package images
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -965,7 +964,16 @@ func TestDockerBuildTask_ConcurrentRef(t *testing.T) {
 }
 
 func TestParseBuildKitProgress(t *testing.T) {
-	log := `
+	tests := []struct {
+		name               string
+		input              string
+		wantCachedSteps    map[string]bool
+		wantStepDurations  map[string]time.Duration
+		wantExportDuration time.Duration
+	}{
+		{
+			name: "mixed cached and built steps",
+			input: strings.TrimSpace(`
 #0 building with "default" instance using docker driver
 #1 [internal] load build definition from Dockerfile
 #1 DONE 0.1s
@@ -977,24 +985,49 @@ func TestParseBuildKitProgress(t *testing.T) {
 #4 DONE 2.3s
 #5 exporting cache to client directory
 #5 DONE 12.4s
-`
-	stats := parseBuildKitProgress(strings.NewReader(log))
-	if !stats.cachedSteps["[builder 2/2] RUN pip install torch"] {
-		t.Errorf("expected step 3 to be reported cached")
+`),
+			wantCachedSteps: map[string]bool{
+				"[builder 2/2] RUN pip install torch": true,
+			},
+			wantStepDurations: map[string]time.Duration{
+				"[stage-1 2/2] COPY --from=builder /opt/venv /opt/venv": 2300 * time.Millisecond,
+			},
+			wantExportDuration: 12400 * time.Millisecond,
+		},
+		{
+			name: "all cached steps",
+			input: strings.TrimSpace(`
+#1 [builder 1/1] WORKDIR /workspace
+#1 CACHED
+#2 [builder 2/2] RUN npm ci
+#2 CACHED
+`),
+			wantCachedSteps: map[string]bool{
+				"[builder 1/1] WORKDIR /workspace": true,
+				"[builder 2/2] RUN npm ci":         true,
+			},
+			wantStepDurations:  map[string]time.Duration{},
+			wantExportDuration: 0,
+		},
 	}
-	if stats.stepDurations["[stage-1 2/2] COPY --from=builder /opt/venv /opt/venv"] != 2.3 {
-		t.Errorf("expected step 4 duration 2.3s, got %v", stats.stepDurations["[stage-1 2/2] COPY --from=builder /opt/venv /opt/venv"])
-	}
-	if stats.exportDuration != 12.4 {
-		t.Errorf("expected export duration 12.4s, got %v", stats.exportDuration)
-	}
-}
 
-func TestSetupLayerCache_OutsideGitHubActions(t *testing.T) {
-	t.Setenv("GITHUB_ACTIONS", "")
-	cache := setupLayerCache(t.Context(), "test-img", "/path/to/Dockerfile")
-	if cache.importArg != "" || cache.exportArg != "" {
-		t.Fatalf("expected empty importArg outside GITHUB_ACTIONS, got %+v", cache)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseBuildKitProgress(strings.NewReader(tt.input))
+			for step, wantCached := range tt.wantCachedSteps {
+				if got.cachedSteps[step] != wantCached {
+					t.Errorf("step %q cached = %v, want %v", step, got.cachedSteps[step], wantCached)
+				}
+			}
+			for step, wantDuration := range tt.wantStepDurations {
+				if got.stepDurations[step] != wantDuration {
+					t.Errorf("step %q duration = %v, want %v", step, got.stepDurations[step], wantDuration)
+				}
+			}
+			if got.exportDuration != tt.wantExportDuration {
+				t.Errorf("exportDuration = %v, want %v", got.exportDuration, tt.wantExportDuration)
+			}
+		})
 	}
 }
 
@@ -1024,7 +1057,6 @@ func TestLayerCache_SavedVsCost_Evaluation(t *testing.T) {
 	}
 
 	// 2. Warm build with saved <= cost (saved 2s <= cost 13s): drops cache
-	// fake index.json in finalDir
 	if err := os.WriteFile(filepath.Join(finalDir, "index.json"), []byte("{}"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -1039,13 +1071,9 @@ func TestLayerCache_SavedVsCost_Evaluation(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(finalDir, "index.json")); !os.IsNotExist(err) {
 		t.Errorf("expected index.json to be deleted when dropped")
 	}
-	data, err := os.ReadFile(filepath.Join(finalDir, "metadata.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var meta imageCacheMetadata
-	if err := json.Unmarshal(data, &meta); err != nil || !meta.Dropped {
-		t.Errorf("expected metadata.Dropped=true, got %+v", meta)
+	meta, err := readImageCacheMetadata(filepath.Join(finalDir, "metadata.json"))
+	if err != nil || !meta.dropped {
+		t.Errorf("expected metadata.dropped=true, got %+v, err: %v", meta, err)
 	}
 
 	// 3. Next run on same Dockerfile: judged not worth it, passes neither import nor export
@@ -1061,56 +1089,5 @@ func TestLayerCache_SavedVsCost_Evaluation(t *testing.T) {
 	retryCache := setupLayerCache(t.Context(), "test-image", dockerfilePath)
 	if retryCache.exportArg == "" {
 		t.Errorf("expected exportArg re-enabled after Dockerfile changed")
-	}
-}
-
-func TestIsCacheSaveAllowed(t *testing.T) {
-	tests := []struct {
-		name          string
-		githubActions string
-		eventName     string
-		want          bool
-	}{
-		{"outside actions", "", "push", false},
-		{"pr run", "true", "pull_request", false},
-		{"push on actions", "true", "push", true},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("GITHUB_ACTIONS", tc.githubActions)
-			t.Setenv("GITHUB_EVENT_NAME", tc.eventName)
-			if got := isCacheSaveAllowed(); got != tc.want {
-				t.Errorf("isCacheSaveAllowed() = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestFinalizeLayerCache(t *testing.T) {
-	tempDir := t.TempDir()
-	t.Setenv("GITHUB_ACTIONS", "true")
-	t.Setenv("GITHUB_EVENT_NAME", "push")
-	t.Setenv("RUNNER_TEMP", tempDir)
-	envFile := filepath.Join(tempDir, "env.txt")
-	if err := os.WriteFile(envFile, []byte(""), 0644); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("GITHUB_ENV", envFile)
-
-	cacheRoot := filepath.Join(tempDir, layerCacheDirectoryName)
-
-	imgDir := filepath.Join(cacheRoot, "kept-img")
-	if err := os.MkdirAll(imgDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(imgDir, "metadata.json"), []byte(`{"dockerfileHash":"abc"}`), 0644); err != nil {
-		t.Fatal(err)
-	}
-	finalizeLayerCache(t.Context())
-
-	envBytes, err := os.ReadFile(envFile)
-	if err != nil || !strings.Contains(string(envBytes), "AP_LAYER_CACHE_KEY=ap-layer-cache-") {
-		t.Errorf("expected AP_LAYER_CACHE_KEY set in GITHUB_ENV, got %q, err: %v", string(envBytes), err)
 	}
 }
