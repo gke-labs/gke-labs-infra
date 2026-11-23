@@ -363,27 +363,14 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 	}
 
 	cache := setupLayerCache(ctx, t.ImageName, filepath.Join(root, relDockerfilePath))
-	if cache.active {
-		if cache.importArg != "" {
-			buildctlArgs = append(buildctlArgs, "--import-cache", cache.importArg)
-		}
-		if cache.exportArg != "" {
-			buildctlArgs = append(buildctlArgs, "--export-cache", cache.exportArg)
-		}
-	}
+	buildctlArgs = cache.applyBuildctlArgs(buildctlArgs)
 
 	var progressBuffer bytes.Buffer
 
 	command := execCommandContext(ctx, buildctlBinary, buildctlArgs...)
 	command.Dir = root
-	if scope.Stdout() == scope.Stderr() {
-		merged := io.MultiWriter(scope.Stderr(), &progressBuffer)
-		command.Stdout = merged
-		command.Stderr = merged
-	} else {
-		command.Stdout = scope.Stdout()
-		command.Stderr = io.MultiWriter(scope.Stderr(), &progressBuffer)
-	}
+	command.Stdout = scope.Stdout()
+	command.Stderr = io.MultiWriter(scope.Stderr(), &progressBuffer)
 
 	environment := fileutils.PrependPath(os.Environ(), filepath.Dir(buildctlBinary))
 	if invocation.extraPathDirectory != "" {
@@ -392,11 +379,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 	command.Env = append(environment, "BUILDKIT_HOST="+invocation.address)
 
 	if err := command.Run(); err != nil {
-		if cache.stagingDirectory != "" {
-			if rmErr := os.RemoveAll(cache.stagingDirectory); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
-				scoped.Log(ctx).Finest("failed to clean staging directory", "dir", cache.stagingDirectory, "error", rmErr)
-			}
-		}
+		cache.cleanup()
 		return fmt.Errorf("buildctl build failed for %s: %w", t.ImageName, err)
 	}
 
@@ -527,40 +510,17 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContex
 		}
 	}
 	cache := setupLayerCache(ctx, t.ImageName, filepath.Join(root, relDockerfilePath))
-	var progressBuffer bytes.Buffer
-	if cache.active {
-		args = append(args, "--progress=plain")
-		if cache.importArg != "" {
-			args = append(args, "--cache-from", cache.importArg)
-		}
-		if cache.exportArg != "" {
-			args = append(args, "--cache-to", cache.exportArg)
-		}
-	}
+	args = cache.applyDockerArgs(args)
 	args = append(args, ".")
 
+	var progressBuffer bytes.Buffer
 	cmd := execCommandContext(ctx, buildxBin, args...)
 	cmd.Dir = root
-	if cache.active {
-		if scope.Stdout() == scope.Stderr() {
-			merged := io.MultiWriter(scope.Stderr(), &progressBuffer)
-			cmd.Stdout = merged
-			cmd.Stderr = merged
-		} else {
-			cmd.Stdout = scope.Stdout()
-			cmd.Stderr = io.MultiWriter(scope.Stderr(), &progressBuffer)
-		}
-	} else {
-		cmd.Stdout = scope.Stdout()
-		cmd.Stderr = scope.Stderr()
-	}
+	cmd.Stdout = scope.Stdout()
+	cmd.Stderr = cache.wireStderr(scope, &progressBuffer)
 	cmd.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(buildxBin))
 	if err := cmd.Run(); err != nil {
-		if cache.stagingDirectory != "" {
-			if rmErr := os.RemoveAll(cache.stagingDirectory); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
-				scoped.Log(ctx).Finest("failed to clean staging directory", "dir", cache.stagingDirectory, "error", rmErr)
-			}
-		}
+		cache.cleanup()
 		return fmt.Errorf("docker build failed for %s: %w", t.ImageName, err)
 	}
 
@@ -600,357 +560,6 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContex
 	}
 
 	return nil
-}
-
-const (
-	layerCacheDirectoryName = "ap-layer-cache"
-	// estimatedRestoreShare is the estimated per-image share of the cache restore time (download and decompression),
-	// measured across benchmark runs on GitHub Actions runners.
-	estimatedRestoreShare = 5 * time.Second
-)
-
-type imageCacheMetadataJSON struct {
-	DockerfileHash        string             `json:"dockerfileHash"`
-	ExportDurationSeconds float64            `json:"exportDurationSeconds,omitempty"`
-	StepDurationsSeconds  map[string]float64 `json:"stepDurations,omitempty"`
-	Dropped               bool               `json:"dropped,omitempty"`
-}
-
-type imageCacheMetadata struct {
-	dockerfileHash string
-	exportDuration time.Duration
-	stepDurations  map[string]time.Duration
-	dropped        bool
-}
-
-type layerCache struct {
-	active           bool
-	importArg        string
-	exportArg        string
-	finalDirectory   string
-	stagingDirectory string
-	dockerfileHash   string
-	existingMetadata *imageCacheMetadata
-}
-
-func getLayerCacheRoot() string {
-	if os.Getenv("GITHUB_ACTIONS") != "true" {
-		return ""
-	}
-	runnerTemp := os.Getenv("RUNNER_TEMP")
-	if runnerTemp == "" {
-		return ""
-	}
-	return filepath.Join(runnerTemp, layerCacheDirectoryName)
-}
-
-func hashDockerfile(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	hasher := sha256.Sum256(data)
-	return hex.EncodeToString(hasher[:]), nil
-}
-
-func readImageCacheMetadata(path string) (*imageCacheMetadata, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var raw imageCacheMetadataJSON
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, err
-	}
-	metadata := &imageCacheMetadata{
-		dockerfileHash: raw.DockerfileHash,
-		exportDuration: time.Duration(raw.ExportDurationSeconds * float64(time.Second)),
-		dropped:        raw.Dropped,
-	}
-	if raw.StepDurationsSeconds != nil {
-		metadata.stepDurations = make(map[string]time.Duration, len(raw.StepDurationsSeconds))
-		for step, seconds := range raw.StepDurationsSeconds {
-			metadata.stepDurations[step] = time.Duration(seconds * float64(time.Second))
-		}
-	}
-	return metadata, nil
-}
-
-func writeImageCacheMetadata(path string, metadata imageCacheMetadata) error {
-	raw := imageCacheMetadataJSON{
-		DockerfileHash: metadata.dockerfileHash,
-		Dropped:        metadata.dropped,
-	}
-	if metadata.exportDuration > 0 {
-		raw.ExportDurationSeconds = metadata.exportDuration.Seconds()
-	}
-	if metadata.stepDurations != nil {
-		raw.StepDurationsSeconds = make(map[string]float64, len(metadata.stepDurations))
-		for step, duration := range metadata.stepDurations {
-			raw.StepDurationsSeconds[step] = duration.Seconds()
-		}
-	}
-	data, err := json.MarshalIndent(raw, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0644)
-}
-
-func setupLayerCache(ctx context.Context, imageName, dockerfilePath string) layerCache {
-	cacheRoot := getLayerCacheRoot()
-	if cacheRoot == "" {
-		return layerCache{}
-	}
-	dockerfileHash, err := hashDockerfile(dockerfilePath)
-	if err != nil {
-		scoped.Log(ctx).Warn("failed to hash Dockerfile for layer cache", "path", dockerfilePath, "error", err)
-		return layerCache{}
-	}
-	finalDirectory := filepath.Join(cacheRoot, imageName)
-	stagingDirectory := filepath.Join(cacheRoot, imageName+"-stage")
-	existingMetadata, err := readImageCacheMetadata(filepath.Join(finalDirectory, "metadata.json"))
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		scoped.Log(ctx).Warn("failed to read layer cache metadata", "image", imageName, "error", err)
-	}
-	if existingMetadata != nil && existingMetadata.dropped && existingMetadata.dockerfileHash == dockerfileHash {
-		return layerCache{}
-	}
-	var importArg string
-	if ok, err := fileutils.FileExists(filepath.Join(finalDirectory, "index.json")); err == nil && ok {
-		importArg = "type=local,src=" + finalDirectory
-	}
-	var exportArg string
-	if isCacheSaveAllowed() {
-		exportArg = fmt.Sprintf("type=local,dest=%s,mode=max,compression=uncompressed", stagingDirectory)
-		if err := os.RemoveAll(stagingDirectory); err != nil && !errors.Is(err, os.ErrNotExist) {
-			scoped.Log(ctx).Warn("failed to clean staging directory", "dir", stagingDirectory, "error", err)
-		}
-		if err := os.MkdirAll(stagingDirectory, 0755); err != nil {
-			scoped.Log(ctx).Warn("failed to create staging layer cache directory", "dir", stagingDirectory, "error", err)
-			return layerCache{}
-		}
-	}
-	if importArg == "" && exportArg == "" {
-		return layerCache{}
-	}
-	return layerCache{active: true, importArg: importArg, exportArg: exportArg, finalDirectory: finalDirectory, stagingDirectory: stagingDirectory, dockerfileHash: dockerfileHash, existingMetadata: existingMetadata}
-}
-
-func (c layerCache) saveDecision(action string, metadata imageCacheMetadata) error {
-	if action == "dropped" {
-		if c.stagingDirectory != "" {
-			if err := os.RemoveAll(c.stagingDirectory); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
-		}
-		if err := os.RemoveAll(c.finalDirectory); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		if err := os.MkdirAll(c.finalDirectory, 0755); err != nil {
-			return err
-		}
-		return writeImageCacheMetadata(filepath.Join(c.finalDirectory, "metadata.json"), metadata)
-	}
-	if c.stagingDirectory != "" {
-		if ok, err := fileutils.FileExists(c.stagingDirectory); err == nil && ok {
-			if err := writeImageCacheMetadata(filepath.Join(c.stagingDirectory, "metadata.json"), metadata); err != nil {
-				return err
-			}
-			if err := os.RemoveAll(c.finalDirectory); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
-			return os.Rename(c.stagingDirectory, c.finalDirectory)
-		}
-	}
-	return nil
-}
-
-func (c layerCache) evaluate(ctx context.Context, imageName string, progress io.Reader) {
-	if !c.active || c.exportArg == "" {
-		return
-	}
-	buildKitProgress := parseBuildKitProgress(progress)
-	exportDuration := buildKitProgress.exportDuration
-
-	var savedDuration, costDuration time.Duration
-	var action string
-	var newMetadata imageCacheMetadata
-
-	if c.existingMetadata == nil || len(c.existingMetadata.stepDurations) == 0 {
-		costDuration = exportDuration
-		action = "kept"
-		newMetadata = imageCacheMetadata{dockerfileHash: c.dockerfileHash, exportDuration: exportDuration, stepDurations: buildKitProgress.stepDurations}
-	} else {
-		for step := range buildKitProgress.cachedSteps {
-			if duration, ok := c.existingMetadata.stepDurations[step]; ok {
-				savedDuration += duration
-			}
-		}
-		costDuration = c.existingMetadata.exportDuration + estimatedRestoreShare
-		if savedDuration <= costDuration {
-			action = "dropped"
-			newMetadata = imageCacheMetadata{dockerfileHash: c.dockerfileHash, dropped: true}
-		} else {
-			action = "kept"
-			newMetadata = *c.existingMetadata
-			hasNewSteps := false
-			for step := range buildKitProgress.stepDurations {
-				if !buildKitProgress.cachedSteps[step] {
-					hasNewSteps = true
-					break
-				}
-			}
-			if hasNewSteps {
-				if newMetadata.stepDurations == nil {
-					newMetadata.stepDurations = make(map[string]time.Duration)
-				}
-				for step, duration := range buildKitProgress.stepDurations {
-					newMetadata.stepDurations[step] = duration
-				}
-				newMetadata.exportDuration = exportDuration
-				newMetadata.dockerfileHash = c.dockerfileHash
-			} else {
-				if err := os.RemoveAll(c.stagingDirectory); err != nil && !errors.Is(err, os.ErrNotExist) {
-					scoped.Log(ctx).Finest("failed to clean staging directory", "dir", c.stagingDirectory, "error", err)
-				}
-				c.stagingDirectory = ""
-			}
-		}
-	}
-
-	if err := c.saveDecision(action, newMetadata); err != nil {
-		scoped.Log(ctx).Warn("failed to update layer cache", "image", imageName, "error", err)
-	}
-
-	scoped.Log(ctx).Info("evaluated layer cache",
-		"image", imageName,
-		"saved", formatDuration(savedDuration),
-		"cost", formatDuration(costDuration),
-		"action", action,
-	)
-
-	if err := finalizeLayerCache(ctx); err != nil {
-		scoped.Log(ctx).Warn("failed to finalize layer cache", "error", err)
-	}
-}
-
-func finalizeLayerCache(ctx context.Context) error {
-	if !isCacheSaveAllowed() {
-		return nil
-	}
-	cacheRoot := getLayerCacheRoot()
-	runnerOS := os.Getenv("RUNNER_OS")
-	if cacheRoot == "" || runnerOS == "" {
-		return nil
-	}
-	entries, err := os.ReadDir(cacheRoot)
-	if err != nil {
-		return err
-	}
-	hasher := sha256.New()
-	hasAnyContent := false
-	for _, entry := range entries {
-		if !entry.IsDir() || strings.HasSuffix(entry.Name(), "-stage") {
-			continue
-		}
-		imageDirectory := filepath.Join(cacheRoot, entry.Name())
-		indexData, err := os.ReadFile(filepath.Join(imageDirectory, "index.json"))
-		if err == nil {
-			hasAnyContent = true
-			hasher.Write([]byte(entry.Name()))
-			hasher.Write(indexData)
-			continue
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		if metadata, err := readImageCacheMetadata(filepath.Join(imageDirectory, "metadata.json")); err == nil && metadata.dropped {
-			hasAnyContent = true
-			hasher.Write([]byte(entry.Name()))
-			hasher.Write([]byte("dropped:" + metadata.dockerfileHash))
-		}
-	}
-	if !hasAnyContent {
-		return nil
-	}
-	hash := hex.EncodeToString(hasher.Sum(nil))
-	if len(hash) > 16 {
-		hash = hash[:16]
-	}
-	return setGitHubActionsEnv("AP_LAYER_CACHE_KEY", fmt.Sprintf("ap-layer-cache-%s-%s", runnerOS, hash))
-}
-
-func setGitHubActionsEnv(name, value string) error {
-	githubEnv := os.Getenv("GITHUB_ENV")
-	if githubEnv == "" {
-		return nil
-	}
-	f, err := os.OpenFile(githubEnv, os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	_, printErr := fmt.Fprintf(f, "%s=%s\n", name, value)
-	closeErr := f.Close()
-	if printErr != nil {
-		return printErr
-	}
-	return closeErr
-}
-
-func isCacheSaveAllowed() bool {
-	return os.Getenv("GITHUB_ACTIONS") == "true" && os.Getenv("GITHUB_EVENT_NAME") == "push"
-}
-
-type buildKitProgress struct {
-	stepDurations  map[string]time.Duration
-	cachedSteps    map[string]bool
-	exportDuration time.Duration
-}
-
-func parseBuildKitProgress(reader io.Reader) buildKitProgress {
-	scanner := bufio.NewScanner(reader)
-	stepDescriptions := make(map[string]string)
-	stepDurations := make(map[string]time.Duration)
-	cachedSteps := make(map[string]bool)
-	var exportDuration time.Duration
-
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if !strings.HasPrefix(line, "#") {
-			continue
-		}
-		parts := strings.SplitN(line[1:], " ", 2)
-		if len(parts) < 2 {
-			continue
-		}
-		vertexID := parts[0]
-		rest := strings.TrimSpace(parts[1])
-
-		if strings.HasPrefix(rest, "[") || strings.Contains(rest, "exporting cache") {
-			stepDescriptions[vertexID] = rest
-		} else if rest == "CACHED" || strings.HasPrefix(rest, "CACHED ") {
-			if description, ok := stepDescriptions[vertexID]; ok {
-				cachedSteps[description] = true
-			}
-		} else if strings.HasPrefix(rest, "DONE ") {
-			fields := strings.Fields(rest)
-			if len(fields) >= 2 {
-				duration, parseError := time.ParseDuration(fields[1])
-				if parseError != nil {
-					continue
-				}
-				if description, ok := stepDescriptions[vertexID]; ok {
-					if strings.Contains(description, "exporting cache") {
-						exportDuration = duration
-					} else if strings.HasPrefix(description, "[") && !strings.HasPrefix(description, "[internal]") && !strings.HasPrefix(description, "[auth]") && !strings.Contains(description, "FROM ") {
-						stepDurations[description] = duration
-					}
-				}
-			}
-		}
-	}
-
-	return buildKitProgress{stepDurations: stepDurations, cachedSteps: cachedSteps, exportDuration: exportDuration}
 }
 
 // parseContextSizeFromPlain parses a buildctl --progress=plain stream and returns
