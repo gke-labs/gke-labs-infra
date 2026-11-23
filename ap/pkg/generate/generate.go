@@ -835,6 +835,7 @@ jobs:
 
 			sb.WriteString(fmt.Sprintf(`
       - name: Restore image layer cache
+        id: restore-layer-cache
         uses: %s
         with:
           path: ${{ runner.temp }}/ap-layer-cache
@@ -852,11 +853,11 @@ jobs:
 		if scriptName == "ap-build" {
 			sb.WriteString(fmt.Sprintf(`
       - name: Save image layer cache
-        if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && env.AP_LAYER_CACHE_KEY != '' && steps.restore-layer-cache.outputs.cache-matched-key != env.AP_LAYER_CACHE_KEY
         uses: %s
         with:
           path: ${{ runner.temp }}/ap-layer-cache
-          key: ${{ env.AP_LAYER_CACHE_KEY || format('ap-layer-cache-{0}-{1}', runner.os, github.sha) }}
+          key: ${{ env.AP_LAYER_CACHE_KEY }}
 `, actionCacheSave))
 		}
 

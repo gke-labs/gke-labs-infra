@@ -332,6 +332,7 @@ func TestGithubActionsWorkflowLayerCache(t *testing.T) {
 	content := string(b)
 
 	expectedRestore := fmt.Sprintf(`      - name: Restore image layer cache
+        id: restore-layer-cache
         uses: %s
         with:
           path: ${{ runner.temp }}/ap-layer-cache
@@ -340,11 +341,11 @@ func TestGithubActionsWorkflowLayerCache(t *testing.T) {
             ap-layer-cache-${{ runner.os }}-`, actionCacheRestore)
 
 	expectedSave := fmt.Sprintf(`      - name: Save image layer cache
-        if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && env.AP_LAYER_CACHE_KEY != '' && steps.restore-layer-cache.outputs.cache-matched-key != env.AP_LAYER_CACHE_KEY
         uses: %s
         with:
           path: ${{ runner.temp }}/ap-layer-cache
-          key: ${{ env.AP_LAYER_CACHE_KEY || format('ap-layer-cache-{0}-{1}', runner.os, github.sha) }}`, actionCacheSave)
+          key: ${{ env.AP_LAYER_CACHE_KEY }}`, actionCacheSave)
 
 	if !strings.Contains(content, expectedRestore) {
 		t.Errorf("workflow missing expected restore step:\n%s", content)
