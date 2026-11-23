@@ -379,7 +379,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 	command.Env = append(environment, "BUILDKIT_HOST="+invocation.address)
 
 	if err := command.Run(); err != nil {
-		cache.cleanup()
+		cache.cleanup(ctx)
 		return fmt.Errorf("buildctl build failed for %s: %w", t.ImageName, err)
 	}
 
@@ -520,7 +520,7 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContex
 	cmd.Stderr = cache.wireStderr(scope, &progressBuffer)
 	cmd.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(buildxBin))
 	if err := cmd.Run(); err != nil {
-		cache.cleanup()
+		cache.cleanup(ctx)
 		return fmt.Errorf("docker build failed for %s: %w", t.ImageName, err)
 	}
 
