@@ -238,7 +238,7 @@ func TestPresubmitScriptsWithSkipConfig(t *testing.T) {
 // workflows must reference actions by full commit SHA, never by a
 // mutable tag.
 func TestPinnedActionRefs(t *testing.T) {
-	for _, ref := range []string{actionCheckout, actionSetupGo, actionUploadArtifact} {
+	for _, ref := range []string{actionCheckout, actionSetupGo, actionUploadArtifact, actionCacheRestore, actionCacheSave} {
 		at := strings.Index(ref, "@")
 		if at < 0 {
 			t.Errorf("action ref %q has no @", ref)
@@ -299,6 +299,59 @@ func TestGithubActionsWorkflowArtifactUpload(t *testing.T) {
 		if !strings.Contains(content, expectedStep) {
 			t.Errorf("job %s missing expected artifact upload step in workflow:\n%s", job, content)
 		}
+	}
+}
+
+func TestGithubActionsWorkflowLayerCache(t *testing.T) {
+	root := t.TempDir()
+	writeTestHeadersConfig(t, root)
+
+	presubmitsDir := filepath.Join(root, "dev", "ci", "presubmits")
+	if err := os.MkdirAll(presubmitsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, script := range []string{"ap-build", "ap-test"} {
+		if err := fileutils.WriteFileAtomic(t.Context(), filepath.Join(presubmitsDir, script), []byte("#!/bin/bash\nexit 0\n"), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	r, err := sourcetree.Open(t.Context(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runGithubActionsGenerator(t.Context(), r, root, []*tasks.TaskContext{tasks.NewTaskContext(root, root, r)}); err != nil {
+		t.Fatalf("runGithubActionsGenerator: %v", err)
+	}
+
+	b, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "ci-presubmits.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(b)
+
+	expectedRestore := fmt.Sprintf(`      - name: Restore image layer cache
+        id: restore-layer-cache
+        uses: %s
+        with:
+          path: ${{ runner.temp }}/ap-layer-cache
+          key: ap-layer-cache-${{ runner.os }}-
+          restore-keys: |
+            ap-layer-cache-${{ runner.os }}-`, actionCacheRestore)
+
+	expectedSave := fmt.Sprintf(`      - name: Save image layer cache
+        if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && env.AP_LAYER_CACHE_KEY != '' && steps.restore-layer-cache.outputs.cache-matched-key != env.AP_LAYER_CACHE_KEY
+        uses: %s
+        with:
+          path: ${{ runner.temp }}/ap-layer-cache
+          key: ${{ env.AP_LAYER_CACHE_KEY }}`, actionCacheSave)
+
+	if !strings.Contains(content, expectedRestore) {
+		t.Errorf("workflow missing expected restore step:\n%s", content)
+	}
+	if !strings.Contains(content, expectedSave) {
+		t.Errorf("workflow missing expected save step:\n%s", content)
 	}
 }
 

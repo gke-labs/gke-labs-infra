@@ -21,6 +21,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
 )
@@ -137,5 +138,11 @@ func RunBuild(ctx context.Context, opt BuildOptions) error {
 		return fmt.Errorf("nothing to build under %s: no images/*/Dockerfile and no dev/tasks/build-* scripts", groupNameDir)
 	}
 
-	return tasks.Run(ctx, tasks.NewTaskContext(opt.RepoRoot, opt.RepoRoot, r), []tasks.Task{group}, tasks.RunOptions{DryRun: opt.DryRun})
+	if err := tasks.Run(ctx, tasks.NewTaskContext(opt.RepoRoot, opt.RepoRoot, r), []tasks.Task{group}, tasks.RunOptions{DryRun: opt.DryRun}); err != nil {
+		return err
+	}
+	if err := images.FinalizeLayerCache(ctx); err != nil {
+		scoped.Log(ctx).Warn("failed to finalize layer cache", "error", err)
+	}
+	return nil
 }

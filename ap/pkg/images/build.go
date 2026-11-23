@@ -362,6 +362,9 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 		buildctlArgs = append(buildctlArgs, "--opt", "platform="+strings.Join(platforms, ","))
 	}
 
+	cache := setupLayerCache(ctx, t.ImageName, filepath.Join(root, relDockerfilePath))
+	buildctlArgs = cache.applyBuildctlArgs(buildctlArgs)
+
 	var progressBuffer bytes.Buffer
 
 	command := execCommandContext(ctx, buildctlBinary, buildctlArgs...)
@@ -376,8 +379,11 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 	command.Env = append(environment, "BUILDKIT_HOST="+invocation.address)
 
 	if err := command.Run(); err != nil {
+		cache.cleanup(ctx)
 		return fmt.Errorf("buildctl build failed for %s: %w", t.ImageName, err)
 	}
+
+	cache.evaluate(ctx, t.ImageName, &progressBuffer)
 
 	digest := extractDigestFromMetadataFile(metadataFile)
 	if naming.Tag == "latest" && digest != "" {
@@ -503,16 +509,24 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContex
 			args = append(args, "--platform", platforms[0])
 		}
 	}
+	cache := setupLayerCache(ctx, t.ImageName, filepath.Join(root, relDockerfilePath))
+	args = cache.applyDockerArgs(args)
 	args = append(args, ".")
 
+	var progressBuffer bytes.Buffer
 	cmd := execCommandContext(ctx, buildxBin, args...)
 	cmd.Dir = root
 	cmd.Stdout = scope.Stdout()
-	cmd.Stderr = scope.Stderr()
+	cmd.Stderr = cache.wireStderr(scope, &progressBuffer)
 	cmd.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(buildxBin))
 	if err := cmd.Run(); err != nil {
+		cache.cleanup(ctx)
 		return fmt.Errorf("docker build failed for %s: %w", t.ImageName, err)
 	}
+
+	duration := time.Since(start)
+
+	cache.evaluate(ctx, t.ImageName, &progressBuffer)
 
 	digest := extractDigestFromMetadataFile(metaFile)
 	if digest == "" {
@@ -542,7 +556,6 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContex
 	}
 
 	if !t.Quiet {
-		duration := time.Since(start)
 		scoped.Log(ctx).Info("built image", "image", t.ImageName, "builder", "docker", "duration", formatDuration(duration))
 	}
 

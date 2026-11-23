@@ -832,12 +832,36 @@ jobs:
         run: ./%s
 `, relCleanupTask))
 			}
+
+			sb.WriteString(fmt.Sprintf(`
+      - name: Restore image layer cache
+        id: restore-layer-cache
+        uses: %s
+        with:
+          path: ${{ runner.temp }}/ap-layer-cache
+          key: ap-layer-cache-${{ runner.os }}-
+          restore-keys: |
+            ap-layer-cache-${{ runner.os }}-
+`, actionCacheRestore))
 		}
 
 		sb.WriteString(fmt.Sprintf(`
       - name: Run %s
         run: ./%s/%s
+`, jobName, relPresubmitsDir, scriptName))
 
+		if scriptName == "ap-build" {
+			sb.WriteString(fmt.Sprintf(`
+      - name: Save image layer cache
+        if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && env.AP_LAYER_CACHE_KEY != '' && steps.restore-layer-cache.outputs.cache-matched-key != env.AP_LAYER_CACHE_KEY
+        uses: %s
+        with:
+          path: ${{ runner.temp }}/ap-layer-cache
+          key: ${{ env.AP_LAYER_CACHE_KEY }}
+`, actionCacheSave))
+		}
+
+		sb.WriteString(fmt.Sprintf(`
       - name: Upload artifacts
         if: always()
         uses: %s
@@ -845,7 +869,7 @@ jobs:
           name: artifacts-%s
           path: /tmp/artifacts
           if-no-files-found: ignore
-`, jobName, relPresubmitsDir, scriptName, actionUploadArtifact, jobName))
+`, actionUploadArtifact, jobName))
 	}
 
 	if err := os.MkdirAll(workflowsDir, 0755); err != nil {
