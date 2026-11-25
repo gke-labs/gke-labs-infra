@@ -2023,108 +2023,72 @@ func TestDeploy_WaitFlag(t *testing.T) {
 }
 
 func TestDeploy_HashSuffixFlagAndConfig(t *testing.T) {
-	t.Run("flag exists and defaults to false", func(t *testing.T) {
-		rootOpt := &RootOptions{}
-		cmd := BuildDeployCommand(rootOpt)
-
-		flag := cmd.Flags().Lookup("hash-suffix")
-		if flag == nil {
-			t.Fatal("expected --hash-suffix flag on deploy command")
-		}
-		if flag.DefValue != "false" {
-			t.Errorf("expected --hash-suffix default to be false, got %q", flag.DefValue)
-		}
-	})
-
-	t.Run("default off leaves HashIndex nil", func(t *testing.T) {
-		tempDir := setupFixtureRepo(t)
-		tree, err := sourcetree.Open(t.Context(), tempDir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		opt := DeployOptions{
-			RootOptions: &RootOptions{RepoRoot: tempDir, Dir: tempDir, DryRun: true},
-		}
-		if err := opt.Resolve(t.Context(), []string{"./k8s"}); err != nil {
-			t.Fatal(err)
-		}
-		if opt.HashSuffix {
-			t.Fatalf("expected HashSuffix to default to false")
-		}
-		planTasks, err := BuildDeployPlan(opt, tree, "", images.ResolveImageNaming(nil))
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, applyTask := range collectApplyTasks(planTasks) {
-			if applyTask.HashIndex != nil {
-				t.Errorf("expected nil HashIndex when HashSuffix is false")
-			}
-		}
-	})
-
-	t.Run("ap.yaml deploy.hashSuffix enables shared HashIndex", func(t *testing.T) {
-		tempDir := setupFixtureRepo(t)
-		if err := os.WriteFile(filepath.Join(tempDir, ".ap", "ap.yaml"), []byte("deploy:\n  hashSuffix: true\n"), 0644); err != nil {
-			t.Fatal(err)
-		}
-		tree, err := sourcetree.Open(t.Context(), tempDir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		opt := DeployOptions{
-			RootOptions: &RootOptions{RepoRoot: tempDir, Dir: tempDir, DryRun: true},
-		}
-		if err := opt.Resolve(t.Context(), []string{"./k8s"}); err != nil {
-			t.Fatal(err)
-		}
-		if !opt.HashSuffix {
-			t.Fatalf("expected HashSuffix to be enabled from .ap/ap.yaml")
-		}
-		planTasks, err := BuildDeployPlan(opt, tree, "", images.ResolveImageNaming(nil))
-		if err != nil {
-			t.Fatal(err)
-		}
-		applyTasks := collectApplyTasks(planTasks)
-		if len(applyTasks) < 2 {
-			t.Fatalf("expected at least 2 apply tasks, got %d", len(applyTasks))
-		}
-		sharedIndex := applyTasks[0].HashIndex
-		if sharedIndex == nil {
-			t.Fatalf("expected non-nil HashIndex when HashSuffix is true")
-		}
-		for _, applyTask := range applyTasks[1:] {
-			if applyTask.HashIndex != sharedIndex {
-				t.Errorf("expected all KubectlApplyTasks in deploy plan to share the same ConfigHashIndex")
-			}
-		}
-	})
-
-	t.Run("explicit --hash-suffix=false overrides ap.yaml", func(t *testing.T) {
-		tempDir := setupFixtureRepo(t)
-		if err := os.WriteFile(filepath.Join(tempDir, ".ap", "ap.yaml"), []byte("deploy:\n  hashSuffix: true\n"), 0644); err != nil {
-			t.Fatal(err)
-		}
-		opt := DeployOptions{
-			RootOptions:        &RootOptions{RepoRoot: tempDir, Dir: tempDir, DryRun: true},
-			HashSuffix:         false,
-			hashSuffixExplicit: true,
-		}
-		if err := opt.Resolve(t.Context(), []string{"./k8s"}); err != nil {
-			t.Fatal(err)
-		}
-		if opt.HashSuffix {
-			t.Errorf("expected explicit --hash-suffix=false to override .ap/ap.yaml")
-		}
-	})
-}
-
-func collectApplyTasks(taskList []tasks.Task) []*k8s.KubectlApplyTask {
-	var result []*k8s.KubectlApplyTask
-	for _, task := range taskList {
-		if applyTask, ok := task.(*k8s.KubectlApplyTask); ok {
-			result = append(result, applyTask)
-		}
-		result = append(result, collectApplyTasks(task.GetChildren())...)
+	tempDir := setupFixtureRepo(t)
+	if err := os.WriteFile(filepath.Join(tempDir, ".ap", "ap.yaml"), []byte("deploy:\n  hashSuffix: true\n"), 0644); err != nil {
+		t.Fatal(err)
 	}
-	return result
+
+	cmd := BuildDeployCommand(&RootOptions{RepoRoot: tempDir, Dir: tempDir, DryRun: true})
+	if cmd.Flags().Lookup("deploy.hashSuffix") == nil {
+		t.Fatal("expected --deploy.hashSuffix flag on deploy command")
+	}
+	if cmd.Flags().Lookup("hash-suffix") != nil {
+		t.Fatal("unexpected --hash-suffix alias on deploy command")
+	}
+
+	// Config default enables HashSuffix when flag is not explicitly passed.
+	opt := DeployOptions{RootOptions: &RootOptions{RepoRoot: tempDir, Dir: tempDir, DryRun: true}}
+	if err := opt.resolveHashSuffix(cmd); err != nil {
+		t.Fatal(err)
+	}
+	if !opt.HashSuffix {
+		t.Fatalf("expected HashSuffix=true from .ap/ap.yaml")
+	}
+
+	// Explicit --deploy.hashSuffix=false overrides .ap/ap.yaml.
+	if err := cmd.ParseFlags([]string{"--deploy.hashSuffix=false"}); err != nil {
+		t.Fatal(err)
+	}
+	optOverride := DeployOptions{RootOptions: &RootOptions{RepoRoot: tempDir, Dir: tempDir, DryRun: true}}
+	if err := optOverride.resolveHashSuffix(cmd); err != nil {
+		t.Fatal(err)
+	}
+	if optOverride.HashSuffix {
+		t.Fatalf("expected --deploy.hashSuffix=false to override .ap/ap.yaml")
+	}
+
+	// BuildDeployPlan populates ConfigHashes when enabled and leaves them empty when disabled.
+	tree, err := sourcetree.Open(t.Context(), tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, enabled := range []bool{false, true} {
+		planOpt := DeployOptions{
+			RootOptions: &RootOptions{RepoRoot: tempDir, Dir: tempDir, DryRun: true},
+			HashSuffix:  enabled,
+		}
+		if err := planOpt.Resolve(t.Context(), []string{"./k8s"}); err != nil {
+			t.Fatal(err)
+		}
+		planTasks, err := BuildDeployPlan(planOpt, tree, "", images.ResolveImageNaming(nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var applyTasks []*k8s.KubectlApplyTask
+		var walk func([]tasks.Task)
+		walk = func(list []tasks.Task) {
+			for _, task := range list {
+				if applyTask, ok := task.(*k8s.KubectlApplyTask); ok {
+					applyTasks = append(applyTasks, applyTask)
+				}
+				walk(task.GetChildren())
+			}
+		}
+		walk(planTasks)
+		for _, applyTask := range applyTasks {
+			if (len(applyTask.ConfigHashes) > 0) != enabled {
+				t.Errorf("enabled=%v: got ConfigHashes len=%d", enabled, len(applyTask.ConfigHashes))
+			}
+		}
+	}
 }

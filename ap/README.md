@@ -70,7 +70,7 @@ For non-kind clusters, configure building with a remote BuildKit daemon using `-
 
 `ap deploy` applies manifests as written, apart from image references, the `-n` namespace, and optional content-hash suffixes; it does not install CRDs that the manifests do not contain, and it does not create Secrets.
 
-Pass `--hash-suffix` (or set `deploy.hashSuffix: true` in `.ap/ap.yaml`) to enable kustomize-style content-hash suffixing for `ConfigMap` and `Secret` resources defined in plain manifests: `ap deploy` appends a deterministic 10-character SHA-256 content hash suffix to each `ConfigMap` / `Secret` name (e.g. `app-config-<hash>`) and automatically rewrites matching references (`envFrom`, `env[].valueFrom`, `volumes[]` including `projected.sources[]`, and `imagePullSecrets`) in workload manifests (`Deployment`, `DaemonSet`, `StatefulSet`, `ReplicaSet`, `ReplicationController`, `Job`, `CronJob`, and `Pod`) within the same namespace so configuration changes trigger a clean Kubernetes rollout. Kustomization targets are left untouched so kustomize manages its own hashing.
+Pass `--deploy.hashSuffix` (or set `deploy.hashSuffix: true` in `.ap/ap.yaml`) to enable kustomize-style content-hash suffixing for `ConfigMap` and `Secret` resources defined in plain manifests: `ap deploy` appends a deterministic 10-character SHA-256 content hash suffix to each `ConfigMap` / `Secret` name (e.g. `app-config-<hash>`) and automatically rewrites matching references (`envFrom`, `env[].valueFrom`, `volumes[]` including `projected.sources[]` and volume `secretRef`, and `imagePullSecrets`) in workload manifests (`Deployment`, `DaemonSet`, `StatefulSet`, `Job`, `CronJob`, and `Pod`) within the same namespace so configuration changes trigger a clean Kubernetes rollout. Kustomization targets are left untouched so kustomize manages its own hashing. Old suffixed `ConfigMap` and `Secret` objects are not pruned by `ap deploy` and remain in the cluster after subsequent updates.
 
 For example, to deploy a controller from a single manifest to a non-kind cluster using in-cluster buildkit and registry:
 
@@ -328,8 +328,8 @@ bypass the race detector for an individual invocation.
 `deploy.hashSuffix` is an optional boolean flag (default `false`). When set to `true`,
 `ap deploy` appends a deterministic content-hash suffix to `ConfigMap` and `Secret`
 names in deployed manifests and rewrites workload references to point to the suffixed
-names so config changes trigger a rollout. Pass `--hash-suffix=false` to bypass it for
-an individual invocation.
+names so config changes trigger a rollout; old suffixed objects are not pruned. Pass
+`--deploy.hashSuffix=false` to bypass it for an individual invocation.
 
 `presubmits.skipIfOnlyChanged` is an optional list of bash case globs
 matched against each repo-relative changed path (`*` also matches `/`).

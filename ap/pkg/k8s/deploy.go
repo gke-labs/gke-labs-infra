@@ -406,7 +406,7 @@ type DeployTaskOptions struct {
 	ApplySetID        string
 	Membership        *applyset.Membership
 	Tracker           *WorkloadTracker
-	HashSuffix        bool
+	ConfigHashes      ConfigHashMap
 }
 
 // KubectlApplyTask represents a task to apply a single k8s manifest.
@@ -422,7 +422,7 @@ type KubectlApplyTask struct {
 	ApplySetID        string
 	Membership        *applyset.Membership
 	Tracker           *WorkloadTracker
-	HashIndex         *ConfigHashIndex
+	ConfigHashes      ConfigHashMap
 }
 
 func kustomizeBuild(ctx context.Context, scope *tasks.TaskContext, kustomizationPath string) ([]byte, error) {
@@ -533,18 +533,15 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 		replaced = result.Content
 	}
 
-	if t.HashIndex != nil && !IsKustomization(t.ManifestPath) {
-		if err := t.HashIndex.EnsureLoaded(naming, t.Namespace); err != nil {
-			return fmt.Errorf("failed to compute config hashes: %w", err)
-		}
-		hashResult, err := t.HashIndex.RewriteManifest(replaced, t.Namespace)
+	if len(t.ConfigHashes) > 0 && !IsKustomization(t.ManifestPath) {
+		rewritten, renames, err := rewriteConfigHashes(replaced, t.Namespace, t.ConfigHashes)
 		if err != nil {
 			return fmt.Errorf("failed to apply config hash suffixes in %s: %w", relPath, err)
 		}
-		for _, rename := range hashResult.Renames {
-			scoped.Log(ctx).Info("suffixed config name", "path", relPath, "kind", rename.Kind, "from", rename.OriginalName, "to", rename.SuffixedName)
+		for _, rename := range renames {
+			scoped.Log(ctx).Debug("suffixed config name", "path", relPath, "kind", rename.kind, "from", rename.from, "to", rename.to)
 		}
-		replaced = hashResult.Content
+		replaced = rewritten
 	}
 
 	if t.ApplySetID != "" {
@@ -723,11 +720,6 @@ func DeployTasksForManifests(manifests []string, opts ...DeployTaskOptions) task
 		opt = opts[0]
 	}
 
-	var hashIndex *ConfigHashIndex
-	if opt.HashSuffix {
-		hashIndex = NewConfigHashIndex(manifests)
-	}
-
 	var deployTasks []tasks.Task
 	for _, manifest := range manifests {
 		deployTasks = append(deployTasks, &KubectlApplyTask{
@@ -742,7 +734,7 @@ func DeployTasksForManifests(manifests []string, opts ...DeployTaskOptions) task
 			ApplySetID:        opt.ApplySetID,
 			Membership:        opt.Membership,
 			Tracker:           opt.Tracker,
-			HashIndex:         hashIndex,
+			ConfigHashes:      opt.ConfigHashes,
 		})
 	}
 

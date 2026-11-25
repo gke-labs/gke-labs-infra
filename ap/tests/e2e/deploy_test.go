@@ -169,4 +169,63 @@ spec:
 	if appliedImage3 != expectedImage3 {
 		t.Errorf("expected applied image with explicit tag to be %q, got %q", expectedImage3, appliedImage3)
 	}
+
+	// 4. --deploy.hashSuffix: ConfigMap content change rotates suffix, rolls out Deployment, and leaves old ConfigMap in cluster.
+	deploymentWithConfig := fmt.Sprintf(`
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+  namespace: %s
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      terminationGracePeriodSeconds: 0
+      containers:
+      - name: my-app
+        image: my-app
+        command: ["/bin/sh", "-c", "sleep 3600"]
+        envFrom:
+        - configMapRef:
+            name: app-config
+`, ns)
+	if err := os.WriteFile(filepath.Join(tmpDir, "k8s", "deployment.yaml"), []byte(deploymentWithConfig), 0644); err != nil {
+		t.Fatal(err)
+	}
+	writeConfigMap := func(val string) {
+		cm := fmt.Sprintf("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: app-config\n  namespace: %s\ndata:\n  VERSION: %q\n", ns, val)
+		if err := os.WriteFile(filepath.Join(tmpDir, "k8s", "configmap.yaml"), []byte(cm), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	writeConfigMap("v1")
+	h.RunCmd(apBin, "deploy", "--cluster=kind-ap-deploy-kind-e2e", "--deploy.hashSuffix")
+	cm1 := strings.TrimSpace(h.RunCmd("kubectl", "get", "deployment", "my-app", "-n", ns, "-o", "jsonpath={.spec.template.spec.containers[0].envFrom[0].configMapRef.name}"))
+	if !strings.HasPrefix(cm1, "app-config-") {
+		t.Fatalf("expected suffixed ConfigMap ref, got %q", cm1)
+	}
+	rev1 := strings.TrimSpace(h.RunCmd("kubectl", "get", "deployment", "my-app", "-n", ns, "-o", "jsonpath={.metadata.annotations.deployment\\.kubernetes\\.io/revision}"))
+
+	writeConfigMap("v2")
+	h.RunCmd(apBin, "deploy", "--cluster=kind-ap-deploy-kind-e2e", "--deploy.hashSuffix")
+	cm2 := strings.TrimSpace(h.RunCmd("kubectl", "get", "deployment", "my-app", "-n", ns, "-o", "jsonpath={.spec.template.spec.containers[0].envFrom[0].configMapRef.name}"))
+	if !strings.HasPrefix(cm2, "app-config-") || cm2 == cm1 {
+		t.Fatalf("expected rotated suffixed ConfigMap ref, got v1=%q v2=%q", cm1, cm2)
+	}
+	rev2 := strings.TrimSpace(h.RunCmd("kubectl", "get", "deployment", "my-app", "-n", ns, "-o", "jsonpath={.metadata.annotations.deployment\\.kubernetes\\.io/revision}"))
+	if rev2 == rev1 {
+		t.Errorf("expected Deployment revision to advance after ConfigMap change, both were %q", rev1)
+	}
+	cmList := h.RunCmd("kubectl", "get", "configmap", "-n", ns, "-o", "name")
+	if !strings.Contains(cmList, "configmap/"+cm1) || !strings.Contains(cmList, "configmap/"+cm2) {
+		t.Errorf("expected both old (%q) and new (%q) ConfigMaps to remain in cluster, got:\n%s", cm1, cm2, cmList)
+	}
 }
