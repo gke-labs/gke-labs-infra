@@ -406,6 +406,7 @@ type DeployTaskOptions struct {
 	ApplySetID        string
 	Membership        *applyset.Membership
 	Tracker           *WorkloadTracker
+	HashSuffix        bool
 }
 
 // KubectlApplyTask represents a task to apply a single k8s manifest.
@@ -421,6 +422,7 @@ type KubectlApplyTask struct {
 	ApplySetID        string
 	Membership        *applyset.Membership
 	Tracker           *WorkloadTracker
+	HashIndex         *ConfigHashIndex
 }
 
 func kustomizeBuild(ctx context.Context, scope *tasks.TaskContext, kustomizationPath string) ([]byte, error) {
@@ -529,6 +531,20 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 			scoped.Log(ctx).Info("cluster-scoped, not retargeted", "path", relPath, "resources", strings.Join(result.ClusterScoped, ", "))
 		}
 		replaced = result.Content
+	}
+
+	if t.HashIndex != nil && !IsKustomization(t.ManifestPath) {
+		if err := t.HashIndex.EnsureLoaded(naming, t.Namespace); err != nil {
+			return fmt.Errorf("failed to compute config hashes: %w", err)
+		}
+		hashResult, err := t.HashIndex.RewriteManifest(replaced, t.Namespace)
+		if err != nil {
+			return fmt.Errorf("failed to apply config hash suffixes in %s: %w", relPath, err)
+		}
+		for _, rename := range hashResult.Renames {
+			scoped.Log(ctx).Info("suffixed config name", "path", relPath, "kind", rename.Kind, "from", rename.OriginalName, "to", rename.SuffixedName)
+		}
+		replaced = hashResult.Content
 	}
 
 	if t.ApplySetID != "" {
@@ -707,6 +723,11 @@ func DeployTasksForManifests(manifests []string, opts ...DeployTaskOptions) task
 		opt = opts[0]
 	}
 
+	var hashIndex *ConfigHashIndex
+	if opt.HashSuffix {
+		hashIndex = NewConfigHashIndex(manifests)
+	}
+
 	var deployTasks []tasks.Task
 	for _, manifest := range manifests {
 		deployTasks = append(deployTasks, &KubectlApplyTask{
@@ -721,6 +742,7 @@ func DeployTasksForManifests(manifests []string, opts ...DeployTaskOptions) task
 			ApplySetID:        opt.ApplySetID,
 			Membership:        opt.Membership,
 			Tracker:           opt.Tracker,
+			HashIndex:         hashIndex,
 		})
 	}
 

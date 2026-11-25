@@ -39,6 +39,11 @@ type TestConfig struct {
 	Race bool `json:"race"`
 }
 
+// DeployConfig represents deployment configuration in ap.yaml.
+type DeployConfig struct {
+	HashSuffix bool `json:"hashSuffix"`
+}
+
 // APConfig represents the configuration loaded from .ap/ap.yaml.
 type APConfig struct {
 	Version     string           `json:"version"`
@@ -46,6 +51,7 @@ type APConfig struct {
 	Presubmits  *PresubmitConfig `json:"presubmits"`
 	Generate    *GenerateConfig  `json:"generate"`
 	Test        TestConfig       `json:"test"`
+	Deploy      DeployConfig     `json:"deploy"`
 }
 
 // LoadAPConfig loads the configuration from .ap/ap.yaml using strict unmarshaling.

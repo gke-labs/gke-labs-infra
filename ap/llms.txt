@@ -61,7 +61,8 @@ When making changes to an AP-managed project, coding agents should follow this v
 -   **Registry Prefix**: `IMAGE_PREFIX` defaults to `images.local`, assuming an in-cluster image registry and its node agent.
 -   **Skip Push**: Use `--skip-push` to skip pushing built images to the registry.
 -   **Workload Readiness**: `ap deploy` waits in parallel for all applied Deployments, DaemonSets, and StatefulSets to be ready within a single timeout (`--timeout`, default `5m`). On failure, it reports unavailable replicas, pod waiting reasons, and last termination messages. Use `--wait=false` to skip waiting.
--   **Manifest Scope**: Manifests are applied as written apart from image references and namespace retargeting; `ap deploy` does not install missing CRDs or create Secrets.
+-   **ConfigMap/Secret Hash Suffixing**: Pass `--hash-suffix` or configure `deploy.hashSuffix: true` in `.ap/ap.yaml` to append a deterministic 10-character SHA-256 content-hash suffix to `ConfigMap` and `Secret` names in plain manifests and automatically rewrite workload references (`envFrom`, `env[].valueFrom`, `volumes[]` including `projected.sources[]`, `imagePullSecrets`) in `Deployment`, `DaemonSet`, `StatefulSet`, `ReplicaSet`, `ReplicationController`, `Job`, `CronJob`, and `Pod` manifests in the same namespace so config changes trigger a rollout. Kustomization targets are left untouched.
+-   **Manifest Scope**: Manifests are applied as written apart from image references, namespace retargeting, and optional content-hash suffixes; `ap deploy` does not install missing CRDs or create Secrets.
 
 ## Tool Management
 

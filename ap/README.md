@@ -68,7 +68,9 @@ When the current context is a kind cluster, `ap deploy` works with no `IMAGE_PRE
 
 For non-kind clusters, configure building with a remote BuildKit daemon using `--buildkit-host` or the `BUILDKIT_HOST` environment variable (e.g. `k8s://namespace/service`). The shorthand `--buildkit-host k8s` or `BUILDKIT_HOST=k8s` expands to `k8s://autodeploy-system/buildkit`. The in-cluster BuildKit path uses a private unix socket and opens no local port, using the pinned `buildctl`. `IMAGE_PREFIX` defaults to `images.local`, which assumes the in-cluster image registry and its node agent. Pass `--skip-push` to skip pushing built images to the registry.
 
-`ap deploy` applies manifests as written, apart from image references and the `-n` namespace; it does not install CRDs that the manifests do not contain, and it does not create Secrets.
+`ap deploy` applies manifests as written, apart from image references, the `-n` namespace, and optional content-hash suffixes; it does not install CRDs that the manifests do not contain, and it does not create Secrets.
+
+Pass `--hash-suffix` (or set `deploy.hashSuffix: true` in `.ap/ap.yaml`) to enable kustomize-style content-hash suffixing for `ConfigMap` and `Secret` resources defined in plain manifests: `ap deploy` appends a deterministic 10-character SHA-256 content hash suffix to each `ConfigMap` / `Secret` name (e.g. `app-config-<hash>`) and automatically rewrites matching references (`envFrom`, `env[].valueFrom`, `volumes[]` including `projected.sources[]`, and `imagePullSecrets`) in workload manifests (`Deployment`, `DaemonSet`, `StatefulSet`, `ReplicaSet`, `ReplicationController`, `Job`, `CronJob`, and `Pod`) within the same namespace so configuration changes trigger a clean Kubernetes rollout. Kustomization targets are left untouched so kustomize manages its own hashing.
 
 For example, to deploy a controller from a single manifest to a non-kind cluster using in-cluster buildkit and registry:
 
@@ -297,6 +299,8 @@ Example `.ap/ap.yaml`:
 version: "v0.1.0"
 test:
   race: true
+deploy:
+  hashSuffix: true
 presubmits:
   skipIfOnlyChanged:
   - docs/*
@@ -320,6 +324,12 @@ names and commit hashes are rejected on purpose.
 tests under the data race detector (`-race`) by default. This also ensures generated
 presubmit jobs (`ap-test`) run tests under the race detector. Pass `--test.race=false` to
 bypass the race detector for an individual invocation.
+
+`deploy.hashSuffix` is an optional boolean flag (default `false`). When set to `true`,
+`ap deploy` appends a deterministic content-hash suffix to `ConfigMap` and `Secret`
+names in deployed manifests and rewrites workload references to point to the suffixed
+names so config changes trigger a rollout. Pass `--hash-suffix=false` to bypass it for
+an individual invocation.
 
 `presubmits.skipIfOnlyChanged` is an optional list of bash case globs
 matched against each repo-relative changed path (`*` also matches `/`).

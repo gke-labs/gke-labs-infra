@@ -2021,3 +2021,110 @@ func TestDeploy_WaitFlag(t *testing.T) {
 		}
 	}
 }
+
+func TestDeploy_HashSuffixFlagAndConfig(t *testing.T) {
+	t.Run("flag exists and defaults to false", func(t *testing.T) {
+		rootOpt := &RootOptions{}
+		cmd := BuildDeployCommand(rootOpt)
+
+		flag := cmd.Flags().Lookup("hash-suffix")
+		if flag == nil {
+			t.Fatal("expected --hash-suffix flag on deploy command")
+		}
+		if flag.DefValue != "false" {
+			t.Errorf("expected --hash-suffix default to be false, got %q", flag.DefValue)
+		}
+	})
+
+	t.Run("default off leaves HashIndex nil", func(t *testing.T) {
+		tempDir := setupFixtureRepo(t)
+		tree, err := sourcetree.Open(t.Context(), tempDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		opt := DeployOptions{
+			RootOptions: &RootOptions{RepoRoot: tempDir, Dir: tempDir, DryRun: true},
+		}
+		if err := opt.Resolve(t.Context(), []string{"./k8s"}); err != nil {
+			t.Fatal(err)
+		}
+		if opt.HashSuffix {
+			t.Fatalf("expected HashSuffix to default to false")
+		}
+		planTasks, err := BuildDeployPlan(opt, tree, "", images.ResolveImageNaming(nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, applyTask := range collectApplyTasks(planTasks) {
+			if applyTask.HashIndex != nil {
+				t.Errorf("expected nil HashIndex when HashSuffix is false")
+			}
+		}
+	})
+
+	t.Run("ap.yaml deploy.hashSuffix enables shared HashIndex", func(t *testing.T) {
+		tempDir := setupFixtureRepo(t)
+		if err := os.WriteFile(filepath.Join(tempDir, ".ap", "ap.yaml"), []byte("deploy:\n  hashSuffix: true\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		tree, err := sourcetree.Open(t.Context(), tempDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		opt := DeployOptions{
+			RootOptions: &RootOptions{RepoRoot: tempDir, Dir: tempDir, DryRun: true},
+		}
+		if err := opt.Resolve(t.Context(), []string{"./k8s"}); err != nil {
+			t.Fatal(err)
+		}
+		if !opt.HashSuffix {
+			t.Fatalf("expected HashSuffix to be enabled from .ap/ap.yaml")
+		}
+		planTasks, err := BuildDeployPlan(opt, tree, "", images.ResolveImageNaming(nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		applyTasks := collectApplyTasks(planTasks)
+		if len(applyTasks) < 2 {
+			t.Fatalf("expected at least 2 apply tasks, got %d", len(applyTasks))
+		}
+		sharedIndex := applyTasks[0].HashIndex
+		if sharedIndex == nil {
+			t.Fatalf("expected non-nil HashIndex when HashSuffix is true")
+		}
+		for _, applyTask := range applyTasks[1:] {
+			if applyTask.HashIndex != sharedIndex {
+				t.Errorf("expected all KubectlApplyTasks in deploy plan to share the same ConfigHashIndex")
+			}
+		}
+	})
+
+	t.Run("explicit --hash-suffix=false overrides ap.yaml", func(t *testing.T) {
+		tempDir := setupFixtureRepo(t)
+		if err := os.WriteFile(filepath.Join(tempDir, ".ap", "ap.yaml"), []byte("deploy:\n  hashSuffix: true\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		opt := DeployOptions{
+			RootOptions:        &RootOptions{RepoRoot: tempDir, Dir: tempDir, DryRun: true},
+			HashSuffix:         false,
+			hashSuffixExplicit: true,
+		}
+		if err := opt.Resolve(t.Context(), []string{"./k8s"}); err != nil {
+			t.Fatal(err)
+		}
+		if opt.HashSuffix {
+			t.Errorf("expected explicit --hash-suffix=false to override .ap/ap.yaml")
+		}
+	})
+}
+
+func collectApplyTasks(taskList []tasks.Task) []*k8s.KubectlApplyTask {
+	var result []*k8s.KubectlApplyTask
+	for _, task := range taskList {
+		if applyTask, ok := task.(*k8s.KubectlApplyTask); ok {
+			result = append(result, applyTask)
+		}
+		result = append(result, collectApplyTasks(task.GetChildren())...)
+	}
+	return result
+}

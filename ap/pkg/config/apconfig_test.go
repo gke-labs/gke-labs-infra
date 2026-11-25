@@ -235,3 +235,31 @@ test:
 		t.Errorf("expected Test.Race to be true, got false")
 	}
 }
+
+func TestLoadAPConfig_DeployHashSuffix(t *testing.T) {
+	tempDir := t.TempDir()
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.MkdirAll(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	content := `
+version: "!self"
+deploy:
+  hashSuffix: true
+`
+	if err := os.WriteFile(filepath.Join(apDir, "ap.yaml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadAPConfig(tempDir)
+	if err != nil {
+		t.Fatalf("LoadAPConfig failed: %v", err)
+	}
+	if cfg == nil {
+		t.Fatalf("expected non-nil config")
+	}
+	if !cfg.Deploy.HashSuffix {
+		t.Errorf("expected Deploy.HashSuffix to be true, got false")
+	}
+}

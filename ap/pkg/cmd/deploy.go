@@ -48,10 +48,12 @@ type DeployOptions struct {
 	Targets      []string
 	Wait         bool
 	Timeout      time.Duration
+	HashSuffix   bool
 
-	TargetCluster k8s.KubeCluster
-	kindCluster   string
-	parentRef     *applyset.ParentRef
+	TargetCluster      k8s.KubeCluster
+	kindCluster        string
+	parentRef          *applyset.ParentRef
+	hashSuffixExplicit bool
 
 	plans []deployPlan
 }
@@ -71,12 +73,13 @@ func BuildDeployCommand(rootOpt *RootOptions) *cobra.Command {
 
 Positional path arguments select either a directory to apply all manifests found under any k8s/ directory beneath it, a single manifest file to apply only that file and build only its referenced images, or an explicit kustomization.yaml file to build with kustomize and apply. Positional arguments also support Git URLs (e.g. GitHub web links, raw links, or Kustomize-style syntax with ?ref=), cloning locally and deploying the resolved target.
 
-Flags configure the target cluster (--cluster), target namespace (-n, --namespace), remote buildkit daemon (--buildkit-host), and whether to skip pushing images (--skip-push).`,
+Flags configure the target cluster (--cluster), target namespace (-n, --namespace), remote buildkit daemon (--buildkit-host), content-hash suffixing for ConfigMaps and Secrets (--hash-suffix), and whether to skip pushing images (--skip-push).`,
 		Args: cobra.ArbitraryArgs,
 		Annotations: map[string]string{
 			"allowURLWithoutRepoRoot": "true",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			opt.hashSuffixExplicit = cmd.Flags().Changed("hash-suffix")
 			if err := opt.Resolve(cmd.Context(), args); err != nil {
 				return err
 			}
@@ -91,6 +94,7 @@ Flags configure the target cluster (--cluster), target namespace (-n, --namespac
 	cmd.Flags().StringVar(&opt.ApplySet, "applyset", "", "ApplySet parent object ([RESOURCE[.GROUP]/]NAME)")
 	cmd.Flags().BoolVar(&opt.Wait, "wait", true, "Wait for deployed workloads (Deployments, DaemonSets, StatefulSets) to be ready")
 	cmd.Flags().DurationVar(&opt.Timeout, "timeout", 5*time.Minute, "Timeout for waiting for workloads to be ready")
+	cmd.Flags().BoolVar(&opt.HashSuffix, "hash-suffix", false, "Append a content-hash suffix to ConfigMap and Secret names and rewrite workload references")
 
 	return cmd
 }
@@ -133,6 +137,16 @@ func (opt *DeployOptions) Resolve(ctx context.Context, args []string) error {
 	opt.Targets = args
 	if opt.RepoRoot == "" {
 		return fmt.Errorf("repo root is not set")
+	}
+
+	if !opt.hashSuffixExplicit && !opt.HashSuffix {
+		apConfig, err := config.LoadAPConfig(opt.RepoRoot)
+		if err != nil {
+			return err
+		}
+		if apConfig != nil {
+			opt.HashSuffix = apConfig.Deploy.HashSuffix
+		}
 	}
 
 	if err := k8s.ValidateNamespaceName(opt.Namespace); err != nil {
@@ -411,10 +425,10 @@ func BuildDeployPlan(opt DeployOptions, r *sourcetree.SourceTree, buildkitHost s
 		parentRef.Namespace = opt.Namespace
 	}
 	push := !opt.SkipPush && !tc.IsKind()
-	return buildDeployTasks(r, opt.plans, push, buildkitHost, opt.Namespace, tc, naming, parentRef, opt.Wait, opt.Timeout)
+	return buildDeployTasks(r, opt.plans, push, buildkitHost, opt.Namespace, tc, naming, parentRef, opt.Wait, opt.Timeout, opt.HashSuffix)
 }
 
-func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, buildkitHost string, namespace string, targetCluster k8s.KubeCluster, naming images.ImageNaming, parentRef *applyset.ParentRef, wait bool, timeout time.Duration) ([]tasks.Task, error) {
+func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, buildkitHost string, namespace string, targetCluster k8s.KubeCluster, naming images.ImageNaming, parentRef *applyset.ParentRef, wait bool, timeout time.Duration, hashSuffix bool) ([]tasks.Task, error) {
 	repoRoot := r.RepoRoot()
 	var allTasks []tasks.Task
 
@@ -480,6 +494,7 @@ func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, b
 			ApplySetID:        applySetID,
 			Membership:        membership,
 			Tracker:           tracker,
+			HashSuffix:        hashSuffix,
 		})
 		group.Tasks = append(group.Tasks, deployTasks)
 
