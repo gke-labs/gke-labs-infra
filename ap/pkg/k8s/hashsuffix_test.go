@@ -286,35 +286,63 @@ data:
 	}
 }
 
-func TestSelectSupersededConfigs(t *testing.T) {
-	item := func(name, namespace string, labels map[string]string) labeledObject {
-		var object labeledObject
-		object.Metadata.Name = name
-		object.Metadata.Namespace = namespace
-		object.Metadata.Labels = labels
-		return object
+func TestRemoveSupersededConfigTask_DeleteArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		task *RemoveSupersededConfigTask
+		want []string
+	}{
+		{
+			name: "with namespace and context",
+			task: &RemoveSupersededConfigTask{
+				Config: SuffixedConfig{
+					Kind:         "ConfigMap",
+					Namespace:    "target-ns",
+					OriginalName: "app-config",
+					CurrentName:  "app-config-new",
+				},
+				Cluster: ClusterFromContext("my-ctx"),
+			},
+			want: []string{
+				"--context", "my-ctx",
+				"-n", "target-ns",
+				"delete", "configmap",
+				"-l", HashSuffixOfLabel + "=app-config",
+				"--field-selector", "metadata.name!=app-config-new",
+				"--ignore-not-found",
+				"-o", "name",
+			},
+		},
+		{
+			name: "without namespace",
+			task: &RemoveSupersededConfigTask{
+				Config: SuffixedConfig{
+					Kind:         "Secret",
+					OriginalName: "app-secret",
+					CurrentName:  "app-secret-new",
+				},
+			},
+			want: []string{
+				"delete", "secret",
+				"-l", HashSuffixOfLabel + "=app-secret",
+				"--field-selector", "metadata.name!=app-secret-new",
+				"--ignore-not-found",
+				"-o", "name",
+			},
+		},
 	}
 
-	items := []labeledObject{
-		item("app-config-cccccccccc", "app-ns", map[string]string{HashSuffixOfLabel: "app-config"}),
-		item("app-config-bbbbbbbbbb", "app-ns", map[string]string{HashSuffixOfLabel: "app-config"}),
-		item("app-config-aaaaaaaaaa", "app-ns", map[string]string{HashSuffixOfLabel: "app-config"}),
-		item("other-config-1111111111", "app-ns", map[string]string{HashSuffixOfLabel: "other-config"}),
-		item("app-config", "app-ns", nil),
-		item("app-config-manual", "app-ns", map[string]string{"app": "web"}),
-	}
-
-	got := selectSupersededConfigs(items, "app-config", "app-config-cccccccccc")
-	want := []configObject{
-		{Name: "app-config-aaaaaaaaaa", Namespace: "app-ns"},
-		{Name: "app-config-bbbbbbbbbb", Namespace: "app-ns"},
-	}
-	if !slices.Equal(got, want) {
-		t.Errorf("selectSupersededConfigs got %v, want %v", got, want)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.task.deleteArgs()
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("deleteArgs() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
-func TestRemoveSupersededConfigTask(t *testing.T) {
+func TestRemoveSupersededConfigTask_RunLogsPerDeletedObject(t *testing.T) {
 	tempDir := t.TempDir()
 	for _, dir := range []string{".git", ".ap", "bin"} {
 		if err := os.MkdirAll(filepath.Join(tempDir, dir), 0755); err != nil {
@@ -322,23 +350,8 @@ func TestRemoveSupersededConfigTask(t *testing.T) {
 		}
 	}
 
-	callsFile := filepath.Join(tempDir, "calls.log")
 	fakeKubectl := filepath.Join(tempDir, "bin", "kubectl")
-	script := fmt.Sprintf(`#!/bin/sh
-echo "$@" >> %q
-for arg in "$@"; do
-  if [ "$arg" = "get" ]; then
-    cat <<'EOF'
-{"items":[
-  {"metadata":{"name":"app-config-new","namespace":"target-ns","labels":{"%s":"app-config"}}},
-  {"metadata":{"name":"app-config-old","namespace":"target-ns","labels":{"%s":"app-config"}}},
-  {"metadata":{"name":"app-config-unlabeled","namespace":"target-ns"}}
-]}
-EOF
-    exit 0
-  fi
-done
-`, callsFile, HashSuffixOfLabel, HashSuffixOfLabel)
+	script := "#!/bin/sh\necho 'No resources found'\necho 'configmap/app-config-old1'\necho 'configmap/app-config-old2'\n"
 	if err := os.WriteFile(fakeKubectl, []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -358,25 +371,13 @@ done
 			OriginalName: "app-config",
 			CurrentName:  "app-config-new",
 		},
-		Cluster: ClusterFromContext("my-ctx"),
 	}
 	if err := task.Run(ctx, scope); err != nil {
 		t.Fatalf("RemoveSupersededConfigTask.Run failed: %v", err)
 	}
 
-	callsBytes, err := os.ReadFile(callsFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	calls := strings.Split(strings.TrimSpace(string(callsBytes)), "\n")
-	wantCalls := []string{
-		"--context my-ctx -n target-ns get configmap -l " + HashSuffixOfLabel + "=app-config -o json",
-		"--context my-ctx -n target-ns delete configmap app-config-old --ignore-not-found=true",
-	}
-	if !slices.Equal(calls, wantCalls) {
-		t.Errorf("kubectl calls got:\n%s\nwant:\n%s", strings.Join(calls, "\n"), strings.Join(wantCalls, "\n"))
-	}
-	wantLog := "removed superseded config kind=ConfigMap namespace=target-ns name=app-config-old\n"
+	wantLog := "removed superseded config kind=ConfigMap namespace=target-ns name=app-config-old1\n" +
+		"removed superseded config kind=ConfigMap namespace=target-ns name=app-config-old2\n"
 	if logBuffer.String() != wantLog {
 		t.Errorf("log output got %q, want %q", logBuffer.String(), wantLog)
 	}

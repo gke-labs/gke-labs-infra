@@ -65,8 +65,7 @@ type SuffixedConfig struct {
 	CurrentName  string
 }
 
-// SuffixedConfigs returns all entries in the map sorted deterministically by
-// kind, namespace, and original name.
+// SuffixedConfigs returns all entries in the map.
 func (m ConfigHashMap) SuffixedConfigs() []SuffixedConfig {
 	if len(m) == 0 {
 		return nil
@@ -80,20 +79,7 @@ func (m ConfigHashMap) SuffixedConfigs() []SuffixedConfig {
 			CurrentName:  entry.suffixedName,
 		})
 	}
-	sortSuffixedConfigs(configs)
 	return configs
-}
-
-func sortSuffixedConfigs(configs []SuffixedConfig) {
-	sort.Slice(configs, func(i, j int) bool {
-		if configs[i].Kind != configs[j].Kind {
-			return configs[i].Kind < configs[j].Kind
-		}
-		if configs[i].Namespace != configs[j].Namespace {
-			return configs[i].Namespace < configs[j].Namespace
-		}
-		return configs[i].OriginalName < configs[j].OriginalName
-	})
 }
 
 type configRename struct {
@@ -368,49 +354,6 @@ func yamlPath(node *yaml.Node, keys ...string) *yaml.Node {
 	return node
 }
 
-type labeledObject struct {
-	Metadata struct {
-		Name      string            `json:"name"`
-		Namespace string            `json:"namespace"`
-		Labels    map[string]string `json:"labels"`
-	} `json:"metadata"`
-}
-
-type labeledObjectList struct {
-	Items []labeledObject `json:"items"`
-}
-
-type configObject struct {
-	Name      string
-	Namespace string
-}
-
-// selectSupersededConfigs returns the objects in items that carry
-// HashSuffixOfLabel equal to originalName and whose name differs from
-// currentName, sorted by name.
-func selectSupersededConfigs(items []labeledObject, originalName, currentName string) []configObject {
-	if originalName == "" {
-		return nil
-	}
-	var superseded []configObject
-	for _, item := range items {
-		if item.Metadata.Name == "" || item.Metadata.Name == currentName {
-			continue
-		}
-		if item.Metadata.Labels[HashSuffixOfLabel] != originalName {
-			continue
-		}
-		superseded = append(superseded, configObject{
-			Name:      item.Metadata.Name,
-			Namespace: item.Metadata.Namespace,
-		})
-	}
-	sort.Slice(superseded, func(i, j int) bool {
-		return superseded[i].Name < superseded[j].Name
-	})
-	return superseded
-}
-
 // RemoveSupersededConfigTask deletes older hash-suffixed ConfigMaps or Secrets
 // carrying HashSuffixOfLabel for a single original name while keeping CurrentName.
 type RemoveSupersededConfigTask struct {
@@ -437,64 +380,48 @@ func (t *RemoveSupersededConfigTask) GetChildren() []tasks.Task {
 	return nil
 }
 
-// Run lists matching labeled objects in the target namespace and deletes all
-// superseded ones whose name differs from CurrentName.
+func (t *RemoveSupersededConfigTask) deleteArgs() []string {
+	var args []string
+	args = append(args, t.Cluster.KubectlArgs()...)
+	if t.Config.Namespace != "" {
+		args = append(args, "-n", t.Config.Namespace)
+	}
+	args = append(args,
+		"delete", strings.ToLower(t.Config.Kind),
+		"-l", fmt.Sprintf("%s=%s", HashSuffixOfLabel, t.Config.OriginalName),
+		"--field-selector", fmt.Sprintf("metadata.name!=%s", t.Config.CurrentName),
+		"--ignore-not-found",
+		"-o", "name",
+	)
+	return args
+}
+
+// Run deletes superseded objects matching HashSuffixOfLabel in the target
+// namespace whose name differs from CurrentName.
 func (t *RemoveSupersededConfigTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
 	kubectlBinary, err := scope.Tool(ctx, "kubectl")
 	if err != nil {
 		return fmt.Errorf("failed to ensure kubectl: %w", err)
 	}
 
-	resource := strings.ToLower(t.Config.Kind)
-	selector := fmt.Sprintf("%s=%s", HashSuffixOfLabel, t.Config.OriginalName)
-
-	var getArgs []string
-	getArgs = append(getArgs, t.Cluster.KubectlArgs()...)
-	if t.Config.Namespace != "" {
-		getArgs = append(getArgs, "-n", t.Config.Namespace)
-	}
-	getArgs = append(getArgs, "get", resource, "-l", selector, "-o", "json")
-
-	getCommand := exec.CommandContext(ctx, kubectlBinary, getArgs...)
+	command := exec.CommandContext(ctx, kubectlBinary, t.deleteArgs()...)
 	var stdout, stderr bytes.Buffer
-	getCommand.Stdout = &stdout
-	getCommand.Stderr = &stderr
-	if err := getCommand.Run(); err != nil {
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+	if err := command.Run(); err != nil {
 		errorMessage := strings.TrimSpace(stderr.String())
 		if errorMessage != "" {
-			return fmt.Errorf("failed to list %s with %s: %w: %s", resource, selector, err, errorMessage)
+			return fmt.Errorf("failed to delete superseded %s/%s: %w: %s", t.Config.Kind, t.Config.OriginalName, err, errorMessage)
 		}
-		return fmt.Errorf("failed to list %s with %s: %w", resource, selector, err)
+		return fmt.Errorf("failed to delete superseded %s/%s: %w", t.Config.Kind, t.Config.OriginalName, err)
 	}
 
-	var list labeledObjectList
-	if err := json.Unmarshal(stdout.Bytes(), &list); err != nil {
-		return fmt.Errorf("failed to parse %s list JSON: %w", resource, err)
-	}
-
-	for _, object := range selectSupersededConfigs(list.Items, t.Config.OriginalName, t.Config.CurrentName) {
-		namespace := t.Config.Namespace
-		if namespace == "" {
-			namespace = object.Namespace
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		_, name, ok := strings.Cut(strings.TrimSpace(line), "/")
+		if !ok || name == "" {
+			continue
 		}
-		var deleteArgs []string
-		deleteArgs = append(deleteArgs, t.Cluster.KubectlArgs()...)
-		if namespace != "" {
-			deleteArgs = append(deleteArgs, "-n", namespace)
-		}
-		deleteArgs = append(deleteArgs, "delete", resource, object.Name, "--ignore-not-found=true")
-
-		deleteCommand := exec.CommandContext(ctx, kubectlBinary, deleteArgs...)
-		var deleteStderr bytes.Buffer
-		deleteCommand.Stderr = &deleteStderr
-		if err := deleteCommand.Run(); err != nil {
-			errorMessage := strings.TrimSpace(deleteStderr.String())
-			if errorMessage != "" {
-				return fmt.Errorf("failed to delete %s/%s: %w: %s", t.Config.Kind, object.Name, err, errorMessage)
-			}
-			return fmt.Errorf("failed to delete %s/%s: %w", t.Config.Kind, object.Name, err)
-		}
-		scoped.Log(ctx).Info("removed superseded config", "kind", t.Config.Kind, "namespace", namespace, "name", object.Name)
+		scoped.Log(ctx).Info("removed superseded config", "kind", t.Config.Kind, "namespace", t.Config.Namespace, "name", name)
 	}
 	return nil
 }
@@ -503,7 +430,15 @@ func (t *RemoveSupersededConfigTask) Run(ctx context.Context, scope *tasks.TaskC
 // hash-suffixed ConfigMaps and Secrets for each config in configs.
 func RemoveSupersededConfigsTasks(configs []SuffixedConfig, cluster KubeCluster) tasks.Task {
 	sorted := append([]SuffixedConfig(nil), configs...)
-	sortSuffixedConfigs(sorted)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].Kind != sorted[j].Kind {
+			return sorted[i].Kind < sorted[j].Kind
+		}
+		if sorted[i].Namespace != sorted[j].Namespace {
+			return sorted[i].Namespace < sorted[j].Namespace
+		}
+		return sorted[i].OriginalName < sorted[j].OriginalName
+	})
 	subTasks := make([]tasks.Task, 0, len(sorted))
 	for _, config := range sorted {
 		subTasks = append(subTasks, &RemoveSupersededConfigTask{
