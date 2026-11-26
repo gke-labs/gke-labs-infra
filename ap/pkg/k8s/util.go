@@ -15,11 +15,16 @@
 package k8s
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"io"
 	"os"
+	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
+	"gopkg.in/yaml.v3"
 )
 
 var serviceAccountTokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
@@ -35,4 +40,36 @@ func IsInCluster() bool {
 		return false
 	}
 	return exists
+}
+
+func decodeYAMLDocuments(content string) ([]*yaml.Node, error) {
+	decoder := yaml.NewDecoder(strings.NewReader(content))
+	var docs []*yaml.Node
+	for {
+		var doc yaml.Node
+		err := decoder.Decode(&doc)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode YAML: %w", err)
+		}
+		docs = append(docs, &doc)
+	}
+	return docs, nil
+}
+
+func encodeYAMLDocuments(docs []*yaml.Node) (string, error) {
+	var buffer bytes.Buffer
+	encoder := yaml.NewEncoder(&buffer)
+	encoder.SetIndent(2)
+	for _, doc := range docs {
+		if err := encoder.Encode(doc); err != nil {
+			return "", fmt.Errorf("failed to encode YAML: %w", err)
+		}
+	}
+	if err := encoder.Close(); err != nil {
+		return "", fmt.Errorf("failed to close YAML encoder: %w", err)
+	}
+	return buffer.String(), nil
 }

@@ -68,7 +68,9 @@ When the current context is a kind cluster, `ap deploy` works with no `IMAGE_PRE
 
 For non-kind clusters, configure building with a remote BuildKit daemon using `--buildkit-host` or the `BUILDKIT_HOST` environment variable (e.g. `k8s://namespace/service`). The shorthand `--buildkit-host k8s` or `BUILDKIT_HOST=k8s` expands to `k8s://autodeploy-system/buildkit`. The in-cluster BuildKit path uses a private unix socket and opens no local port, using the pinned `buildctl`. `IMAGE_PREFIX` defaults to `images.local`, which assumes the in-cluster image registry and its node agent. Pass `--skip-push` to skip pushing built images to the registry.
 
-`ap deploy` applies manifests as written, apart from image references and the `-n` namespace; it does not install CRDs that the manifests do not contain, and it does not create Secrets.
+`ap deploy` applies manifests as written, apart from image references, the `-n` namespace, and opt-in content-hash suffixes; it does not install CRDs that the manifests do not contain, and it does not create Secrets.
+
+Annotate a `ConfigMap` or `Secret` in plain manifests with `infra.labs.gke.io/hash-suffix: "true"` to append a deterministic 10-character SHA-256 content-hash suffix to its name (e.g. `app-config-<hash>`). Any annotation value other than `"true"` is an error. References in pod specs of `Deployment`, `DaemonSet`, `StatefulSet`, `Job`, `CronJob`, and `Pod` in the same namespace (`envFrom`, `env[].valueFrom`, `volumes[]` including `projected.sources[]` and volume `secretRef`, and `imagePullSecrets`) are rewritten to point to the suffixed name so configuration changes trigger a clean Kubernetes rollout. References from other resource kinds (such as `Ingress` TLS secrets, custom resources, or code reading a fixed name) are not rewritten, so only annotate objects consumed by pods; unannotated objects and kustomization targets are left untouched. Old suffixed `ConfigMap` and `Secret` objects are not removed by `ap deploy` and remain in the cluster after subsequent updates.
 
 For example, to deploy a controller from a single manifest to a non-kind cluster using in-cluster buildkit and registry:
 

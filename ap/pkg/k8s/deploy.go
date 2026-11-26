@@ -406,6 +406,7 @@ type DeployTaskOptions struct {
 	ApplySetID        string
 	Membership        *applyset.Membership
 	Tracker           *WorkloadTracker
+	ConfigHashes      ConfigHashMap
 }
 
 // KubectlApplyTask represents a task to apply a single k8s manifest.
@@ -421,6 +422,7 @@ type KubectlApplyTask struct {
 	ApplySetID        string
 	Membership        *applyset.Membership
 	Tracker           *WorkloadTracker
+	ConfigHashes      ConfigHashMap
 }
 
 func kustomizeBuild(ctx context.Context, scope *tasks.TaskContext, kustomizationPath string) ([]byte, error) {
@@ -529,6 +531,17 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.TaskContext) er
 			scoped.Log(ctx).Info("cluster-scoped, not retargeted", "path", relPath, "resources", strings.Join(result.ClusterScoped, ", "))
 		}
 		replaced = result.Content
+	}
+
+	if len(t.ConfigHashes) > 0 && !IsKustomization(t.ManifestPath) {
+		rewritten, renames, err := rewriteConfigHashes(replaced, t.Namespace, t.ConfigHashes)
+		if err != nil {
+			return fmt.Errorf("failed to apply config hash suffixes in %s: %w", relPath, err)
+		}
+		for _, rename := range renames {
+			scoped.Log(ctx).Debug("suffixed config name", "path", relPath, "kind", rename.kind, "from", rename.from, "to", rename.to)
+		}
+		replaced = rewritten
 	}
 
 	if t.ApplySetID != "" {
@@ -721,6 +734,7 @@ func DeployTasksForManifests(manifests []string, opts ...DeployTaskOptions) task
 			ApplySetID:        opt.ApplySetID,
 			Membership:        opt.Membership,
 			Tracker:           opt.Tracker,
+			ConfigHashes:      opt.ConfigHashes,
 		})
 	}
 

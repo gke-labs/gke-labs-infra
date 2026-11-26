@@ -471,6 +471,11 @@ func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, b
 			})
 		}
 
+		configHashes, err := k8s.BuildConfigHashMap(plan.manifests, naming, namespace)
+		if err != nil {
+			return nil, err
+		}
+
 		deployTasks := k8s.DeployTasksForManifests(plan.manifests, k8s.DeployTaskOptions{
 			RepoRoot:          repoRoot,
 			Namespace:         namespace,
@@ -480,6 +485,7 @@ func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, b
 			ApplySetID:        applySetID,
 			Membership:        membership,
 			Tracker:           tracker,
+			ConfigHashes:      configHashes,
 		})
 		group.Tasks = append(group.Tasks, deployTasks)
 

@@ -2021,3 +2021,60 @@ func TestDeploy_WaitFlag(t *testing.T) {
 		}
 	}
 }
+
+func TestDeploy_HashSuffixAnnotation(t *testing.T) {
+	tempDir := setupFixtureRepo(t)
+	buildApplyTasks := func() ([]*k8s.KubectlApplyTask, error) {
+		tree, err := sourcetree.Open(t.Context(), tempDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		opt := DeployOptions{RootOptions: &RootOptions{RepoRoot: tempDir, Dir: tempDir, DryRun: true}}
+		if err := opt.Resolve(t.Context(), []string{"./k8s"}); err != nil {
+			t.Fatal(err)
+		}
+		planTasks, err := BuildDeployPlan(opt, tree, "", images.ResolveImageNaming(nil))
+		if err != nil {
+			return nil, err
+		}
+		var result []*k8s.KubectlApplyTask
+		var walk func([]tasks.Task)
+		walk = func(list []tasks.Task) {
+			for _, task := range list {
+				if applyTask, ok := task.(*k8s.KubectlApplyTask); ok {
+					result = append(result, applyTask)
+				}
+				walk(task.GetChildren())
+			}
+		}
+		walk(planTasks)
+		return result, nil
+	}
+
+	// Unannotated ConfigMap produces empty ConfigHashes.
+	applyTasks, err := buildApplyTasks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, applyTask := range applyTasks {
+		if len(applyTask.ConfigHashes) != 0 {
+			t.Errorf("expected empty ConfigHashes without annotation, got %d", len(applyTask.ConfigHashes))
+		}
+	}
+
+	// Annotated ConfigMap populates ConfigHashes on every apply task in the plan.
+	cmPath := filepath.Join(tempDir, "k8s", "cm.yaml")
+	annotated := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: app-cm\n  annotations:\n    " + k8s.HashSuffixAnnotation + ": \"true\"\ndata:\n  key: value\n"
+	if err := os.WriteFile(cmPath, []byte(annotated), 0644); err != nil {
+		t.Fatal(err)
+	}
+	applyTasks, err = buildApplyTasks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, applyTask := range applyTasks {
+		if len(applyTask.ConfigHashes) != 1 {
+			t.Errorf("expected 1 ConfigHash entry with annotation, got %d", len(applyTask.ConfigHashes))
+		}
+	}
+}

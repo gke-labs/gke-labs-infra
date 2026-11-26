@@ -15,11 +15,9 @@
 package k8s
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os/exec"
 	"strings"
 
@@ -39,18 +37,9 @@ type AppliedObjectInfo struct {
 // StampManifest decodes YAML content, adds applyset.kubernetes.io/part-of label
 // to every object, and returns the modified YAML along with applied object infos.
 func StampManifest(content string, id string, resolver ScopeResolver, fallbackNamespace string) (string, []AppliedObjectInfo, error) {
-	decoder := yaml.NewDecoder(strings.NewReader(content))
-	var docs []*yaml.Node
-	for {
-		var doc yaml.Node
-		err := decoder.Decode(&doc)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return "", nil, fmt.Errorf("failed to decode YAML: %w", err)
-		}
-		docs = append(docs, &doc)
+	docs, err := decodeYAMLDocuments(content)
+	if err != nil {
+		return "", nil, err
 	}
 
 	if len(docs) == 0 {
@@ -105,16 +94,11 @@ func StampManifest(content string, id string, resolver ScopeResolver, fallbackNa
 		setMetadataLabel(root, applyset.PartOfLabel, id)
 	}
 
-	var buf bytes.Buffer
-	encoder := yaml.NewEncoder(&buf)
-	encoder.SetIndent(2)
-	for _, doc := range docs {
-		if err := encoder.Encode(doc); err != nil {
-			return "", nil, fmt.Errorf("failed to encode YAML: %w", err)
-		}
+	encoded, err := encodeYAMLDocuments(docs)
+	if err != nil {
+		return "", nil, err
 	}
-
-	return buf.String(), applied, nil
+	return encoded, applied, nil
 }
 
 func setMetadataLabel(root *yaml.Node, key, value string) {
