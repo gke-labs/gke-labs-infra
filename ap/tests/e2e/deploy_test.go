@@ -171,7 +171,7 @@ spec:
 		t.Errorf("expected applied image with explicit tag to be %q, got %q", expectedImage3, appliedImage3)
 	}
 
-	// 4. Hash-suffix annotation: ConfigMap content change rotates suffix, rolls out Deployment, and leaves old ConfigMap in cluster.
+	// 4. Hash-suffix annotation: ConfigMap content change rotates suffix, rolls out Deployment, and removes the superseded ConfigMap.
 	deploymentWithConfig := fmt.Sprintf(`
 apiVersion: apps/v1
 kind: Deployment
@@ -214,6 +214,8 @@ spec:
 		t.Fatalf("expected suffixed ConfigMap ref, got %q", cm1)
 	}
 	rev1 := strings.TrimSpace(h.RunCmd("kubectl", "get", "deployment", "my-app", "-n", ns, "-o", "jsonpath={.metadata.annotations.deployment\\.kubernetes\\.io/revision}"))
+	cmBefore := h.RunCmd("kubectl", "get", "configmap", "-n", ns)
+	t.Logf("kubectl get configmap (before second deploy):\n%s", cmBefore)
 
 	writeConfigMap("v2")
 	h.RunCmd(apBin, "deploy", "--cluster=kind-ap-deploy-kind-e2e")
@@ -225,8 +227,17 @@ spec:
 	if rev2 == rev1 {
 		t.Errorf("expected Deployment revision to advance after ConfigMap change, both were %q", rev1)
 	}
+	readyReplicasAfterConfig := strings.TrimSpace(h.RunCmd("kubectl", "get", "deployment", "my-app", "-n", ns, "-o", "jsonpath={.status.readyReplicas}"))
+	if readyReplicasAfterConfig != "1" {
+		t.Errorf("expected 1 ready replica after ConfigMap rotation, got %q", readyReplicasAfterConfig)
+	}
+	cmAfter := h.RunCmd("kubectl", "get", "configmap", "-n", ns)
+	t.Logf("kubectl get configmap (after second deploy):\n%s", cmAfter)
 	cmList := h.RunCmd("kubectl", "get", "configmap", "-n", ns, "-o", "name")
-	if !strings.Contains(cmList, "configmap/"+cm1) || !strings.Contains(cmList, "configmap/"+cm2) {
-		t.Errorf("expected both old (%q) and new (%q) ConfigMaps to remain in cluster, got:\n%s", cm1, cm2, cmList)
+	if strings.Contains(cmList, "configmap/"+cm1) {
+		t.Errorf("expected superseded ConfigMap %q to be removed, got:\n%s", cm1, cmList)
+	}
+	if !strings.Contains(cmList, "configmap/"+cm2) {
+		t.Errorf("expected current ConfigMap %q to remain in cluster, got:\n%s", cm2, cmList)
 	}
 }

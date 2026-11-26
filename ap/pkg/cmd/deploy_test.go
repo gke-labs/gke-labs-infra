@@ -2077,4 +2077,55 @@ func TestDeploy_HashSuffixAnnotation(t *testing.T) {
 			t.Errorf("expected 1 ConfigHash entry with annotation, got %d", len(applyTask.ConfigHashes))
 		}
 	}
+
+	// With Wait=true, dry-run prints the cleanup task after wait-ready; Wait=false omits it.
+	tree, err := sourcetree.Open(t.Context(), tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	optWait := DeployOptions{
+		RootOptions: &RootOptions{RepoRoot: tempDir, Dir: tempDir, DryRun: true},
+		Wait:        true,
+	}
+	if err := optWait.Resolve(t.Context(), []string{"./k8s"}); err != nil {
+		t.Fatal(err)
+	}
+	waitTasks, err := BuildDeployPlan(optWait, tree, "", images.ResolveImageNaming(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(waitTasks) < 2 {
+		t.Fatalf("expected wait and cleanup tasks, got %d tasks", len(waitTasks))
+	}
+	if _, ok := waitTasks[len(waitTasks)-2].(*k8s.WaitForWorkloadsTask); !ok {
+		t.Errorf("expected WaitForWorkloadsTask before cleanup, got %T", waitTasks[len(waitTasks)-2])
+	}
+	if waitTasks[len(waitTasks)-1].GetName() != "remove-superseded-configs" {
+		t.Errorf("expected remove-superseded-configs as final task, got %q", waitTasks[len(waitTasks)-1].GetName())
+	}
+	dryRunOutput := captureStdout(t, func() {
+		if err := RunDeploy(t.Context(), optWait); err != nil {
+			t.Fatalf("RunDeploy dry-run failed: %v", err)
+		}
+	})
+	if !strings.Contains(dryRunOutput, "remove-superseded-ConfigMap/app-cm (keep: app-cm-") {
+		t.Errorf("expected dry-run output to show superseded ConfigMap cleanup, got:\n%s", dryRunOutput)
+	}
+
+	optNoWait := DeployOptions{
+		RootOptions: &RootOptions{RepoRoot: tempDir, Dir: tempDir, DryRun: true},
+		Wait:        false,
+	}
+	if err := optNoWait.Resolve(t.Context(), []string{"./k8s"}); err != nil {
+		t.Fatal(err)
+	}
+	noWaitTasks, err := BuildDeployPlan(optNoWait, tree, "", images.ResolveImageNaming(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range noWaitTasks {
+		if task.GetName() == "remove-superseded-configs" {
+			t.Errorf("expected Wait=false plan to omit remove-superseded-configs")
+		}
+	}
 }

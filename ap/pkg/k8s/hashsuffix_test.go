@@ -15,15 +15,18 @@
 package k8s
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/imageref"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
@@ -35,8 +38,8 @@ func TestConfigHash_DeterminismAndChanges(t *testing.T) {
 		if err := indexConfigHashes(renames, manifest, ""); err != nil {
 			t.Fatal(err)
 		}
-		for _, suffixed := range renames {
-			return suffixed
+		for _, entry := range renames {
+			return entry.suffixedName
 		}
 		t.Fatal("expected one indexed config resource")
 		return ""
@@ -87,8 +90,8 @@ func TestConfigHash_DeterminismAndChanges(t *testing.T) {
 
 func TestRewriteConfigHashes_ReferenceShapesAndWorkloads(t *testing.T) {
 	renames := ConfigHashMap{
-		{kind: "ConfigMap", namespace: "default", name: "app-cfg"}: "app-cfg-1111111111",
-		{kind: "Secret", namespace: "default", name: "app-sec"}:    "app-sec-2222222222",
+		{kind: "ConfigMap", namespace: "default", name: "app-cfg"}: {suffixedName: "app-cfg-1111111111"},
+		{kind: "Secret", namespace: "default", name: "app-sec"}:    {suffixedName: "app-sec-2222222222"},
 	}
 
 	tests := []struct {
@@ -267,6 +270,12 @@ data:
 	if !strings.Contains(config1, HashSuffixAnnotation+": \"true\"") {
 		t.Errorf("expected %s annotation to remain on applied ConfigMap:\n%s", HashSuffixAnnotation, config1)
 	}
+	if !strings.Contains(config1, HashSuffixOfLabel+": eval-runner-config") {
+		t.Errorf("expected %s label on suffixed ConfigMap:\n%s", HashSuffixOfLabel, config1)
+	}
+	if strings.Count(config1, HashSuffixOfLabel) != 1 {
+		t.Errorf("expected %s label only on suffixed ConfigMap, got:\n%s", HashSuffixOfLabel, config1)
+	}
 	if !strings.Contains(config1, "name: fixed-config\n") || !strings.Contains(deploy1, "name: fixed-config\n") {
 		t.Errorf("expected unannotated fixed-config to keep its name and reference:\ndeploy:\n%s\nconfig:\n%s", deploy1, config1)
 	}
@@ -274,5 +283,102 @@ data:
 	name2 := pattern.FindString(config2)
 	if name2 == "" || pattern.FindString(deploy2) != name2 || name2 == name1 {
 		t.Fatalf("expected rotated matching suffixed name on v2: v1=%q v2=%q", name1, name2)
+	}
+}
+
+func TestRemoveSupersededConfigTask_DeleteArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		task *RemoveSupersededConfigTask
+		want []string
+	}{
+		{
+			name: "with namespace and context",
+			task: &RemoveSupersededConfigTask{
+				Config: SuffixedConfig{
+					Kind:         "ConfigMap",
+					Namespace:    "target-ns",
+					OriginalName: "app-config",
+					CurrentName:  "app-config-new",
+				},
+				Cluster: ClusterFromContext("my-ctx"),
+			},
+			want: []string{
+				"--context", "my-ctx",
+				"-n", "target-ns",
+				"delete", "configmap",
+				"-l", HashSuffixOfLabel + "=app-config",
+				"--field-selector", "metadata.name!=app-config-new",
+				"--ignore-not-found",
+				"-o", "name",
+			},
+		},
+		{
+			name: "without namespace",
+			task: &RemoveSupersededConfigTask{
+				Config: SuffixedConfig{
+					Kind:         "Secret",
+					OriginalName: "app-secret",
+					CurrentName:  "app-secret-new",
+				},
+			},
+			want: []string{
+				"delete", "secret",
+				"-l", HashSuffixOfLabel + "=app-secret",
+				"--field-selector", "metadata.name!=app-secret-new",
+				"--ignore-not-found",
+				"-o", "name",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.task.deleteArgs()
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("deleteArgs() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRemoveSupersededConfigTask_RunLogsPerDeletedObject(t *testing.T) {
+	tempDir := t.TempDir()
+	for _, dir := range []string{".git", ".ap", "bin"} {
+		if err := os.MkdirAll(filepath.Join(tempDir, dir), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	fakeKubectl := filepath.Join(tempDir, "bin", "kubectl")
+	script := "#!/bin/sh\necho 'No resources found'\necho 'configmap/app-config-old1'\necho 'configmap/app-config-old2'\n"
+	if err := os.WriteFile(fakeKubectl, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	tree, err := sourcetree.Open(t.Context(), tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logBuffer bytes.Buffer
+	ctx := scoped.WithLog(t.Context(), tasks.NewLogger(&logBuffer))
+	scope := tasks.NewTaskContext(tempDir, tempDir, tree).WithTool("kubectl", fakeKubectl)
+
+	task := &RemoveSupersededConfigTask{
+		Config: SuffixedConfig{
+			Kind:         "ConfigMap",
+			Namespace:    "target-ns",
+			OriginalName: "app-config",
+			CurrentName:  "app-config-new",
+		},
+	}
+	if err := task.Run(ctx, scope); err != nil {
+		t.Fatalf("RemoveSupersededConfigTask.Run failed: %v", err)
+	}
+
+	wantLog := "removed superseded config kind=ConfigMap namespace=target-ns name=app-config-old1\n" +
+		"removed superseded config kind=ConfigMap namespace=target-ns name=app-config-old2\n"
+	if logBuffer.String() != wantLog {
+		t.Errorf("log output got %q, want %q", logBuffer.String(), wantLog)
 	}
 }
