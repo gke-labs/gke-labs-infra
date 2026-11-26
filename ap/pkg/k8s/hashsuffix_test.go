@@ -42,18 +42,18 @@ func TestConfigHash_DeterminismAndChanges(t *testing.T) {
 		return ""
 	}
 
-	baseCM := "apiVersion: v1\nkind: ConfigMap\nmetadata: {name: app-cfg}\ndata: {a: '1', b: '2'}\n"
-	baseSecret := "apiVersion: v1\nkind: Secret\nmetadata: {name: app-sec}\ntype: Opaque\nstringData: {tok: v1}\n"
+	baseCM := "apiVersion: v1\nkind: ConfigMap\nmetadata: {name: app-cfg, annotations: {" + HashSuffixAnnotation + ": 'true'}}\ndata: {a: '1', b: '2'}\n"
+	baseSecret := "apiVersion: v1\nkind: Secret\nmetadata: {name: app-sec, annotations: {" + HashSuffixAnnotation + ": 'true'}}\ntype: Opaque\nstringData: {tok: v1}\n"
 
 	tests := []struct {
 		name     string
 		a, b     string
 		wantSame bool
 	}{
-		{"reordered keys and labels", baseCM, "# c\napiVersion: v1\nkind: ConfigMap\nmetadata: {name: app-cfg, labels: {x: y}}\ndata: {b: '2', a: '1'}\n", true},
-		{"changed ConfigMap data", baseCM, "apiVersion: v1\nkind: ConfigMap\nmetadata: {name: app-cfg}\ndata: {a: '1', b: '3'}\n", false},
-		{"changed Secret stringData", baseSecret, "apiVersion: v1\nkind: Secret\nmetadata: {name: app-sec}\ntype: Opaque\nstringData: {tok: v2}\n", false},
-		{"changed Secret type", baseSecret, "apiVersion: v1\nkind: Secret\nmetadata: {name: app-sec}\ntype: kubernetes.io/tls\nstringData: {tok: v1}\n", false},
+		{"reordered keys and labels", baseCM, "# c\napiVersion: v1\nkind: ConfigMap\nmetadata: {name: app-cfg, labels: {x: y}, annotations: {" + HashSuffixAnnotation + ": 'true'}}\ndata: {b: '2', a: '1'}\n", true},
+		{"changed ConfigMap data", baseCM, "apiVersion: v1\nkind: ConfigMap\nmetadata: {name: app-cfg, annotations: {" + HashSuffixAnnotation + ": 'true'}}\ndata: {a: '1', b: '3'}\n", false},
+		{"changed Secret stringData", baseSecret, "apiVersion: v1\nkind: Secret\nmetadata: {name: app-sec, annotations: {" + HashSuffixAnnotation + ": 'true'}}\ntype: Opaque\nstringData: {tok: v2}\n", false},
+		{"changed Secret type", baseSecret, "apiVersion: v1\nkind: Secret\nmetadata: {name: app-sec, annotations: {" + HashSuffixAnnotation + ": 'true'}}\ntype: kubernetes.io/tls\nstringData: {tok: v1}\n", false},
 	}
 
 	suffixPattern := regexp.MustCompile(`^app-(cfg|sec)-[0-9a-f]{10}$`)
@@ -66,6 +66,20 @@ func TestConfigHash_DeterminismAndChanges(t *testing.T) {
 			}
 			if (nameA == nameB) != tc.wantSame {
 				t.Errorf("got %q vs %q, wantSame=%v", nameA, nameB, tc.wantSame)
+			}
+		})
+	}
+
+	for _, badVal := range []string{`"false"`, `""`, `true`} {
+		t.Run("invalid annotation "+badVal, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "bad.yaml")
+			content := fmt.Sprintf("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: app-cfg\n  annotations:\n    %s: %s\n", HashSuffixAnnotation, badVal)
+			if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := BuildConfigHashMap([]string{path}, imageref.ImageNaming{}, "")
+			if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "ConfigMap/app-cfg") {
+				t.Fatalf("expected error naming file and ConfigMap/app-cfg, got: %v", err)
 			}
 		})
 	}
@@ -163,6 +177,8 @@ spec:
         envFrom:
         - configMapRef:
             name: eval-runner-config
+        - configMapRef:
+            name: fixed-config
 `
 	if err := os.WriteFile(deployPath, []byte(deployYAML), 0644); err != nil {
 		t.Fatal(err)
@@ -197,9 +213,19 @@ kind: ConfigMap
 metadata:
   name: eval-runner-config
   namespace: orig
+  annotations:
+    %s: "true"
 data:
   setting: %q
-`, value)
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fixed-config
+  namespace: orig
+data:
+  fixed: "yes"
+`, HashSuffixAnnotation, value)
 		if err := os.WriteFile(configPath, []byte(configYAML), 0644); err != nil {
 			t.Fatal(err)
 		}
@@ -237,6 +263,12 @@ data:
 	name1 := pattern.FindString(config1)
 	if name1 == "" || pattern.FindString(deploy1) != name1 {
 		t.Fatalf("expected matching suffixed name across Deployment and ConfigMap:\ndeploy:\n%s\nconfig:\n%s", deploy1, config1)
+	}
+	if !strings.Contains(config1, HashSuffixAnnotation+": \"true\"") {
+		t.Errorf("expected %s annotation to remain on applied ConfigMap:\n%s", HashSuffixAnnotation, config1)
+	}
+	if !strings.Contains(config1, "name: fixed-config\n") || !strings.Contains(deploy1, "name: fixed-config\n") {
+		t.Errorf("expected unannotated fixed-config to keep its name and reference:\ndeploy:\n%s\nconfig:\n%s", deploy1, config1)
 	}
 	deploy2, config2 := deployWithData("v2")
 	name2 := pattern.FindString(config2)

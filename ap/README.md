@@ -68,9 +68,9 @@ When the current context is a kind cluster, `ap deploy` works with no `IMAGE_PRE
 
 For non-kind clusters, configure building with a remote BuildKit daemon using `--buildkit-host` or the `BUILDKIT_HOST` environment variable (e.g. `k8s://namespace/service`). The shorthand `--buildkit-host k8s` or `BUILDKIT_HOST=k8s` expands to `k8s://autodeploy-system/buildkit`. The in-cluster BuildKit path uses a private unix socket and opens no local port, using the pinned `buildctl`. `IMAGE_PREFIX` defaults to `images.local`, which assumes the in-cluster image registry and its node agent. Pass `--skip-push` to skip pushing built images to the registry.
 
-`ap deploy` applies manifests as written, apart from image references, the `-n` namespace, and optional content-hash suffixes; it does not install CRDs that the manifests do not contain, and it does not create Secrets.
+`ap deploy` applies manifests as written, apart from image references, the `-n` namespace, and opt-in content-hash suffixes; it does not install CRDs that the manifests do not contain, and it does not create Secrets.
 
-Pass `--deploy.hashSuffix` (or set `deploy.hashSuffix: true` in `.ap/ap.yaml`) to enable kustomize-style content-hash suffixing for `ConfigMap` and `Secret` resources defined in plain manifests: `ap deploy` appends a deterministic 10-character SHA-256 content hash suffix to each `ConfigMap` / `Secret` name (e.g. `app-config-<hash>`) and automatically rewrites matching references (`envFrom`, `env[].valueFrom`, `volumes[]` including `projected.sources[]` and volume `secretRef`, and `imagePullSecrets`) in workload manifests (`Deployment`, `DaemonSet`, `StatefulSet`, `Job`, `CronJob`, and `Pod`) within the same namespace so configuration changes trigger a clean Kubernetes rollout. Kustomization targets are left untouched so kustomize manages its own hashing. Old suffixed `ConfigMap` and `Secret` objects are not pruned by `ap deploy` and remain in the cluster after subsequent updates.
+Annotate a `ConfigMap` or `Secret` in plain manifests with `infra.labs.gke.io/hash-suffix: "true"` to append a deterministic 10-character SHA-256 content-hash suffix to its name (e.g. `app-config-<hash>`). Any annotation value other than `"true"` is an error. References in pod specs of `Deployment`, `DaemonSet`, `StatefulSet`, `Job`, `CronJob`, and `Pod` in the same namespace (`envFrom`, `env[].valueFrom`, `volumes[]` including `projected.sources[]` and volume `secretRef`, and `imagePullSecrets`) are rewritten to point to the suffixed name so configuration changes trigger a clean Kubernetes rollout. References from other resource kinds (such as `Ingress` TLS secrets, custom resources, or code reading a fixed name) are not rewritten, so only annotate objects consumed by pods; unannotated objects and kustomization targets are left untouched. Old suffixed `ConfigMap` and `Secret` objects are not removed by `ap deploy` and remain in the cluster after subsequent updates.
 
 For example, to deploy a controller from a single manifest to a non-kind cluster using in-cluster buildkit and registry:
 
@@ -299,8 +299,6 @@ Example `.ap/ap.yaml`:
 version: "v0.1.0"
 test:
   race: true
-deploy:
-  hashSuffix: true
 presubmits:
   skipIfOnlyChanged:
   - docs/*
@@ -324,12 +322,6 @@ names and commit hashes are rejected on purpose.
 tests under the data race detector (`-race`) by default. This also ensures generated
 presubmit jobs (`ap-test`) run tests under the race detector. Pass `--test.race=false` to
 bypass the race detector for an individual invocation.
-
-`deploy.hashSuffix` is an optional boolean flag (default `false`). When set to `true`,
-`ap deploy` appends a deterministic content-hash suffix to `ConfigMap` and `Secret`
-names in deployed manifests and rewrites workload references to point to the suffixed
-names so config changes trigger a rollout; old suffixed objects are not pruned. Pass
-`--deploy.hashSuffix=false` to bypass it for an individual invocation.
 
 `presubmits.skipIfOnlyChanged` is an optional list of bash case globs
 matched against each repo-relative changed path (`*` also matches `/`).

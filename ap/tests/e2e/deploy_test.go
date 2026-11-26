@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/e2e"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
 )
 
 func TestDeploy_KindRollout(t *testing.T) {
@@ -170,7 +171,7 @@ spec:
 		t.Errorf("expected applied image with explicit tag to be %q, got %q", expectedImage3, appliedImage3)
 	}
 
-	// 4. --deploy.hashSuffix: ConfigMap content change rotates suffix, rolls out Deployment, and leaves old ConfigMap in cluster.
+	// 4. Hash-suffix annotation: ConfigMap content change rotates suffix, rolls out Deployment, and leaves old ConfigMap in cluster.
 	deploymentWithConfig := fmt.Sprintf(`
 apiVersion: apps/v1
 kind: Deployment
@@ -200,14 +201,14 @@ spec:
 		t.Fatal(err)
 	}
 	writeConfigMap := func(val string) {
-		cm := fmt.Sprintf("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: app-config\n  namespace: %s\ndata:\n  VERSION: %q\n", ns, val)
+		cm := fmt.Sprintf("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: app-config\n  namespace: %s\n  annotations:\n    %s: \"true\"\ndata:\n  VERSION: %q\n", ns, k8s.HashSuffixAnnotation, val)
 		if err := os.WriteFile(filepath.Join(tmpDir, "k8s", "configmap.yaml"), []byte(cm), 0644); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	writeConfigMap("v1")
-	h.RunCmd(apBin, "deploy", "--cluster=kind-ap-deploy-kind-e2e", "--deploy.hashSuffix")
+	h.RunCmd(apBin, "deploy", "--cluster=kind-ap-deploy-kind-e2e")
 	cm1 := strings.TrimSpace(h.RunCmd("kubectl", "get", "deployment", "my-app", "-n", ns, "-o", "jsonpath={.spec.template.spec.containers[0].envFrom[0].configMapRef.name}"))
 	if !strings.HasPrefix(cm1, "app-config-") {
 		t.Fatalf("expected suffixed ConfigMap ref, got %q", cm1)
@@ -215,7 +216,7 @@ spec:
 	rev1 := strings.TrimSpace(h.RunCmd("kubectl", "get", "deployment", "my-app", "-n", ns, "-o", "jsonpath={.metadata.annotations.deployment\\.kubernetes\\.io/revision}"))
 
 	writeConfigMap("v2")
-	h.RunCmd(apBin, "deploy", "--cluster=kind-ap-deploy-kind-e2e", "--deploy.hashSuffix")
+	h.RunCmd(apBin, "deploy", "--cluster=kind-ap-deploy-kind-e2e")
 	cm2 := strings.TrimSpace(h.RunCmd("kubectl", "get", "deployment", "my-app", "-n", ns, "-o", "jsonpath={.spec.template.spec.containers[0].envFrom[0].configMapRef.name}"))
 	if !strings.HasPrefix(cm2, "app-config-") || cm2 == cm1 {
 		t.Fatalf("expected rotated suffixed ConfigMap ref, got v1=%q v2=%q", cm1, cm2)

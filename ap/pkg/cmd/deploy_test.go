@@ -2022,73 +2022,59 @@ func TestDeploy_WaitFlag(t *testing.T) {
 	}
 }
 
-func TestDeploy_HashSuffixFlagAndConfig(t *testing.T) {
+func TestDeploy_HashSuffixAnnotation(t *testing.T) {
 	tempDir := setupFixtureRepo(t)
-	if err := os.WriteFile(filepath.Join(tempDir, ".ap", "ap.yaml"), []byte("deploy:\n  hashSuffix: true\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	cmd := BuildDeployCommand(&RootOptions{RepoRoot: tempDir, Dir: tempDir, DryRun: true})
-	if cmd.Flags().Lookup("deploy.hashSuffix") == nil {
-		t.Fatal("expected --deploy.hashSuffix flag on deploy command")
-	}
-	if cmd.Flags().Lookup("hash-suffix") != nil {
-		t.Fatal("unexpected --hash-suffix alias on deploy command")
-	}
-
-	// Config default enables HashSuffix when flag is not explicitly passed.
-	opt := DeployOptions{RootOptions: &RootOptions{RepoRoot: tempDir, Dir: tempDir, DryRun: true}}
-	if err := opt.resolveHashSuffix(cmd); err != nil {
-		t.Fatal(err)
-	}
-	if !opt.HashSuffix {
-		t.Fatalf("expected HashSuffix=true from .ap/ap.yaml")
-	}
-
-	// Explicit --deploy.hashSuffix=false overrides .ap/ap.yaml.
-	if err := cmd.ParseFlags([]string{"--deploy.hashSuffix=false"}); err != nil {
-		t.Fatal(err)
-	}
-	optOverride := DeployOptions{RootOptions: &RootOptions{RepoRoot: tempDir, Dir: tempDir, DryRun: true}}
-	if err := optOverride.resolveHashSuffix(cmd); err != nil {
-		t.Fatal(err)
-	}
-	if optOverride.HashSuffix {
-		t.Fatalf("expected --deploy.hashSuffix=false to override .ap/ap.yaml")
-	}
-
-	// BuildDeployPlan populates ConfigHashes when enabled and leaves them empty when disabled.
-	tree, err := sourcetree.Open(t.Context(), tempDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, enabled := range []bool{false, true} {
-		planOpt := DeployOptions{
-			RootOptions: &RootOptions{RepoRoot: tempDir, Dir: tempDir, DryRun: true},
-			HashSuffix:  enabled,
-		}
-		if err := planOpt.Resolve(t.Context(), []string{"./k8s"}); err != nil {
-			t.Fatal(err)
-		}
-		planTasks, err := BuildDeployPlan(planOpt, tree, "", images.ResolveImageNaming(nil))
+	buildApplyTasks := func() ([]*k8s.KubectlApplyTask, error) {
+		tree, err := sourcetree.Open(t.Context(), tempDir)
 		if err != nil {
 			t.Fatal(err)
 		}
-		var applyTasks []*k8s.KubectlApplyTask
+		opt := DeployOptions{RootOptions: &RootOptions{RepoRoot: tempDir, Dir: tempDir, DryRun: true}}
+		if err := opt.Resolve(t.Context(), []string{"./k8s"}); err != nil {
+			t.Fatal(err)
+		}
+		planTasks, err := BuildDeployPlan(opt, tree, "", images.ResolveImageNaming(nil))
+		if err != nil {
+			return nil, err
+		}
+		var result []*k8s.KubectlApplyTask
 		var walk func([]tasks.Task)
 		walk = func(list []tasks.Task) {
 			for _, task := range list {
 				if applyTask, ok := task.(*k8s.KubectlApplyTask); ok {
-					applyTasks = append(applyTasks, applyTask)
+					result = append(result, applyTask)
 				}
 				walk(task.GetChildren())
 			}
 		}
 		walk(planTasks)
-		for _, applyTask := range applyTasks {
-			if (len(applyTask.ConfigHashes) > 0) != enabled {
-				t.Errorf("enabled=%v: got ConfigHashes len=%d", enabled, len(applyTask.ConfigHashes))
-			}
+		return result, nil
+	}
+
+	// Unannotated ConfigMap produces empty ConfigHashes.
+	applyTasks, err := buildApplyTasks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, applyTask := range applyTasks {
+		if len(applyTask.ConfigHashes) != 0 {
+			t.Errorf("expected empty ConfigHashes without annotation, got %d", len(applyTask.ConfigHashes))
+		}
+	}
+
+	// Annotated ConfigMap populates ConfigHashes on every apply task in the plan.
+	cmPath := filepath.Join(tempDir, "k8s", "cm.yaml")
+	annotated := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: app-cm\n  annotations:\n    " + k8s.HashSuffixAnnotation + ": \"true\"\ndata:\n  key: value\n"
+	if err := os.WriteFile(cmPath, []byte(annotated), 0644); err != nil {
+		t.Fatal(err)
+	}
+	applyTasks, err = buildApplyTasks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, applyTask := range applyTasks {
+		if len(applyTask.ConfigHashes) != 1 {
+			t.Errorf("expected 1 ConfigHash entry with annotation, got %d", len(applyTask.ConfigHashes))
 		}
 	}
 }

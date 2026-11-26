@@ -30,8 +30,6 @@ func TestLoadAPConfig(t *testing.T) {
 
 	content := `
 version: "!self"
-deploy:
-  hashSuffix: true
 generate:
   ignoreOrphans:
     - "pkg/sandbox/*.pb.go"
@@ -54,9 +52,6 @@ generate:
 
 	if cfg.Version != "!self" {
 		t.Errorf("expected version '!self', got %q", cfg.Version)
-	}
-	if !cfg.Deploy.HashSuffix {
-		t.Errorf("expected Deploy.HashSuffix=true, got false")
 	}
 
 	if cfg.Generate == nil {

@@ -25,7 +25,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const contentHashLength = 10
+const (
+	// HashSuffixAnnotation opts a ConfigMap or Secret into content-hash name suffixing.
+	HashSuffixAnnotation = "infra.labs.gke.io/hash-suffix"
+
+	contentHashLength = 10
+)
 
 type configHashKey struct {
 	kind      string
@@ -56,7 +61,7 @@ var podSpecRefFields = map[string]struct {
 }
 
 // BuildConfigHashMap scans non-kustomization manifests and returns the map of
-// ConfigMap and Secret names to their content-hash-suffixed names.
+// annotated ConfigMap and Secret names to their content-hash-suffixed names.
 func BuildConfigHashMap(manifests []string, naming imageref.ImageNaming, targetNamespace string) (ConfigHashMap, error) {
 	renames := make(ConfigHashMap)
 	for _, manifestPath := range manifests {
@@ -67,12 +72,15 @@ func BuildConfigHashMap(manifests []string, naming imageref.ImageNaming, targetN
 		if err != nil {
 			return nil, fmt.Errorf("failed to read manifest %s: %w", manifestPath, err)
 		}
+		if !strings.Contains(string(rawContent), HashSuffixAnnotation) {
+			continue
+		}
 		replaced, err := replacePlaceholderImages(string(rawContent), naming)
 		if err != nil {
 			return nil, fmt.Errorf("failed to replace placeholders in %s: %w", manifestPath, err)
 		}
 		if err := indexConfigHashes(renames, replaced, targetNamespace); err != nil {
-			return nil, fmt.Errorf("failed to index config hashes in %s: %w", manifestPath, err)
+			return nil, fmt.Errorf("%s: %w", manifestPath, err)
 		}
 	}
 	return renames, nil
@@ -95,6 +103,13 @@ func indexConfigHashes(renames ConfigHashMap, content, targetNamespace string) e
 		name := getMetadataName(root)
 		if name == "" {
 			continue
+		}
+		annNode := yamlPath(root, "metadata", "annotations", HashSuffixAnnotation)
+		if annNode == nil {
+			continue
+		}
+		if annNode.Kind != yaml.ScalarNode || annNode.Tag != "!!str" || annNode.Value != "true" {
+			return fmt.Errorf("%s/%s: invalid %s annotation %q (only \"true\" is supported)", kind, name, HashSuffixAnnotation, annNode.Value)
 		}
 		hash, err := computeConfigHash(root, kind, name)
 		if err != nil {
