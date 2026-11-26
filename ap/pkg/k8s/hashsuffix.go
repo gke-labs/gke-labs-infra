@@ -86,6 +86,8 @@ func BuildConfigHashMap(manifests []string, naming imageref.ImageNaming, targetN
 	return renames, nil
 }
 
+// indexConfigHashes records suffixed names in renames for every core v1 ConfigMap
+// or Secret in content annotated with HashSuffixAnnotation: "true".
 func indexConfigHashes(renames ConfigHashMap, content, targetNamespace string) error {
 	docs, err := decodeYAMLDocuments(content)
 	if err != nil {
@@ -121,6 +123,10 @@ func indexConfigHashes(renames ConfigHashMap, content, targetNamespace string) e
 	return nil
 }
 
+// rewriteConfigHashes renames ConfigMaps and Secrets present in renames and rewrites
+// references to them in pod specs of supported workloads in the same namespace.
+// Objects not in renames and references from other resource kinds are left untouched.
+// If nothing in content matched, content is returned unchanged without re-encoding.
 func rewriteConfigHashes(content, targetNamespace string, renames ConfigHashMap) (string, []configRename, error) {
 	if len(renames) == 0 {
 		return content, nil, nil
@@ -216,6 +222,10 @@ func rewriteRefField(parent *yaml.Node, field, kind, namespace string, renames C
 	return from, to, true
 }
 
+// computeConfigHash hashes a canonical JSON encoding of kind, name, type, data,
+// binaryData, and stringData into a 10-character lowercase hex SHA-256 prefix.
+// Labels, annotations, map key order, and YAML comments are excluded so only
+// content or type changes rotate the suffixed name.
 func computeConfigHash(root *yaml.Node, kind, name string) (string, error) {
 	var obj struct {
 		Kind       string            `yaml:"-" json:"kind"`
@@ -247,6 +257,8 @@ func effectiveConfigNamespace(docNamespace, targetNamespace string) string {
 	return "default"
 }
 
+// findPodSpecNode returns the pod spec YAML node for Pod, Deployment, DaemonSet,
+// StatefulSet, Job, and CronJob manifests, or nil for all other kinds.
 func findPodSpecNode(root *yaml.Node, apiVersion, kind string) *yaml.Node {
 	switch kind {
 	case "Pod":
