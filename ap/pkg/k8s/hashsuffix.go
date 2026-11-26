@@ -15,19 +15,28 @@
 package k8s
 
 import (
+	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"sort"
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/imageref"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"gopkg.in/yaml.v3"
 )
 
 const (
 	// HashSuffixAnnotation opts a ConfigMap or Secret into content-hash name suffixing.
 	HashSuffixAnnotation = "infra.labs.gke.io/hash-suffix"
+
+	// HashSuffixOfLabel records the original unsuffixed name on a hash-suffixed ConfigMap or Secret.
+	HashSuffixOfLabel = "infra.labs.gke.io/hash-suffix-of"
 
 	contentHashLength = 10
 )
@@ -38,9 +47,54 @@ type configHashKey struct {
 	name      string
 }
 
+type configHashEntry struct {
+	suffixedName      string
+	explicitNamespace string
+}
+
 // ConfigHashMap maps (kind, namespace, name) of ConfigMaps and Secrets to their
 // content-hash-suffixed names.
-type ConfigHashMap map[configHashKey]string
+type ConfigHashMap map[configHashKey]configHashEntry
+
+// SuffixedConfig identifies an annotated ConfigMap or Secret whose name was
+// rewritten with a content-hash suffix.
+type SuffixedConfig struct {
+	Kind         string
+	Namespace    string
+	OriginalName string
+	CurrentName  string
+}
+
+// SuffixedConfigs returns all entries in the map sorted deterministically by
+// kind, namespace, and original name.
+func (m ConfigHashMap) SuffixedConfigs() []SuffixedConfig {
+	if len(m) == 0 {
+		return nil
+	}
+	configs := make([]SuffixedConfig, 0, len(m))
+	for key, entry := range m {
+		configs = append(configs, SuffixedConfig{
+			Kind:         key.kind,
+			Namespace:    entry.explicitNamespace,
+			OriginalName: key.name,
+			CurrentName:  entry.suffixedName,
+		})
+	}
+	sortSuffixedConfigs(configs)
+	return configs
+}
+
+func sortSuffixedConfigs(configs []SuffixedConfig) {
+	sort.Slice(configs, func(i, j int) bool {
+		if configs[i].Kind != configs[j].Kind {
+			return configs[i].Kind < configs[j].Kind
+		}
+		if configs[i].Namespace != configs[j].Namespace {
+			return configs[i].Namespace < configs[j].Namespace
+		}
+		return configs[i].OriginalName < configs[j].OriginalName
+	})
+}
 
 type configRename struct {
 	kind string
@@ -117,14 +171,23 @@ func indexConfigHashes(renames ConfigHashMap, content, targetNamespace string) e
 		if err != nil {
 			return fmt.Errorf("failed to hash %s/%s: %w", kind, name, err)
 		}
-		ns := effectiveConfigNamespace(getMetadataNamespace(root), targetNamespace)
-		renames[configHashKey{kind: kind, namespace: ns, name: name}] = name + "-" + hash
+		documentNamespace := getMetadataNamespace(root)
+		namespace := effectiveConfigNamespace(documentNamespace, targetNamespace)
+		explicitNamespace := targetNamespace
+		if explicitNamespace == "" {
+			explicitNamespace = documentNamespace
+		}
+		renames[configHashKey{kind: kind, namespace: namespace, name: name}] = configHashEntry{
+			suffixedName:      name + "-" + hash,
+			explicitNamespace: explicitNamespace,
+		}
 	}
 	return nil
 }
 
-// rewriteConfigHashes renames ConfigMaps and Secrets present in renames and rewrites
-// references to them in pod specs of supported workloads in the same namespace.
+// rewriteConfigHashes renames ConfigMaps and Secrets present in renames, records
+// HashSuffixOfLabel on each renamed object, and rewrites references to them in
+// pod specs of supported workloads in the same namespace.
 // Objects not in renames and references from other resource kinds are left untouched.
 // If nothing in content matched, content is returned unchanged without re-encoding.
 func rewriteConfigHashes(content, targetNamespace string, renames ConfigHashMap) (string, []configRename, error) {
@@ -148,6 +211,7 @@ func rewriteConfigHashes(content, targetNamespace string, renames ConfigHashMap)
 
 		if apiVersion == "v1" && (kind == "ConfigMap" || kind == "Secret") {
 			if from, to, ok := rewriteRefField(yamlPath(root, "metadata"), "name", kind, ns, renames); ok {
+				setMetadataLabel(root, HashSuffixOfLabel, from)
 				applied = append(applied, configRename{kind: kind, from: from, to: to})
 				modified = true
 			}
@@ -213,13 +277,13 @@ func rewriteRefField(parent *yaml.Node, field, kind, namespace string, renames C
 		return "", "", false
 	}
 	from := nameNode.Value
-	to, ok := renames[configHashKey{kind: kind, namespace: namespace, name: from}]
+	entry, ok := renames[configHashKey{kind: kind, namespace: namespace, name: from}]
 	if !ok {
 		return "", "", false
 	}
-	nameNode.Value = to
+	nameNode.Value = entry.suffixedName
 	nameNode.Tag = "!!str"
-	return from, to, true
+	return from, entry.suffixedName, true
 }
 
 // computeConfigHash hashes a canonical JSON encoding of kind, name, type, data,
@@ -302,4 +366,153 @@ func yamlPath(node *yaml.Node, keys ...string) *yaml.Node {
 		return node.Alias
 	}
 	return node
+}
+
+type labeledObject struct {
+	Metadata struct {
+		Name      string            `json:"name"`
+		Namespace string            `json:"namespace"`
+		Labels    map[string]string `json:"labels"`
+	} `json:"metadata"`
+}
+
+type labeledObjectList struct {
+	Items []labeledObject `json:"items"`
+}
+
+type configObject struct {
+	Name      string
+	Namespace string
+}
+
+// selectSupersededConfigs returns the objects in items that carry
+// HashSuffixOfLabel equal to originalName and whose name differs from
+// currentName, sorted by name.
+func selectSupersededConfigs(items []labeledObject, originalName, currentName string) []configObject {
+	if originalName == "" {
+		return nil
+	}
+	var superseded []configObject
+	for _, item := range items {
+		if item.Metadata.Name == "" || item.Metadata.Name == currentName {
+			continue
+		}
+		if item.Metadata.Labels[HashSuffixOfLabel] != originalName {
+			continue
+		}
+		superseded = append(superseded, configObject{
+			Name:      item.Metadata.Name,
+			Namespace: item.Metadata.Namespace,
+		})
+	}
+	sort.Slice(superseded, func(i, j int) bool {
+		return superseded[i].Name < superseded[j].Name
+	})
+	return superseded
+}
+
+// RemoveSupersededConfigTask deletes older hash-suffixed ConfigMaps or Secrets
+// carrying HashSuffixOfLabel for a single original name while keeping CurrentName.
+type RemoveSupersededConfigTask struct {
+	Config  SuffixedConfig
+	Cluster KubeCluster
+}
+
+// GetName returns the display name for the cleanup task.
+func (t *RemoveSupersededConfigTask) GetName() string {
+	target := fmt.Sprintf("%s/%s", t.Config.Kind, t.Config.OriginalName)
+	var parts []string
+	if cluster := t.Cluster.String(); cluster != "" {
+		parts = append(parts, "context: "+cluster)
+	}
+	if t.Config.Namespace != "" {
+		parts = append(parts, "namespace: "+t.Config.Namespace)
+	}
+	parts = append(parts, "keep: "+t.Config.CurrentName)
+	return fmt.Sprintf("remove-superseded-%s (%s)", target, strings.Join(parts, ", "))
+}
+
+// GetChildren returns nil because RemoveSupersededConfigTask is a leaf task.
+func (t *RemoveSupersededConfigTask) GetChildren() []tasks.Task {
+	return nil
+}
+
+// Run lists matching labeled objects in the target namespace and deletes all
+// superseded ones whose name differs from CurrentName.
+func (t *RemoveSupersededConfigTask) Run(ctx context.Context, scope *tasks.TaskContext) error {
+	kubectlBinary, err := scope.Tool(ctx, "kubectl")
+	if err != nil {
+		return fmt.Errorf("failed to ensure kubectl: %w", err)
+	}
+
+	resource := strings.ToLower(t.Config.Kind)
+	selector := fmt.Sprintf("%s=%s", HashSuffixOfLabel, t.Config.OriginalName)
+
+	var getArgs []string
+	getArgs = append(getArgs, t.Cluster.KubectlArgs()...)
+	if t.Config.Namespace != "" {
+		getArgs = append(getArgs, "-n", t.Config.Namespace)
+	}
+	getArgs = append(getArgs, "get", resource, "-l", selector, "-o", "json")
+
+	getCommand := exec.CommandContext(ctx, kubectlBinary, getArgs...)
+	var stdout, stderr bytes.Buffer
+	getCommand.Stdout = &stdout
+	getCommand.Stderr = &stderr
+	if err := getCommand.Run(); err != nil {
+		errorMessage := strings.TrimSpace(stderr.String())
+		if errorMessage != "" {
+			return fmt.Errorf("failed to list %s with %s: %w: %s", resource, selector, err, errorMessage)
+		}
+		return fmt.Errorf("failed to list %s with %s: %w", resource, selector, err)
+	}
+
+	var list labeledObjectList
+	if err := json.Unmarshal(stdout.Bytes(), &list); err != nil {
+		return fmt.Errorf("failed to parse %s list JSON: %w", resource, err)
+	}
+
+	for _, object := range selectSupersededConfigs(list.Items, t.Config.OriginalName, t.Config.CurrentName) {
+		namespace := t.Config.Namespace
+		if namespace == "" {
+			namespace = object.Namespace
+		}
+		var deleteArgs []string
+		deleteArgs = append(deleteArgs, t.Cluster.KubectlArgs()...)
+		if namespace != "" {
+			deleteArgs = append(deleteArgs, "-n", namespace)
+		}
+		deleteArgs = append(deleteArgs, "delete", resource, object.Name, "--ignore-not-found=true")
+
+		deleteCommand := exec.CommandContext(ctx, kubectlBinary, deleteArgs...)
+		var deleteStderr bytes.Buffer
+		deleteCommand.Stderr = &deleteStderr
+		if err := deleteCommand.Run(); err != nil {
+			errorMessage := strings.TrimSpace(deleteStderr.String())
+			if errorMessage != "" {
+				return fmt.Errorf("failed to delete %s/%s: %w: %s", t.Config.Kind, object.Name, err, errorMessage)
+			}
+			return fmt.Errorf("failed to delete %s/%s: %w", t.Config.Kind, object.Name, err)
+		}
+		scoped.Log(ctx).Info("removed superseded config", "kind", t.Config.Kind, "namespace", namespace, "name", object.Name)
+	}
+	return nil
+}
+
+// RemoveSupersededConfigsTasks returns a task group that deletes superseded
+// hash-suffixed ConfigMaps and Secrets for each config in configs.
+func RemoveSupersededConfigsTasks(configs []SuffixedConfig, cluster KubeCluster) tasks.Task {
+	sorted := append([]SuffixedConfig(nil), configs...)
+	sortSuffixedConfigs(sorted)
+	subTasks := make([]tasks.Task, 0, len(sorted))
+	for _, config := range sorted {
+		subTasks = append(subTasks, &RemoveSupersededConfigTask{
+			Config:  config,
+			Cluster: cluster,
+		})
+	}
+	return &tasks.Group{
+		Name:  "remove-superseded-configs",
+		Tasks: subTasks,
+	}
 }

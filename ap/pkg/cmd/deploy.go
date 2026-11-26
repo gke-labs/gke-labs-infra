@@ -448,6 +448,7 @@ func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, b
 	}
 
 	tracker := k8s.NewWorkloadTracker()
+	var suffixedConfigs []k8s.SuffixedConfig
 
 	for _, plan := range plans {
 		group := &tasks.Group{
@@ -475,6 +476,7 @@ func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, b
 		if err != nil {
 			return nil, err
 		}
+		suffixedConfigs = append(suffixedConfigs, configHashes.SuffixedConfigs()...)
 
 		deployTasks := k8s.DeployTasksForManifests(plan.manifests, k8s.DeployTaskOptions{
 			RepoRoot:          repoRoot,
@@ -503,6 +505,9 @@ func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, b
 			Timeout:   timeout,
 			Tracker:   tracker,
 		})
+		if len(suffixedConfigs) > 0 {
+			allTasks = append(allTasks, k8s.RemoveSupersededConfigsTasks(suffixedConfigs, targetCluster))
+		}
 	}
 
 	return allTasks, nil
