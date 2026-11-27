@@ -1,0 +1,6 @@
+owner: gke-labs
+name: kueue-addons
+settings:
+  hasWiki: false
+defaultRulesets:
+  - require-pr-reviews
